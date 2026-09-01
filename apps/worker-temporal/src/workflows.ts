@@ -1,8 +1,13 @@
-import { proxyActivities, sleep, defineSignal, setHandler, condition, workflowInfo } from "@temporalio/workflow";
+import { proxyActivities, sleep, defineSignal, setHandler, condition } from "@temporalio/workflow";
 import type * as activities from "./activities";
 import type { DiscoveryInput } from "./activities";
 
 const { runDiscoveryCycle } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "1 minute",
+  retry: { maximumAttempts: 3 },
+});
+
+const { requestApprovalActivity, executeProposalActivity } = proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
@@ -50,23 +55,59 @@ export const pauseSignal = defineSignal("pause");
 export const resumeSignal = defineSignal("resume");
 export const archiveSignal = defineSignal("archive");
 
-/** §14/§11.2 — human approval decision delivered to a waiting execution workflow. */
-export const approvalSignal = defineSignal<[{ approved: boolean; approvalTokenHash: string }]>("approval");
+/** §14/§11.2 — the human approval decision delivered to a waiting execution workflow. */
+export interface ApprovalDecisionSignal {
+  approved: boolean;
+  /** Approval token minted by the API on approve; required to execute. */
+  token?: string;
+  decidedBy?: string;
+}
+export const approvalSignal = defineSignal<[ApprovalDecisionSignal]>("approval");
+
+export interface OpportunityExecutionInput {
+  opportunityId: string;
+  grossAmountMinor: number;
+  currency: string;
+  requestedByAgent: string;
+  approvalTimeoutMinutes: number;
+}
+
+export interface OpportunityExecutionResult {
+  status: "executed" | "rejected" | "expired";
+  approvalId: string;
+  transactionId?: string;
+}
 
 /**
- * §11.2 Opportunity Execution Workflow — reverify, recalc, risk, prepare
- * negotiation, then WAIT for a human approval signal before any outbound action.
+ * §11.2 Opportunity Execution Workflow — request a human gate, then WAIT for
+ * the approval signal (bounded by the approval timeout). On approve, execute
+ * the gated proposal via a token-verified activity; on reject/timeout, do
+ * nothing. No outbound/binding action happens without the human signal.
  */
-export async function opportunityExecutionWorkflow(input: { opportunityId: string; approvalTimeoutMinutes: number }): Promise<string> {
-  let decision: { approved: boolean; approvalTokenHash: string } | undefined;
+export async function opportunityExecutionWorkflow(input: OpportunityExecutionInput): Promise<OpportunityExecutionResult> {
+  let decision: ApprovalDecisionSignal | undefined;
   setHandler(approvalSignal, (d) => {
     decision = d;
   });
 
-  const decided = await condition(() => decision !== undefined, `${input.approvalTimeoutMinutes} minutes`);
-  if (!decided || !decision?.approved) return "rejected_or_expired";
+  const { approvalId } = await requestApprovalActivity({
+    opportunityId: input.opportunityId,
+    grossAmountMinor: input.grossAmountMinor,
+    currency: input.currency,
+    requestedByAgent: input.requestedByAgent,
+    approvalTimeoutMinutes: input.approvalTimeoutMinutes,
+  });
 
-  // Approved: the workflow id anchors the audit trail; execution of the
-  // outbound/settlement action happens via a gated activity (not shown here).
-  return `approved:${workflowInfo().workflowId}:${decision.approvalTokenHash}`;
+  const decided = await condition(() => decision !== undefined, `${input.approvalTimeoutMinutes} minutes`);
+  if (!decided) return { status: "expired", approvalId };
+  if (!decision!.approved) return { status: "rejected", approvalId };
+
+  const { transactionId } = await executeProposalActivity({
+    opportunityId: input.opportunityId,
+    grossAmountMinor: input.grossAmountMinor,
+    currency: input.currency,
+    decidedBy: decision!.decidedBy ?? "operator",
+    token: decision!.token ?? "",
+  });
+  return { status: "executed", approvalId, transactionId };
 }

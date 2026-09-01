@@ -12,7 +12,7 @@ import {
   closeDb,
 } from "@opportunity-os/db";
 import { mintApprovalToken, verifyApprovalToken } from "@opportunity-os/auth";
-import { sha256Hex, canonicalJson, verifyChain } from "@opportunity-os/audit";
+import { hashProposalTerms, verifyChain } from "@opportunity-os/audit";
 import { getConfig } from "@opportunity-os/config";
 import { runDiscoveryCycle } from "@opportunity-os/discovery";
 import { deliverPendingApprovals } from "../../apps/worker-notifications/src/deliver";
@@ -40,10 +40,9 @@ describe.skipIf(!HAS_DB)("approval loop (live postgres)", () => {
   let operatorId: string;
   let agentId: string;
   let opportunityId: string;
-  const terms = { action: "propose_transaction", grossAmountMinor: 22000, currency: "USD" };
+  const terms = { grossAmountMinor: 22000, currency: "USD" };
 
-  const payloadHash = () =>
-    sha256Hex(canonicalJson({ action: terms.action, opportunityId, grossAmountMinor: terms.grossAmountMinor, currency: terms.currency }));
+  const payloadHash = () => hashProposalTerms({ opportunityId, grossAmountMinor: terms.grossAmountMinor, currency: terms.currency });
 
   beforeAll(async () => {
     const [operator, agent] = await Promise.all([

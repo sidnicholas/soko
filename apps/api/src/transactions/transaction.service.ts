@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import { enqueueEvent, getApprovalById, getDb, proposeTransaction } from "@opportunity-os/db";
 import { verifyApprovalToken } from "@opportunity-os/auth";
 import { getConfig } from "@opportunity-os/config";
-import { hashActionPayload } from "../common/proposal";
+import { hashProposalTerms } from "@opportunity-os/audit";
 import type { Principal } from "../common/current-user";
 import type { ProposeTransactionBody, SettlementPlanBody } from "./transaction.dto";
 
@@ -95,13 +95,11 @@ export class TransactionService {
    * action + payload (§14/§22). Records an audit-backed execution event.
    */
   async propose(principal: Principal, token: string | undefined, body: ProposeTransactionBody) {
-    const payload = {
-      action: "propose_transaction",
+    const payloadHash = hashProposalTerms({
       opportunityId: body.opportunityId,
       grossAmountMinor: body.grossAmountMinor,
       currency: body.currency,
-    };
-    const payloadHash = hashActionPayload(payload);
+    });
     const verified = verifyApprovalToken(getConfig().security.approvalTokenSecret, token ?? "", {
       action: "propose_transaction",
       payloadHash,

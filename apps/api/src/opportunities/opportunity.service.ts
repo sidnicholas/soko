@@ -11,7 +11,7 @@ import {
 import { draftNegotiation } from "@opportunity-os/negotiation";
 import { readMoney } from "../common/money";
 import { getConfig } from "@opportunity-os/config";
-import { hashActionPayload } from "../common/proposal";
+import { hashProposalTerms } from "@opportunity-os/audit";
 import type { Principal } from "../common/current-user";
 import type { RequestApprovalBody } from "./opportunity.dto";
 
@@ -83,18 +83,12 @@ export class OpportunityService {
    */
   async requestApproval(id: string, principal: Principal, body: RequestApprovalBody) {
     await this.get(id);
-    const payload = {
-      action: "propose_transaction",
-      opportunityId: id,
-      grossAmountMinor: body.grossAmountMinor,
-      currency: body.currency,
-    };
     return createApproval({
       requestedByAgent: principal.userId,
       actionType: "propose_transaction",
       entityType: "opportunity",
       entityId: id,
-      payloadHash: hashActionPayload(payload),
+      payloadHash: hashProposalTerms({ opportunityId: id, grossAmountMinor: body.grossAmountMinor, currency: body.currency }),
       humanReadableSummary:
         body.summary ?? `Propose a transaction for opportunity ${id} at ${body.grossAmountMinor} ${body.currency} (minor units)`,
       riskSummary: body.riskSummary ?? null,

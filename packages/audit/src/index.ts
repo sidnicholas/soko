@@ -6,6 +6,22 @@ export { sha256Hex, canonicalJson };
 /** Sentinel previous-hash for the first event in a chain. */
 export const GENESIS_HASH = "0".repeat(64);
 
+/**
+ * Canonical hash of a transaction-proposal command's terms (§14/§22). One
+ * source of truth shared by the API and the durable workflow so an approval
+ * token minted on either path verifies on the other.
+ */
+export function hashProposalTerms(terms: { opportunityId: string; grossAmountMinor: number; currency: string }): string {
+  return sha256Hex(
+    canonicalJson({
+      action: "propose_transaction",
+      opportunityId: terms.opportunityId,
+      grossAmountMinor: terms.grossAmountMinor,
+      currency: terms.currency,
+    }),
+  );
+}
+
 /** An audit event before the chain assigns its linking hashes. */
 export type AuditEventDraft = Omit<AuditEvent, "event_hash" | "previous_event_hash">;
 
