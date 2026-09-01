@@ -13,7 +13,8 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "dev": "turbo run dev",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:migrate": "tsx packages/db/src/migrate.ts"
   },
   "devDependencies": {
     "turbo": "^2.2.3",

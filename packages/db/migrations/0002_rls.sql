@@ -2,6 +2,18 @@
 -- remains application-owned; RLS is defense-in-depth for the Supabase path.
 -- Assumes Supabase-style auth.uid() returning the current user's UUID.
 
+-- Portability shim: on plain PostgreSQL there is no Supabase auth schema, so
+-- provide auth.uid() ONLY when it does not already exist. On Supabase the
+-- native function is present and left untouched. This lets the same migration
+-- run in local/CI Postgres and in Supabase.
+do $$
+begin
+  if to_regprocedure('auth.uid()') is null then
+    create schema if not exists auth;
+    execute 'create function auth.uid() returns uuid language sql stable as $f$ select nullif(current_setting(''request.jwt.claim.sub'', true), '''')::uuid $f$';
+  end if;
+end $$;
+
 alter table missions enable row level security;
 alter table mission_versions enable row level security;
 

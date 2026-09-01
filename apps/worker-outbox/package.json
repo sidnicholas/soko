@@ -1,0 +1,23 @@
+{
+  "name": "@opportunity-os/worker-outbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/main.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "relay:once": "tsx src/main.ts --once",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo lint-skip"
+  },
+  "dependencies": {
+    "@opportunity-os/contracts": "workspace:*",
+    "@opportunity-os/config": "workspace:*",
+    "@opportunity-os/db": "workspace:*",
+    "@opportunity-os/observability": "workspace:*",
+    "ioredis": "^5.4.1"
+  }
+}

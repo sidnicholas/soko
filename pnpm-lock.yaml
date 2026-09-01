@@ -275,6 +275,24 @@ importers:
         specifier: ^5.4.1
         version: 5.11.1
 
+  apps/worker-outbox:
+    dependencies:
+      '@opportunity-os/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@opportunity-os/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@opportunity-os/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@opportunity-os/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      ioredis:
+        specifier: ^5.4.1
+        version: 5.11.1
+
   apps/worker-temporal:
     dependencies:
       '@opportunity-os/audit':
