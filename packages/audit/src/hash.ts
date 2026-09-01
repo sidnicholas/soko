@@ -15,6 +15,7 @@ export function canonicalJson(value: unknown): string {
 
 function canonicalize(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
+  if (value instanceof Date) return value.toISOString();
   if (Array.isArray(value)) return value.map(canonicalize);
   const entries = Object.entries(value as Record<string, unknown>)
     .filter(([, v]) => v !== undefined)

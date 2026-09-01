@@ -1,10 +1,15 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
+  createApproval,
   enqueueEvent,
   getDb,
   getOpportunity,
   listOpportunitiesForOperator,
 } from "@opportunity-os/db";
+import { getConfig } from "@opportunity-os/config";
+import { hashActionPayload } from "../common/proposal";
+import type { Principal } from "../common/current-user";
+import type { RequestApprovalBody } from "./opportunity.dto";
 
 @Injectable()
 export class OpportunityService {
@@ -68,6 +73,32 @@ export class OpportunityService {
       });
 
       return negotiation;
+    });
+  }
+
+  /**
+   * §14 request a human gate for proposing a transaction on this opportunity.
+   * Hashes the exact proposed terms so the approval — and the token minted on
+   * approval — binds to precisely this command.
+   */
+  async requestApproval(id: string, principal: Principal, body: RequestApprovalBody) {
+    await this.get(id);
+    const payload = {
+      action: "propose_transaction",
+      opportunityId: id,
+      grossAmountMinor: body.grossAmountMinor,
+      currency: body.currency,
+    };
+    return createApproval({
+      requestedByAgent: principal.userId,
+      actionType: "propose_transaction",
+      entityType: "opportunity",
+      entityId: id,
+      payloadHash: hashActionPayload(payload),
+      humanReadableSummary:
+        body.summary ?? `Propose a transaction for opportunity ${id} at ${body.grossAmountMinor} ${body.currency} (minor units)`,
+      riskSummary: body.riskSummary ?? null,
+      expiresAt: new Date(Date.now() + getConfig().policy.approvalTimeoutMinutes * 60_000).toISOString(),
     });
   }
 }

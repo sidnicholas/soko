@@ -1,5 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { enqueueEvent, getDb } from "@opportunity-os/db";
+import { decideApproval, getDb } from "@opportunity-os/db";
+import { mintApprovalToken } from "@opportunity-os/auth";
+import { getConfig } from "@opportunity-os/config";
 import type { ApprovalDecision, ApprovalStatus, EventName } from "@opportunity-os/contracts";
 import type { Principal } from "../common/current-user";
 import { requirePermission } from "../common/current-user";
@@ -32,15 +34,16 @@ export class ApprovalService {
   }
 
   async get(id: string) {
-    const approval = await getDb()
-      .selectFrom("approvals")
-      .selectAll()
-      .where("id", "=", id)
-      .executeTakeFirst();
+    const approval = await getDb().selectFrom("approvals").selectAll().where("id", "=", id).executeTakeFirst();
     if (!approval) throw new NotFoundException(`Approval ${id} not found`);
     return approval;
   }
 
+  /**
+   * Record a human decision. On approve/modify, mint a signed approval token
+   * bound to this approval's action + payload hash — the only thing that can
+   * later authorize the gated action (§14/§22). Rejection mints nothing.
+   */
   async decide(id: string, kind: DecisionKind, principal: Principal, body: ApprovalDecisionBody) {
     requirePermission(principal, "approval:decide");
     const approval = await this.get(id);
@@ -54,41 +57,29 @@ export class ApprovalService {
     }
 
     const outcome = DECISIONS[kind];
-    const decidedAt = new Date().toISOString();
-
-    return getDb().transaction().execute(async (tx) => {
-      const updated = await tx
-        .updateTable("approvals")
-        .set({
-          status: outcome.status,
-          decision: outcome.decision,
-          decided_by: principal.userId,
-          decided_at: decidedAt,
-          decision_metadata_json: {
-            reason: body.reason ?? null,
-            modifications: body.modifications ?? null,
-            ...(body.metadata ?? {}),
-          },
-        })
-        .where("id", "=", id)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-
-      await enqueueEvent(tx, {
-        eventName: outcome.event,
-        aggregateType: "approval",
-        aggregateId: id,
-        idempotencyKey: `${outcome.event}:${id}`,
-        payload: {
-          approvalId: id,
-          entityType: approval.entity_type,
-          entityId: approval.entity_id,
-          decision: outcome.decision,
-          decidedBy: principal.userId,
-        },
-      });
-
-      return updated;
+    const updated = await decideApproval(id, {
+      status: outcome.status,
+      decision: outcome.decision,
+      event: outcome.event,
+      decidedBy: principal.userId,
+      metadata: {
+        reason: body.reason ?? null,
+        modifications: body.modifications ?? null,
+        ...(body.metadata ?? {}),
+      },
     });
+
+    if (outcome.decision === "reject") return { approval: updated };
+
+    const cfg = getConfig();
+    const approval_token = mintApprovalToken(cfg.security.approvalTokenSecret, {
+      approvalId: id,
+      action: updated.action_type,
+      entityType: updated.entity_type,
+      entityId: updated.entity_id,
+      payloadHash: updated.payload_hash,
+      expiresAt: new Date(Date.now() + cfg.policy.approvalTimeoutMinutes * 60_000).toISOString(),
+    });
+    return { approval: updated, approval_token };
   }
 }

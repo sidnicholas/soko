@@ -274,6 +274,9 @@ importers:
       '@opportunity-os/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@opportunity-os/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -382,6 +385,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@opportunity-os/audit':
+        specifier: workspace:*
+        version: link:../audit
       '@opportunity-os/config':
         specifier: workspace:*
         version: link:../config

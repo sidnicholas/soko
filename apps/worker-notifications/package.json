@@ -20,6 +20,7 @@
     "ioredis": "^5.4.1",
     "@opportunity-os/contracts": "workspace:*",
     "@opportunity-os/config": "workspace:*",
+    "@opportunity-os/db": "workspace:*",
     "@opportunity-os/observability": "workspace:*",
     "@opportunity-os/auth": "workspace:*"
   }

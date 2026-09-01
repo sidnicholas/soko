@@ -1,9 +1,14 @@
 import { Inject } from "@nestjs/common";
 import { Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
-import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
+import { ApprovalToken, CurrentUser, requirePermission, type Principal } from "../common/current-user";
 import { ZodBody } from "../common/zod-validation.pipe";
-import { SettlementPlanSchema, type SettlementPlanBody } from "./transaction.dto";
+import {
+  ProposeTransactionSchema,
+  SettlementPlanSchema,
+  type ProposeTransactionBody,
+  type SettlementPlanBody,
+} from "./transaction.dto";
 import { TransactionService } from "./transaction.service";
 
 @ApiTags("transactions")
@@ -27,6 +32,17 @@ export class TransactionsController {
   ) {
     requirePermission(user, "settlement:plan");
     return this.transactions.createSettlementPlan(id, body);
+  }
+
+  @Post("propose")
+  @ApiOperation({ summary: "Propose a transaction from an approved opportunity (requires approval token)" })
+  propose(
+    @CurrentUser() user: Principal,
+    @ApprovalToken() token: string | undefined,
+    @ZodBody(ProposeTransactionSchema) body: ProposeTransactionBody,
+  ) {
+    requirePermission(user, "transaction:propose");
+    return this.transactions.propose(user, token, body);
   }
 
   @Get(":id/timeline")

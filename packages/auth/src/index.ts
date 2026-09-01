@@ -22,6 +22,7 @@ export type Permission =
   | "negotiation:prepare"
   | "negotiation:send"
   | "transaction:read"
+  | "transaction:propose"
   | "settlement:plan"
   | "settlement:execute"
   | "notification:deliver"
@@ -37,6 +38,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "approval:decide",
     "negotiation:prepare",
     "transaction:read",
+    "transaction:propose",
     "settlement:plan",
     "audit:read",
   ],
@@ -53,6 +55,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "approval:decide",
     "negotiation:prepare",
     "transaction:read",
+    "transaction:propose",
     "settlement:plan",
     "settlement:execute",
     "notification:deliver",
@@ -83,10 +86,12 @@ export interface PolicyContextInput {
  */
 export function authorize(ctx: PolicyContextInput, permission: Permission): boolean {
   if (!can(ctx.role, permission)) return false;
-  if (permission === "settlement:execute" || permission === "negotiation:send") {
+  if (permission === "settlement:execute" || permission === "negotiation:send" || permission === "transaction:propose") {
     return ctx.hasApprovedActionToken === true;
   }
   return true;
 }
 
 export const ROLES: readonly UserRole[] = ["user", "operator", "reviewer", "admin", "service", "agent"];
+
+export * from "./approval-token";

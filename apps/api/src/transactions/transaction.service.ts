@@ -1,7 +1,10 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import { enqueueEvent, getDb } from "@opportunity-os/db";
+import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { enqueueEvent, getApprovalById, getDb, proposeTransaction } from "@opportunity-os/db";
+import { verifyApprovalToken } from "@opportunity-os/auth";
 import { getConfig } from "@opportunity-os/config";
-import type { SettlementPlanBody } from "./transaction.dto";
+import { hashActionPayload } from "../common/proposal";
+import type { Principal } from "../common/current-user";
+import type { ProposeTransactionBody, SettlementPlanBody } from "./transaction.dto";
 
 @Injectable()
 export class TransactionService {
@@ -84,5 +87,42 @@ export class TransactionService {
       .where("entity_id", "=", id)
       .orderBy("created_at", "asc")
       .execute();
+  }
+
+  /**
+   * §11.2(10) create a proposed transaction — a binding commitment, so it is
+   * gated on a valid approval token that cryptographically matches this exact
+   * action + payload (§14/§22). Records an audit-backed execution event.
+   */
+  async propose(principal: Principal, token: string | undefined, body: ProposeTransactionBody) {
+    const payload = {
+      action: "propose_transaction",
+      opportunityId: body.opportunityId,
+      grossAmountMinor: body.grossAmountMinor,
+      currency: body.currency,
+    };
+    const payloadHash = hashActionPayload(payload);
+    const verified = verifyApprovalToken(getConfig().security.approvalTokenSecret, token ?? "", {
+      action: "propose_transaction",
+      payloadHash,
+    });
+    if (!verified.ok) throw new ForbiddenException(`Approval token invalid: ${verified.reason}`);
+
+    // Defense in depth: the approval row must still be in an approved state.
+    const approval = await getApprovalById(verified.claims!.approvalId);
+    if (!approval || (approval.status !== "approved" && approval.status !== "modified")) {
+      throw new ForbiddenException("Approval is not in an approved state");
+    }
+    if (approval.entity_id !== body.opportunityId) {
+      throw new ForbiddenException("Approval does not match the target opportunity");
+    }
+
+    return proposeTransaction({
+      opportunityId: body.opportunityId,
+      grossAmountMinor: body.grossAmountMinor,
+      currency: body.currency,
+      termsHash: payloadHash,
+      decidedBy: principal.userId,
+    });
   }
 }

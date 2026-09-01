@@ -153,6 +153,7 @@ export interface ApprovalsTable {
   decision: string | null;
   decision_metadata_json: Json;
   decided_at: Timestamp | null;
+  notified_at: Timestamp | null;
 }
 
 export interface NegotiationsTable {

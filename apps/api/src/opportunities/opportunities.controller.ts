@@ -2,6 +2,8 @@ import { Inject } from "@nestjs/common";
 import { Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
+import { ZodBody } from "../common/zod-validation.pipe";
+import { RequestApprovalSchema, type RequestApprovalBody } from "./opportunity.dto";
 import { OpportunityService } from "./opportunity.service";
 
 @ApiTags("opportunities")
@@ -35,5 +37,16 @@ export class OpportunitiesController {
   prepareNegotiation(@CurrentUser() user: Principal, @Param("id") id: string) {
     requirePermission(user, "negotiation:prepare");
     return this.opportunities.prepareNegotiation(id);
+  }
+
+  @Post(":id/request-approval")
+  @ApiOperation({ summary: "Request human approval to propose a transaction" })
+  requestApproval(
+    @CurrentUser() user: Principal,
+    @Param("id") id: string,
+    @ZodBody(RequestApprovalSchema) body: RequestApprovalBody,
+  ) {
+    requirePermission(user, "approval:create");
+    return this.opportunities.requestApproval(id, user, body);
   }
 }

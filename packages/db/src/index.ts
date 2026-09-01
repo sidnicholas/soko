@@ -7,3 +7,6 @@ export * from "./repositories/demands";
 export * from "./repositories/supply";
 export * from "./repositories/matches";
 export * from "./repositories/lifecycle";
+export * from "./repositories/approvals";
+export * from "./repositories/audit";
+export * from "./repositories/transactions";

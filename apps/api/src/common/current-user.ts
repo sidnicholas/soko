@@ -42,6 +42,13 @@ export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionC
   };
 });
 
+/** Extracts the raw `x-approval-token` header (verified cryptographically per action). */
+export const ApprovalToken = createParamDecorator((_data: unknown, ctx: ExecutionContext): string | undefined => {
+  const req = ctx.switchToHttp().getRequest<FastifyRequest>();
+  const header = req.headers["x-approval-token"];
+  return typeof header === "string" && header.length > 0 ? header : undefined;
+});
+
 /** Enforces an application-owned permission for the principal (§22); throws 403. */
 export function requirePermission(principal: Principal, permission: Permission): void {
   const allowed = authorize(
