@@ -7,6 +7,7 @@
  * near-certain, no-human-time opportunity can outrank a large one that needs
  * capital and hours of work (§12 worked example, enforced by unit test).
  */
+export * from "./match";
 export const SCORE_VERSION = "v1";
 
 /** Normalized component scores. Ratio fields are 0..1; risk fields: higher = worse. */

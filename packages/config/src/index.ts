@@ -39,6 +39,7 @@ const EnvSchema = z.object({
 
   APPROVAL_TIMEOUT_MINUTES: z.coerce.number().int().positive().default(60),
   MISSION_REFRESH_INTERVAL_MINUTES: z.coerce.number().int().positive().default(15),
+  SUPPLY_STALE_MINUTES: z.coerce.number().int().positive().default(1440),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
@@ -66,7 +67,7 @@ export interface AppConfig {
     smtpUrl?: string;
   };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
-  policy: { approvalTimeoutMinutes: number; missionRefreshIntervalMinutes: number };
+  policy: { approvalTimeoutMinutes: number; missionRefreshIntervalMinutes: number; supplyStaleMinutes: number };
 }
 
 function toConfig(env: Env): AppConfig {
@@ -110,6 +111,7 @@ function toConfig(env: Env): AppConfig {
     policy: {
       approvalTimeoutMinutes: env.APPROVAL_TIMEOUT_MINUTES,
       missionRefreshIntervalMinutes: env.MISSION_REFRESH_INTERVAL_MINUTES,
+      supplyStaleMinutes: env.SUPPLY_STALE_MINUTES,
     },
   };
 }

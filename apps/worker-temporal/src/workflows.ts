@@ -2,7 +2,7 @@ import { proxyActivities, sleep, defineSignal, setHandler, condition, workflowIn
 import type * as activities from "./activities";
 import type { DiscoveryInput } from "./activities";
 
-const { searchSupply, buildOpportunities, persistOpportunities } = proxyActivities<typeof activities>({
+const { runDiscoveryCycle } = proxyActivities<typeof activities>({
   startToCloseTimeout: "1 minute",
   retry: { maximumAttempts: 3 },
 });
@@ -34,9 +34,8 @@ export async function missionDiscoveryWorkflow(input: MissionDiscoveryInput): Pr
   const maxCycles = input.maxCycles ?? Number.MAX_SAFE_INTEGER;
   for (let cycle = 0; cycle < maxCycles && !stop; cycle++) {
     if (!paused) {
-      const supply = await searchSupply(input);
-      const opportunities = await buildOpportunities(input, supply);
-      total += await persistOpportunities(input.missionId, opportunities);
+      const result = await runDiscoveryCycle(input);
+      total += result.opportunitiesPersisted;
     }
     if (cycle + 1 >= maxCycles) break;
     await Promise.race([

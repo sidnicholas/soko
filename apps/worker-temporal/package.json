@@ -26,6 +26,7 @@
     "@opportunity-os/domain": "workspace:*",
     "@opportunity-os/db": "workspace:*",
     "@opportunity-os/audit": "workspace:*",
+    "@opportunity-os/discovery": "workspace:*",
     "@opportunity-os/observability": "workspace:*"
   }
 }

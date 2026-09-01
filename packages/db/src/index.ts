@@ -3,3 +3,7 @@ export * from "./pool";
 export * from "./outbox";
 export * from "./repositories/missions";
 export * from "./repositories/opportunities";
+export * from "./repositories/demands";
+export * from "./repositories/supply";
+export * from "./repositories/matches";
+export * from "./repositories/lifecycle";

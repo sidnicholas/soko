@@ -1,5 +1,5 @@
 {
-  "name": "@opportunity-os/worker-lifecycle",
+  "name": "@opportunity-os/discovery",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,17 +12,14 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
-    "lint": "echo lint-skip",
-    "dev": "tsx watch src/main.ts",
-    "start": "tsx src/main.ts"
+    "lint": "echo lint-skip"
   },
   "dependencies": {
-    "ioredis": "^5.4.1",
     "@opportunity-os/contracts": "workspace:*",
-    "@opportunity-os/config": "workspace:*",
-    "@opportunity-os/db": "workspace:*",
+    "@opportunity-os/connectors-sdk": "workspace:*",
     "@opportunity-os/scoring": "workspace:*",
-    "@opportunity-os/discovery": "workspace:*",
+    "@opportunity-os/risk": "workspace:*",
+    "@opportunity-os/db": "workspace:*",
     "@opportunity-os/observability": "workspace:*"
   }
 }

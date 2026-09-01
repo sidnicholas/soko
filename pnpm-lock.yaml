@@ -247,6 +247,9 @@ importers:
       '@opportunity-os/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@opportunity-os/discovery':
+        specifier: workspace:*
+        version: link:../../packages/discovery
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -307,6 +310,9 @@ importers:
       '@opportunity-os/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@opportunity-os/discovery':
+        specifier: workspace:*
+        version: link:../../packages/discovery
       '@opportunity-os/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -388,6 +394,27 @@ importers:
       pg:
         specifier: ^8.13.1
         version: 8.23.0
+
+  packages/discovery:
+    dependencies:
+      '@opportunity-os/connectors-sdk':
+        specifier: workspace:*
+        version: link:../connectors-sdk
+      '@opportunity-os/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@opportunity-os/db':
+        specifier: workspace:*
+        version: link:../db
+      '@opportunity-os/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@opportunity-os/risk':
+        specifier: workspace:*
+        version: link:../risk
+      '@opportunity-os/scoring':
+        specifier: workspace:*
+        version: link:../scoring
 
   packages/domain:
     dependencies:
