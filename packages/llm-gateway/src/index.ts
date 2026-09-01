@@ -133,7 +133,7 @@ export class LlmGateway {
   }
 
   /** Structured output: run then validate against a zod schema (§18). */
-  async runStructured<T>(req: LlmRequest, schema: z.ZodType<T>): Promise<{ value: T; telemetry: CostTelemetry }> {
+  async runStructured<S extends z.ZodTypeAny>(req: LlmRequest, schema: S): Promise<{ value: z.output<S>; telemetry: CostTelemetry }> {
     const res = await this.run(req);
     const jsonStart = res.text.indexOf("{");
     const parsed = schema.parse(jsonStart >= 0 ? JSON.parse(res.text.slice(jsonStart)) : JSON.parse(res.text));

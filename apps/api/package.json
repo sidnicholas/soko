@@ -25,6 +25,7 @@
     "@opportunity-os/connectors-sdk": "workspace:*",
     "@opportunity-os/contracts": "workspace:*",
     "@opportunity-os/db": "workspace:*",
+    "@opportunity-os/demand": "workspace:*",
     "@opportunity-os/domain": "workspace:*",
     "@opportunity-os/llm-gateway": "workspace:*",
     "@opportunity-os/observability": "workspace:*",

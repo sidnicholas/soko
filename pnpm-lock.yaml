@@ -141,6 +141,9 @@ importers:
       '@opportunity-os/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@opportunity-os/demand':
+        specifier: workspace:*
+        version: link:../../packages/demand
       '@opportunity-os/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -394,6 +397,18 @@ importers:
       pg:
         specifier: ^8.13.1
         version: 8.23.0
+
+  packages/demand:
+    dependencies:
+      '@opportunity-os/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@opportunity-os/llm-gateway':
+        specifier: workspace:*
+        version: link:../llm-gateway
+      '@opportunity-os/observability':
+        specifier: workspace:*
+        version: link:../observability
 
   packages/discovery:
     dependencies:

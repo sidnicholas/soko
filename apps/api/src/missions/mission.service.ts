@@ -11,6 +11,7 @@ import {
 import { canTransition, type TransitionMap } from "@opportunity-os/domain";
 import type { DemandSpecification, EventName } from "@opportunity-os/contracts";
 import type { MissionAction, MissionCreateBody, MissionUpdateBody } from "./mission.dto";
+import { parseDemand } from "@opportunity-os/demand";
 
 /** §6.2 mission lifecycle guard. Draft auto-activates on create (see repo). */
 const MISSION_TRANSITIONS: TransitionMap<string> = {
@@ -36,12 +37,15 @@ const ACTION_EVENT: Record<MissionAction, EventName> = {
 @Injectable()
 export class MissionService {
   async create(ownerUserId: string, body: MissionCreateBody) {
+    // §3.1(3)/§7 — accept a fully-structured spec, or structure the natural-
+    // language intent through the demand parser when none is supplied.
+    const demandSpec = body.demand_spec ?? (await parseDemand({ text: body.raw_intent })).spec;
     const { missionId } = await createMission({
       ownerUserId,
       title: body.title,
       rawIntent: body.raw_intent,
       autonomyPolicy: body.agent_autonomy_policy,
-      demandSpec: body.demand_spec,
+      demandSpec,
       changedBy: ownerUserId,
     });
     return this.detail(missionId);

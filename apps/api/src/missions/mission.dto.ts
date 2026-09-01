@@ -5,7 +5,7 @@ export const MissionCreateSchema = z.object({
   title: z.string().min(1),
   raw_intent: z.string().min(1),
   agent_autonomy_policy: AutonomyPolicy,
-  demand_spec: DemandSpecification,
+  demand_spec: DemandSpecification.optional(),
 });
 export type MissionCreateBody = z.infer<typeof MissionCreateSchema>;
 

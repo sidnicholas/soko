@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { createMission } from "@opportunity-os/db";
-import { DemandSpecification } from "@opportunity-os/contracts";
+import type { DemandSpecification } from "@opportunity-os/contracts";
+import { parseDemand } from "@opportunity-os/demand";
 import type { PublicRequestBody } from "./public.dto";
 
 /**
@@ -13,24 +14,21 @@ const PUBLIC_INTAKE_USER_ID = "00000000-0000-0000-0000-000000000000";
 @Injectable()
 export class PublicService {
   async createRequest(body: PublicRequestBody) {
-    const demandSpec = DemandSpecification.parse({
-      what: { description: body.description },
-      budget: {
-        flexible: body.budget_max === undefined,
-        ...(body.budget_max !== undefined
-          ? { maximum: { amount: body.budget_max, currency: body.currency ?? "USD" } }
-          : {}),
+    // §3.1(3)/§7 structure the free-text request; form fields override inferences.
+    const { spec } = await parseDemand({
+      text: body.description,
+      hints: {
+        currency: body.currency,
+        budgetMaxMinor: body.budget_max,
+        urgency: body.urgency,
+        neededBy: body.needed_by,
       },
-      quality: { constraints: [] },
-      timing: {
-        urgency: body.urgency ?? "flexible",
-        ...(body.needed_by !== undefined ? { neededBy: body.needed_by } : {}),
-      },
-      payment: { acceptableMethods: ["card"] },
-      fulfillment: { type: "other" },
-      flexibility: { substitutesAllowed: true, negotiableFields: [], nonNegotiables: [] },
-      negotiationAuthorization: { mayPrepare: false, maySend: false },
     });
+    // Anonymous intake never authorizes outbound action until the mission is claimed.
+    const demandSpec: DemandSpecification = {
+      ...spec,
+      negotiationAuthorization: { mayPrepare: false, maySend: false },
+    };
 
     const result = await createMission({
       ownerUserId: PUBLIC_INTAKE_USER_ID,
