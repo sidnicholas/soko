@@ -1,0 +1,11 @@
+# Supabase local config (§22, §31 ADR-005). Domain authz remains app-owned.
+project_id = "opportunity-os"
+
+[db]
+port = 5432
+major_version = 16
+
+[auth]
+enabled = true
+
+# SQL migrations are the system of record; see packages/db/migrations.

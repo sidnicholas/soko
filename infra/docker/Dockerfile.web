@@ -1,0 +1,10 @@
+# syntax=docker/dockerfile:1
+FROM node:24-slim AS base
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @opportunity-os/web build
+ENV NODE_ENV=production
+EXPOSE 3000
+CMD ["pnpm", "--filter", "@opportunity-os/web", "start"]

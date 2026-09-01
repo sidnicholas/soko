@@ -1,0 +1,21 @@
+{
+  "name": "@opportunity-os/chain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo lint-skip"
+  },
+  "dependencies": {
+    "@opportunity-os/contracts": "workspace:*",
+    "@opportunity-os/settlement": "workspace:*"
+  }
+}

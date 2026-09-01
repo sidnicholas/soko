@@ -1,0 +1,197 @@
+:root {
+  --oos-canvas: #f4f6f9;
+  --oos-surface: #ffffff;
+  --oos-surface-muted: #f1f3f7;
+  --oos-border: #e3e7ee;
+  --oos-border-strong: #d1d7e0;
+  --oos-ink: #1b1f2a;
+  --oos-ink-muted: #586074;
+  --oos-ink-subtle: #8b93a4;
+  --oos-accent: #2f56d6;
+  --oos-accent-hover: #2444b3;
+  --oos-accent-soft: #eef2fe;
+  --oos-focus: rgba(47, 86, 214, 0.35);
+  --oos-sidebar: #161a24;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--oos-canvas);
+  color: var(--oos-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+@keyframes oos-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* App shell */
+.oos-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.oos-main {
+  min-width: 0;
+  padding: 40px clamp(20px, 4vw, 48px);
+  max-width: 1200px;
+  width: 100%;
+}
+
+/* Sidebar */
+.oos-sidebar {
+  background: var(--oos-sidebar);
+  color: #c9cede;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 24px 16px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.oos-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 12px 20px;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.oos-brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #3f63e0, #6f5be0);
+  flex-shrink: 0;
+}
+
+.oos-nav-group-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7488;
+  padding: 16px 12px 6px;
+}
+
+.oos-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: #b6bccd;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.oos-nav-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.oos-nav-link[aria-current="page"] {
+  background: rgba(63, 99, 224, 0.22);
+  color: #ffffff;
+}
+
+.oos-nav-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+/* Buttons — base look is inline; these add interaction polish */
+.oos-btn:focus-visible,
+.oos-control:focus-visible,
+.oos-control:focus {
+  box-shadow: 0 0 0 3px var(--oos-focus);
+  border-color: var(--oos-accent);
+}
+
+.oos-btn--primary:hover:not(:disabled) {
+  background: var(--oos-accent-hover) !important;
+  border-color: var(--oos-accent-hover) !important;
+}
+
+.oos-btn--secondary:hover:not(:disabled) {
+  background: var(--oos-surface-muted) !important;
+}
+
+.oos-btn--ghost:hover:not(:disabled) {
+  background: var(--oos-surface-muted) !important;
+  color: var(--oos-ink) !important;
+}
+
+.oos-btn--danger:hover:not(:disabled) {
+  background: #fdecec !important;
+}
+
+.oos-row--clickable:hover {
+  background: var(--oos-surface-muted);
+}
+
+.oos-link {
+  color: var(--oos-accent);
+  font-weight: 500;
+}
+
+.oos-link:hover {
+  color: var(--oos-accent-hover);
+  text-decoration: underline;
+}
+
+/* Layout helpers used by screens */
+.oos-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.oos-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 860px) {
+  .oos-shell {
+    grid-template-columns: 1fr;
+  }
+  .oos-sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .oos-nav-group-label {
+    display: none;
+  }
+}

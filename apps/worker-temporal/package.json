@@ -1,0 +1,31 @@
+{
+  "name": "@opportunity-os/worker-temporal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo lint-skip",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@temporalio/client": "^1.11.5",
+    "@temporalio/worker": "^1.11.5",
+    "@temporalio/workflow": "^1.11.5",
+    "@temporalio/activity": "^1.11.5",
+    "@opportunity-os/contracts": "workspace:*",
+    "@opportunity-os/config": "workspace:*",
+    "@opportunity-os/domain": "workspace:*",
+    "@opportunity-os/db": "workspace:*",
+    "@opportunity-os/audit": "workspace:*",
+    "@opportunity-os/observability": "workspace:*"
+  }
+}

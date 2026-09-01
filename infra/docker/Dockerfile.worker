@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+# Build once, run any worker by setting WORKER (§4 separate processes).
+FROM node:24-slim AS base
+RUN corepack enable
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+ENV NODE_ENV=production
+ARG WORKER=worker-temporal
+ENV WORKER=${WORKER}
+CMD ["sh", "-c", "pnpm --filter @opportunity-os/$WORKER start"]

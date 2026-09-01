@@ -1,0 +1,25 @@
+# Railway deployment (§24 V1). Each service is a container built from this repo.
+# Provision managed Postgres (or Supabase), Redis, and Temporal Cloud separately
+# and inject their connection strings as environment variables.
+[build]
+builder = "DOCKERFILE"
+
+[[services]]
+name = "api"
+dockerfilePath = "infra/docker/Dockerfile.api"
+
+[[services]]
+name = "web"
+dockerfilePath = "infra/docker/Dockerfile.web"
+
+[[services]]
+name = "worker-temporal"
+dockerfilePath = "infra/docker/Dockerfile.worker"
+[services.variables]
+WORKER = "worker-temporal"
+
+[[services]]
+name = "worker-connectors"
+dockerfilePath = "infra/docker/Dockerfile.worker"
+[services.variables]
+WORKER = "worker-connectors"
