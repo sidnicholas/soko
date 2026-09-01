@@ -150,6 +150,9 @@ importers:
       '@opportunity-os/llm-gateway':
         specifier: workspace:*
         version: link:../../packages/llm-gateway
+      '@opportunity-os/negotiation':
+        specifier: workspace:*
+        version: link:../../packages/negotiation
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -454,6 +457,21 @@ importers:
       '@opportunity-os/contracts':
         specifier: workspace:*
         version: link:../contracts
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/negotiation:
+    dependencies:
+      '@opportunity-os/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@opportunity-os/llm-gateway':
+        specifier: workspace:*
+        version: link:../llm-gateway
+      '@opportunity-os/observability':
+        specifier: workspace:*
+        version: link:../observability
       zod:
         specifier: ^3.23.8
         version: 3.25.76

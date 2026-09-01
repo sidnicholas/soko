@@ -10,3 +10,4 @@ export * from "./repositories/lifecycle";
 export * from "./repositories/approvals";
 export * from "./repositories/audit";
 export * from "./repositories/transactions";
+export * from "./repositories/negotiations";

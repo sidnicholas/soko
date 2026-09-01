@@ -1,11 +1,15 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
   createApproval,
+  createNegotiationDraft,
   enqueueEvent,
   getDb,
+  getNegotiationContext,
   getOpportunity,
   listOpportunitiesForOperator,
 } from "@opportunity-os/db";
+import { draftNegotiation } from "@opportunity-os/negotiation";
+import { readMoney } from "../common/money";
 import { getConfig } from "@opportunity-os/config";
 import { hashActionPayload } from "../common/proposal";
 import type { Principal } from "../common/current-user";
@@ -44,35 +48,31 @@ export class OpportunityService {
     return this.get(id);
   }
 
-  /** Prepare (never send) a negotiation draft for the opportunity (§13.5, §7). */
+  /** Prepare (never send) an LLM-drafted negotiation for the opportunity (§13.5, §11.2). */
   async prepareNegotiation(id: string) {
-    const opportunity = await this.get(id);
-    const side = opportunity.transaction_role === "sell" ? "sell" : "buy";
+    await this.get(id);
+    const ctx = await getNegotiationContext(id);
+    if (!ctx) throw new NotFoundException(`Opportunity ${id} has no match context to negotiate`);
 
-    return getDb().transaction().execute(async (tx) => {
-      const negotiation = await tx
-        .insertInto("negotiations")
-        .values({
-          opportunity_id: id,
-          side,
-          state: "draft",
-          approved_bounds_json: {},
-          draft_messages_json: [],
-          outbound_message_ids: [],
-          offers_json: [],
-        })
-        .returningAll()
-        .executeTakeFirstOrThrow();
+    const side = ctx.transactionRole === "seller" ? "sell" : "buy";
+    const supply = readMoney(ctx.supplyPrice);
+    const budget = readMoney(ctx.demandMaxBudget) ?? readMoney(ctx.demandTargetPrice);
+    const currency = supply?.currency ?? ctx.supplyCurrency ?? "USD";
 
-      await enqueueEvent(tx, {
-        eventName: "negotiation.draft_ready.v1",
-        aggregateType: "negotiation",
-        aggregateId: negotiation.id,
-        idempotencyKey: `negotiation.draft_ready:${negotiation.id}`,
-        payload: { opportunityId: id, negotiationId: negotiation.id, side },
-      });
+    const draft = await draftNegotiation({
+      side,
+      itemTitle: ctx.supplyTitle,
+      itemDescription: ctx.supplyDescription,
+      targetPriceMinor: supply?.amountMinor ?? null,
+      maxAmountMinor: budget?.amountMinor ?? null,
+      currency,
+    });
 
-      return negotiation;
+    return createNegotiationDraft({
+      opportunityId: id,
+      side,
+      messages: draft.messages,
+      approvedBounds: draft.approvedBounds,
     });
   }
 

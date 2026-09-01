@@ -28,6 +28,7 @@
     "@opportunity-os/demand": "workspace:*",
     "@opportunity-os/domain": "workspace:*",
     "@opportunity-os/llm-gateway": "workspace:*",
+    "@opportunity-os/negotiation": "workspace:*",
     "@opportunity-os/observability": "workspace:*",
     "@opportunity-os/risk": "workspace:*",
     "@opportunity-os/scoring": "workspace:*",
