@@ -1,5 +1,5 @@
 {
-  "name": "@opportunity-os/db",
+  "name": "@opportunity-os/escrow",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,12 +15,6 @@
     "lint": "echo lint-skip"
   },
   "dependencies": {
-    "pg": "^8.13.1",
-    "@types/pg": "^8.11.10",
-    "kysely": "^0.27.4",
-    "@opportunity-os/contracts": "workspace:*",
-    "@opportunity-os/audit": "workspace:*",
-    "@opportunity-os/domain": "workspace:*",
-    "@opportunity-os/config": "workspace:*"
+    "@opportunity-os/contracts": "workspace:*"
   }
 }

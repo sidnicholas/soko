@@ -8,3 +8,4 @@ export * from "./agent";
 export * from "./events";
 export * from "./commands";
 export * from "./connector-data";
+export * from "./escrow";

@@ -223,6 +223,12 @@ export interface EvidenceTable {
   captured_at: Timestamp;
   expires_at: Timestamp | null;
   metadata_json: Json;
+  verifier: string | null;
+  trust_tier: string | null;
+  predicate_type: string | null;
+  satisfies_json: Json;
+  previous_evidence_hash: string | null;
+  evidence_hash: string | null;
 }
 
 export interface AuditEventsTable {

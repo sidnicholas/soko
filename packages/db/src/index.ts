@@ -15,3 +15,4 @@ export * from "./repositories/signals";
 export * from "./repositories/market";
 export * from "./repositories/outcomes";
 export * from "./repositories/graph";
+export * from "./repositories/settlement";

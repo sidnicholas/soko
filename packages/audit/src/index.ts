@@ -22,6 +22,21 @@ export function hashProposalTerms(terms: { opportunityId: string; grossAmountMin
   );
 }
 
+/**
+ * Canonical hash of a milestone-release command's terms (§14/§22). Mirrors the
+ * proposal hash so a release approval token binds this exact milestone + amount.
+ */
+export function hashReleaseTerms(terms: { milestoneId: string; amountMinor: number; currency: string }): string {
+  return sha256Hex(
+    canonicalJson({
+      action: "release_milestone",
+      milestoneId: terms.milestoneId,
+      amountMinor: terms.amountMinor,
+      currency: terms.currency,
+    }),
+  );
+}
+
 /** An audit event before the chain assigns its linking hashes. */
 export type AuditEventDraft = Omit<AuditEvent, "event_hash" | "previous_event_hash">;
 

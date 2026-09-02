@@ -8,6 +8,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
 import { PublicModule } from "./public/public.module";
 import { SignalsModule } from "./signals/signals.module";
 import { EntitiesModule } from "./entities/entities.module";
+import { SettlementModule } from "./settlement/settlement.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { EntitiesModule } from "./entities/entities.module";
     PublicModule,
     SignalsModule,
     EntitiesModule,
+    SettlementModule,
   ],
 })
 export class AppModule {}
