@@ -241,6 +241,9 @@ importers:
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@opportunity-os/risk':
+        specifier: workspace:*
+        version: link:../../packages/risk
       ioredis:
         specifier: ^5.4.1
         version: 5.11.1

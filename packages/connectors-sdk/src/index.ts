@@ -10,6 +10,7 @@ import type {
 
 export * from "./fixtures";
 export * from "./normalize";
+export * from "./adapters";
 
 /** §17 — every source adapter implements this interface. */
 export interface SourceConnector {

@@ -22,6 +22,7 @@
     "@opportunity-os/config": "workspace:*",
     "@opportunity-os/connectors-sdk": "workspace:*",
     "@opportunity-os/db": "workspace:*",
+    "@opportunity-os/risk": "workspace:*",
     "@opportunity-os/observability": "workspace:*"
   }
 }

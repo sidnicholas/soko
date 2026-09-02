@@ -1,12 +1,17 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { createSignal, resolveSignal } from "@opportunity-os/db";
 import { sha256Hex, canonicalJson } from "@opportunity-os/audit";
+import { detectInjection } from "@opportunity-os/risk";
 import type { SignalSubmitBody } from "./signal.dto";
 
 @Injectable()
 export class SignalsService {
   /** Capture a raw signal, then project it into supply/demand so it enters matching. */
   async submit(body: SignalSubmitBody) {
+    // §13.3 untrusted intake: reject instruction-like (prompt-injection) content.
+    if (detectInjection(`${body.title ?? ""} ${body.description}`).length > 0) {
+      throw new BadRequestException("Signal text rejected: instruction-like content");
+    }
     const contentHash = sha256Hex(
       canonicalJson({
         channel: body.channel,

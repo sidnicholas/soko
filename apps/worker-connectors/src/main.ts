@@ -3,10 +3,12 @@ import {
   FixtureDemandConnector,
   FixtureSupplyConnector,
   normalizeObservation,
+  type NormalizedSupply,
 } from "@opportunity-os/connectors-sdk";
 import { upsertSupply } from "@opportunity-os/db";
 import { getConfig } from "@opportunity-os/config";
 import { createLogger } from "@opportunity-os/observability";
+import { ingestConnectors } from "./ingest";
 
 const log = createLogger("worker-connectors");
 
@@ -14,39 +16,20 @@ const registry = new ConnectorRegistry();
 registry.register(FixtureSupplyConnector);
 registry.register(FixtureDemandConnector);
 
-/**
- * One ingestion pass across all registered connectors (§9, §3.1(5)). Supply
- * observations are normalized and upserted idempotently (keyed on
- * source_id/external_ref) so continuous ingestion refreshes rows in place.
- * Demand-side observations are counted here; mission-driven demand is persisted
- * by the discovery workflow.
- */
-async function ingest(query: string): Promise<{ supply: number; demand: number }> {
-  let supply = 0;
-  let demand = 0;
-  for (const connector of registry.all()) {
-    const observations = await connector.search({ query, max: 25, filters: {} });
-    for (const obs of observations) {
-      const n = normalizeObservation(obs);
-      if (n.kind === "supply") {
-        await upsertSupply({
-          sourceId: n.source_id,
-          externalRef: n.external_ref,
-          title: n.title,
-          description: n.description,
-          category: n.category,
-          priceMinor: n.price?.amount ?? null,
-          currency: n.price?.currency ?? "USD",
-          quantity: n.quantity,
-          sourceReliability: n.source_reliability,
-        });
-        supply++;
-      } else {
-        demand++;
-      }
-    }
-  }
-  return { supply, demand };
+/** Persist a gated supply observation; demand-side is left to the discovery workflow. */
+async function persist(supplyCount: { n: number }, normalized: NormalizedSupply): Promise<void> {
+  await upsertSupply({
+    sourceId: normalized.source_id,
+    externalRef: normalized.external_ref,
+    title: normalized.title,
+    description: normalized.description,
+    category: normalized.category,
+    priceMinor: normalized.price?.amount ?? null,
+    currency: normalized.price?.currency ?? "USD",
+    quantity: normalized.quantity,
+    sourceReliability: normalized.source_reliability,
+  });
+  supplyCount.n++;
 }
 
 async function main(): Promise<void> {
@@ -57,8 +40,12 @@ async function main(): Promise<void> {
 
   log.info({ connectors: registry.all().map((c) => c.id), intervalMs }, "connector worker started");
   while (running) {
-    const counts = await ingest("");
-    log.info({ supply: counts.supply, demand: counts.demand }, "ingest.cycle.complete");
+    const supplyCount = { n: 0 };
+    const stats = await ingestConnectors(registry.all(), "", async (obs) => {
+      const normalized = normalizeObservation(obs);
+      if (normalized.kind === "supply") await persist(supplyCount, normalized);
+    });
+    log.info({ ...stats, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
     const { promise, resolve } = Promise.withResolvers<void>();
     setTimeout(resolve, intervalMs);
     await promise;
