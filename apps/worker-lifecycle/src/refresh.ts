@@ -4,7 +4,12 @@ import {
   expireOverdueDemands,
   markStaleSupplyUnavailable,
 } from "@opportunity-os/db";
-import { runDiscoveryCycle, projectMissionDemand, synthesizeOpportunities } from "@opportunity-os/discovery";
+import {
+  runDiscoveryCycle,
+  projectMissionDemand,
+  synthesizeOpportunities,
+  resolveEntities,
+} from "@opportunity-os/discovery";
 import { createLogger } from "@opportunity-os/observability";
 
 const log = createLogger("worker-lifecycle:refresh");
@@ -16,6 +21,7 @@ export interface RefreshSummary {
   missionsSwept: number;
   opportunitiesPersisted: number;
   synthesizedOpportunities: number;
+  entitiesResolved: number;
 }
 
 /**
@@ -51,6 +57,9 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
   // supply, so opportunities arise from independent signals (no listing).
   const synthesis = await synthesizeOpportunities();
 
+  // Resolve canonical entities + market-graph edges over the refreshed rows.
+  const entities = await resolveEntities();
+
   const summary: RefreshSummary = {
     expiredOpportunities,
     expiredDemands,
@@ -58,6 +67,7 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
     missionsSwept: missions.length,
     opportunitiesPersisted,
     synthesizedOpportunities: synthesis.opportunitiesPersisted,
+    entitiesResolved: entities.entitiesTouched,
   };
   log.info(summary, "lifecycle.refresh.cycle");
   return summary;

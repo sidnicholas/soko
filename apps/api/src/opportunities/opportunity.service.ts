@@ -8,6 +8,8 @@ import {
   getOpportunity,
   listOpportunitiesForOperator,
   recordOutcome,
+  getEntityIdForMember,
+  entityPriceStats,
 } from "@opportunity-os/db";
 import { draftNegotiation } from "@opportunity-os/negotiation";
 import { readMoney } from "../common/money";
@@ -60,6 +62,10 @@ export class OpportunityService {
     const budget = readMoney(ctx.demandMaxBudget) ?? readMoney(ctx.demandTargetPrice);
     const currency = supply?.currency ?? ctx.supplyCurrency ?? "USD";
 
+    // Market-graph comparables for this item sharpen the draft's price anchor.
+    const entityId = await getEntityIdForMember("supply", ctx.supplyId);
+    const stats = entityId ? await entityPriceStats(entityId) : null;
+
     const draft = await draftNegotiation({
       side,
       itemTitle: ctx.supplyTitle,
@@ -67,6 +73,7 @@ export class OpportunityService {
       targetPriceMinor: supply?.amountMinor ?? null,
       maxAmountMinor: budget?.amountMinor ?? null,
       currency,
+      ...(stats ? { comparableCount: stats.count, comparableMinMinor: stats.minMinor, comparableMaxMinor: stats.maxMinor } : {}),
     });
 
     return createNegotiationDraft({

@@ -14,6 +14,7 @@ export async function getNegotiationContext(opportunityId: string) {
     .where("o.id", "=", opportunityId)
     .select([
       "o.transaction_role as transactionRole",
+      "s.id as supplyId",
       "d.description as demandDescription",
       "d.target_price as demandTargetPrice",
       "d.max_budget as demandMaxBudget",

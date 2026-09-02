@@ -289,6 +289,47 @@ export interface OutcomesTable {
   created_at: Timestamp;
 }
 
+export interface EntitiesTable {
+  id: Generated<string>;
+  kind: string;
+  category: string | null;
+  canonical_key: string;
+  title: string;
+  attributes_json: Json;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface EntityMembersTable {
+  id: Generated<string>;
+  entity_id: string;
+  member_type: string;
+  member_id: string;
+  created_at: Timestamp;
+}
+
+export interface PriceObservationsTable {
+  id: Generated<string>;
+  entity_id: string;
+  member_type: string;
+  member_id: string;
+  amount_minor: number;
+  currency: string;
+  observed_at: Timestamp;
+}
+
+export interface GraphEdgesTable {
+  id: Generated<string>;
+  src_type: string;
+  src_id: string;
+  dst_type: string;
+  dst_id: string;
+  relation: string;
+  weight: number;
+  metadata_json: Json;
+  created_at: Timestamp;
+}
+
 export interface Database {
   users: UsersTable;
   missions: MissionsTable;
@@ -308,4 +349,8 @@ export interface Database {
   outbox: OutboxTable;
   signals: SignalsTable;
   outcomes: OutcomesTable;
+  entities: EntitiesTable;
+  entity_members: EntityMembersTable;
+  price_observations: PriceObservationsTable;
+  graph_edges: GraphEdgesTable;
 }

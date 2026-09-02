@@ -27,6 +27,14 @@ describe("templateDraft", () => {
     expect(msgs[0]!.intent).toBe("opening_offer");
     expect(msgs[0]!.body).toContain("USD 189.00");
   });
+
+  it("weaves in market comparables when present", () => {
+    const msgs = templateDraft({ ...buyCtx, comparableCount: 3, comparableMinMinor: 18000, comparableMaxMinor: 24000 });
+    const proposal = msgs.find((m) => m.intent === "price_proposal")!;
+    expect(proposal.body).toContain("Comparable listings run");
+    expect(proposal.body).toContain("USD 180.00");
+    expect(proposal.body).toContain("3 sources");
+  });
 });
 
 describe("draftNegotiation", () => {

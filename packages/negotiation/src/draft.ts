@@ -15,6 +15,10 @@ export interface NegotiationContext {
   maxAmountMinor: number | null;
   currency: string;
   counterpartyName?: string | null;
+  /** Market-graph comparables for this item (§ intelligence marketplace). */
+  comparableCount?: number;
+  comparableMinMinor?: number;
+  comparableMaxMinor?: number;
 }
 
 export interface DraftMessage {
@@ -54,6 +58,10 @@ function money(minor: number | null, currency: string): string {
 export function templateDraft(ctx: NegotiationContext): DraftMessage[] {
   const who = ctx.counterpartyName?.trim() ? ctx.counterpartyName.trim() : "there";
   const detail = ctx.itemDescription ? ` For reference: ${ctx.itemDescription}` : "";
+  const comparables =
+    ctx.comparableCount && ctx.comparableMinMinor != null && ctx.comparableMaxMinor != null
+      ? ` Comparable listings run ${money(ctx.comparableMinMinor, ctx.currency)}–${money(ctx.comparableMaxMinor, ctx.currency)} across ${ctx.comparableCount} sources.`
+      : "";
   if (ctx.side === "buy") {
     return [
       {
@@ -66,7 +74,7 @@ export function templateDraft(ctx: NegotiationContext): DraftMessage[] {
         subject: `Offer for ${ctx.itemTitle}`,
         body: `Thanks for confirming. I'd like to move quickly at ${money(ctx.targetPriceMinor, ctx.currency)}${
           ctx.maxAmountMinor !== null ? `, with room toward ${money(ctx.maxAmountMinor, ctx.currency)} for the right terms` : ""
-        }. Would that work? I can arrange payment and logistics promptly.`,
+        }.${comparables} Would that work? I can arrange payment and logistics promptly.`,
       },
     ];
   }
