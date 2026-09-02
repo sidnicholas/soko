@@ -1,43 +1,23 @@
+import { EmbeddingGateway } from "@opportunity-os/llm-gateway";
+
 /**
- * Text embeddings for entity similarity (§ market graph). V1 uses a
- * deterministic, offline hashed bag-of-words vector so substitutes/comparables
- * work with no external model and no pgvector. The interface is the seam: swap
- * in a real provider (OpenAI/Voyage via the LLM gateway) and pgvector at scale
- * (ADR-024) without touching callers.
+ * Entity embeddings come from the LLM gateway's embedding provider (OpenAI
+ * text-embedding-3-small @ 512 by default, Voyage alt, deterministic echo
+ * fallback for dev/CI/offline — see ADR-025). Stored as jsonb; pgvector is the
+ * Supabase-prod drop-in (ADR-024).
  */
-export interface EmbeddingProvider {
-  readonly dim: number;
-  embed(text: string): number[];
+let gateway: EmbeddingGateway | undefined;
+
+export function embeddingGateway(): EmbeddingGateway {
+  return (gateway ??= EmbeddingGateway.default());
 }
 
-const STOP: Record<string, true> = { the: true, and: true, for: true, with: true, new: true, used: true };
-
-export class LocalHashEmbedding implements EmbeddingProvider {
-  constructor(readonly dim = 64) {}
-
-  embed(text: string): number[] {
-    const v = new Array<number>(this.dim).fill(0);
-    for (const raw of text.toLowerCase().split(/[^a-z0-9]+/)) {
-      if (raw.length < 2 || STOP[raw]) continue;
-      let h = 2166136261;
-      for (let i = 0; i < raw.length; i++) {
-        h ^= raw.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-      }
-      const idx = Math.abs(h) % this.dim;
-      v[idx] = (v[idx] ?? 0) + 1;
-    }
-    let norm = 0;
-    for (const x of v) norm += x * x;
-    norm = Math.sqrt(norm);
-    if (norm === 0) return v;
-    return v.map((x) => x / norm);
-  }
+/** Batch-embed texts through the configured provider (with echo fallback). */
+export async function embedTexts(texts: string[]): Promise<number[][]> {
+  return (await embeddingGateway().embed(texts)).vectors;
 }
 
-export const defaultEmbedding: EmbeddingProvider = new LocalHashEmbedding();
-
-/** Cosine similarity. Inputs are L2-normalized, so this is just the dot product. */
+/** Cosine similarity. Vectors are L2-normalized, so this is the dot product. */
 export function cosineSimilarity(a: readonly number[], b: readonly number[]): number {
   const n = Math.min(a.length, b.length);
   let dot = 0;

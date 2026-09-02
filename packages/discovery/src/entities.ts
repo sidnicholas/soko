@@ -11,7 +11,7 @@ import {
   entityPriceStats,
   entitySupplyAgg,
 } from "@opportunity-os/db";
-import { defaultEmbedding, cosineSimilarity } from "./embed";
+import { embedTexts, cosineSimilarity } from "./embed";
 import { createLogger } from "@opportunity-os/observability";
 
 const log = createLogger("discovery:entities");
@@ -66,10 +66,11 @@ export async function resolveEntities(opts: { supplyLimit?: number; demandLimit?
   let priceObservations = 0;
   let comparableEdges = 0;
 
+  const embedText = new Map<string, string>();
   for (const s of supply) {
     const key = canonicalEntityKey(s.category, s.title, s.description);
     const entityId = await upsertEntity({ canonicalKey: key, kind: "product", category: s.category, title: s.title });
-    await setEntityEmbedding(entityId, defaultEmbedding.embed(`${s.title} ${s.description}`));
+    embedText.set(entityId, `${s.title} ${s.description}`);
     touched.add(entityId);
     await linkEntityMember(entityId, "supply", s.id);
     membersLinked++;
@@ -93,10 +94,17 @@ export async function resolveEntities(opts: { supplyLimit?: number; demandLimit?
   for (const d of demands) {
     const key = canonicalEntityKey(d.category, d.description);
     const entityId = await upsertEntity({ canonicalKey: key, kind: "product", category: d.category, title: d.description.slice(0, 80) });
-    await setEntityEmbedding(entityId, defaultEmbedding.embed(d.description));
+    embedText.set(entityId, d.description);
     touched.add(entityId);
     await linkEntityMember(entityId, "demand", d.id);
     membersLinked++;
+  }
+
+  // Batch-embed each touched entity through the gateway (one call).
+  const entries = [...embedText];
+  if (entries.length > 0) {
+    const vectors = await embedTexts(entries.map(([, text]) => text));
+    await Promise.all(entries.map(([entityId], i) => setEntityEmbedding(entityId, vectors[i] ?? [])));
   }
 
   const result: ResolveEntitiesResult = { entitiesTouched: touched.size, membersLinked, priceObservations, comparableEdges };

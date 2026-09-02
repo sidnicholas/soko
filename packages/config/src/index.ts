@@ -23,6 +23,10 @@ const EnvSchema = z.object({
   LLM_DEFAULT_PROVIDER: z.string().default("echo"),
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  VOYAGE_API_KEY: z.string().optional(),
+  EMBEDDING_PROVIDER: z.enum(["echo", "openai", "voyage"]).default("echo"),
+  EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
+  EMBEDDING_DIM: z.coerce.number().int().positive().default(512),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -53,7 +57,15 @@ export interface AppConfig {
   supabase: { url?: string; anonKey?: string; serviceRoleKey?: string };
   redis: { url: string };
   temporal: { address: string; namespace: string; taskQueue: string };
-  llm: { defaultProvider: string; openaiKey?: string; anthropicKey?: string };
+  llm: {
+    defaultProvider: string;
+    openaiKey?: string;
+    anthropicKey?: string;
+    voyageKey?: string;
+    embeddingProvider: "echo" | "openai" | "voyage";
+    embeddingModel: string;
+    embeddingDim: number;
+  };
   settlement: {
     stripeSecretKey?: string;
     stripeWebhookSecret?: string;
@@ -91,6 +103,10 @@ function toConfig(env: Env): AppConfig {
       defaultProvider: env.LLM_DEFAULT_PROVIDER,
       openaiKey: env.OPENAI_API_KEY,
       anthropicKey: env.ANTHROPIC_API_KEY,
+      voyageKey: env.VOYAGE_API_KEY,
+      embeddingProvider: env.EMBEDDING_PROVIDER,
+      embeddingModel: env.EMBEDDING_MODEL,
+      embeddingDim: env.EMBEDDING_DIM,
     },
     settlement: {
       stripeSecretKey: env.STRIPE_SECRET_KEY,

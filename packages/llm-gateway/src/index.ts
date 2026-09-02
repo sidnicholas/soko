@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { CostTelemetry } from "@opportunity-os/contracts";
 import { getConfig } from "@opportunity-os/config";
 
+export * from "./embed";
+
 /** §18 — task classes routed to provider/model profiles. */
 export const LLM_TASK_CLASSES = [
   "extraction",
