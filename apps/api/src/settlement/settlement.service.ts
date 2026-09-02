@@ -7,6 +7,7 @@ import {
   listEvidenceLedger,
   listEvidenceClaims,
   releaseMilestone,
+  setSettlementPlanProviderRef,
   verifyMilestone,
 } from "@opportunity-os/db";
 import { evaluateCondition, decideRelease } from "@opportunity-os/escrow";
@@ -18,9 +19,11 @@ import {
 import { verifyApprovalToken } from "@opportunity-os/auth";
 import { hashReleaseTerms } from "@opportunity-os/audit";
 import { getConfig } from "@opportunity-os/config";
-import type { EscrowCondition, Money } from "@opportunity-os/contracts";
+import type { EscrowCondition, Money, RailFamily, SettlementPlan } from "@opportunity-os/contracts";
+import type { SettlementRail, SettlementService as RailService } from "@opportunity-os/settlement";
 import type { Principal } from "../common/current-user";
 import type { ReleaseMilestoneBody, SubmitEvidenceBody } from "./settlement.dto";
+import { createSettlementService } from "./rails";
 
 function milestoneAmountMinor(total: Money, amount: { kind: "amount" | "percentage"; value: number }): number {
   return amount.kind === "amount" ? Math.round(amount.value) : Math.round((total.amount * amount.value) / 100);
@@ -29,16 +32,32 @@ function milestoneAmountMinor(total: Money, amount: { kind: "amount" | "percenta
 @Injectable()
 export class SettlementService {
   private readonly verifiers = new VerifierRegistry();
+  private readonly rails: RailService = createSettlementService(getConfig());
 
   constructor() {
     this.verifiers.register(makeAttestationVerifier());
     this.verifiers.register(makeSignedDocumentVerifier(getConfig().security.approvalTokenSecret));
   }
 
-  /** Move a DRAFT plan through funding to FUNDED (§20). */
+  private rail(plan: { rail_family: string }): SettlementRail {
+    const rails = this.rails.byFamily(plan.rail_family as RailFamily);
+    if (rails.length === 0) throw new BadRequestException(`No settlement rail for family ${plan.rail_family}`);
+    return rails[0]!;
+  }
+
+  /** Ensure the rail has a prepared contract/intent reference for this plan (§19). */
+  private async ensurePrepared(plan: { id: string; rail_family: string; provider_ref: string | null }): Promise<string> {
+    if (plan.provider_ref) return plan.provider_ref;
+    const prepared = await this.rail(plan).prepare(plan as unknown as SettlementPlan);
+    await setSettlementPlanProviderRef(plan.id, prepared.reference);
+    return prepared.reference;
+  }
+
+  /** Prepare the rail (authorize/create intent) then move the plan to FUNDED (§20). */
   async fund(planId: string, principal: Principal) {
     const plan = await getSettlementPlan(planId);
     if (!plan) throw new NotFoundException(`Settlement plan ${planId} not found`);
+    await this.ensurePrepared(plan);
     await fundSettlementPlan(planId, principal.userId);
     return getSettlementPlan(planId);
   }
@@ -128,14 +147,27 @@ export class SettlementService {
       if (!verified.ok) throw new ForbiddenException(`Approval token invalid: ${verified.reason}`);
     }
 
+    // Actually move funds on the selected rail; the release terms hash binds the
+    // execution to this exact milestone + amount (§13.5).
+    const reference = await this.ensurePrepared(plan);
+    const execution = await this.rail(plan).execute({
+      railId: this.rail(plan).railId,
+      reference,
+      approvalTokenHash: hashReleaseTerms({ milestoneId, amountMinor, currency: total.currency }),
+      amount: { amount: amountMinor, currency: total.currency },
+    });
+    if (execution.status === "failed") {
+      throw new ConflictException(`Rail execution failed on ${execution.railId}`);
+    }
+
     const result = await releaseMilestone({
       milestoneId,
       amountMinor,
       currency: total.currency,
       actorId: principal.userId,
-      externalTransactionRef: body.externalTransactionRef ?? null,
+      externalTransactionRef: body.externalTransactionRef ?? execution.externalRef,
       reason: decision.reason,
     });
-    return { decision, ...result };
+    return { decision, execution, ...result };
   }
 }

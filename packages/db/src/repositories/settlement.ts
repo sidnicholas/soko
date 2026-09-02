@@ -33,6 +33,10 @@ export async function getSettlementPlanByTransaction(transactionId: string) {
     .executeTakeFirst();
 }
 
+export async function setSettlementPlanProviderRef(planId: string, providerRef: string): Promise<void> {
+  await getDb().updateTable("settlement_plans").set({ provider_ref: providerRef }).where("id", "=", planId).execute();
+}
+
 export async function listMilestones(planId: string) {
   return getDb()
     .selectFrom("settlement_milestones")

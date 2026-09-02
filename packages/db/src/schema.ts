@@ -196,6 +196,7 @@ export interface SettlementPlansTable {
   total_amount: Json;
   status: string;
   human_release_policy: string;
+  provider_ref: string | null;
   created_at: Timestamp;
 }
 
