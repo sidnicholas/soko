@@ -6,7 +6,12 @@ import {
   recordPriceObservation,
   upsertGraphEdge,
   listEntityMembers,
+  setEntityEmbedding,
+  listEntityEmbeddings,
+  entityPriceStats,
+  entitySupplyAgg,
 } from "@opportunity-os/db";
+import { defaultEmbedding, cosineSimilarity } from "./embed";
 import { createLogger } from "@opportunity-os/observability";
 
 const log = createLogger("discovery:entities");
@@ -64,6 +69,7 @@ export async function resolveEntities(opts: { supplyLimit?: number; demandLimit?
   for (const s of supply) {
     const key = canonicalEntityKey(s.category, s.title, s.description);
     const entityId = await upsertEntity({ canonicalKey: key, kind: "product", category: s.category, title: s.title });
+    await setEntityEmbedding(entityId, defaultEmbedding.embed(`${s.title} ${s.description}`));
     touched.add(entityId);
     await linkEntityMember(entityId, "supply", s.id);
     membersLinked++;
@@ -87,6 +93,7 @@ export async function resolveEntities(opts: { supplyLimit?: number; demandLimit?
   for (const d of demands) {
     const key = canonicalEntityKey(d.category, d.description);
     const entityId = await upsertEntity({ canonicalKey: key, kind: "product", category: d.category, title: d.description.slice(0, 80) });
+    await setEntityEmbedding(entityId, defaultEmbedding.embed(d.description));
     touched.add(entityId);
     await linkEntityMember(entityId, "demand", d.id);
     membersLinked++;
@@ -94,5 +101,71 @@ export async function resolveEntities(opts: { supplyLimit?: number; demandLimit?
 
   const result: ResolveEntitiesResult = { entitiesTouched: touched.size, membersLinked, priceObservations, comparableEdges };
   log.info(result, "discovery.entities.resolved");
+  return result;
+}
+
+const SUBSTITUTE_MIN_SIM = 0.6;
+const ARBITRAGE_MIN_SPREAD = 0.2;
+const BUNDLE_MIN_SELLERS = 2;
+
+export interface GraphEdgeResult {
+  substitutes: number;
+  arbitrage: number;
+  bundles: number;
+}
+
+/**
+ * Derive the higher-order market graph from resolved entities:
+ *  - SUBSTITUTE_OF: same-category entities with cosine similarity >= threshold
+ *  - ARBITRAGE: an entity whose price spread across observations is large enough
+ *  - BUNDLE_AVAILABLE: an entity with enough distinct sellers to aggregate
+ * Runs each lifecycle sweep after resolveEntities (§ ADR-024).
+ */
+export async function buildGraphEdges(): Promise<GraphEdgeResult> {
+  const entities = await listEntityEmbeddings();
+
+  // Substitutes: pairwise cosine within a category.
+  const byCategory = new Map<string, typeof entities>();
+  for (const e of entities) {
+    const key = e.category ?? "uncategorized";
+    const group = byCategory.get(key);
+    if (group) group.push(e);
+    else byCategory.set(key, [e]);
+  }
+
+  let substitutes = 0;
+  for (const group of byCategory.values()) {
+    for (let i = 0; i < group.length; i++) {
+      for (let j = i + 1; j < group.length; j++) {
+        const sim = cosineSimilarity(group[i]!.embedding, group[j]!.embedding);
+        if (sim < SUBSTITUTE_MIN_SIM) continue;
+        await upsertGraphEdge({ srcType: "entity", srcId: group[i]!.id, dstType: "entity", dstId: group[j]!.id, relation: "SUBSTITUTE_OF", weight: sim });
+        await upsertGraphEdge({ srcType: "entity", srcId: group[j]!.id, dstType: "entity", dstId: group[i]!.id, relation: "SUBSTITUTE_OF", weight: sim });
+        substitutes += 2;
+      }
+    }
+  }
+
+  // Arbitrage + bundle markers per entity.
+  let arbitrage = 0;
+  let bundles = 0;
+  for (const e of entities) {
+    const stats = await entityPriceStats(e.id);
+    if (stats && stats.count >= 2 && stats.maxMinor > 0) {
+      const spread = (stats.maxMinor - stats.minMinor) / stats.maxMinor;
+      if (spread >= ARBITRAGE_MIN_SPREAD) {
+        await upsertGraphEdge({ srcType: "entity", srcId: e.id, dstType: "entity", dstId: e.id, relation: "ARBITRAGE", weight: spread });
+        arbitrage++;
+      }
+    }
+    const agg = await entitySupplyAgg(e.id);
+    if (agg.sellerCount >= BUNDLE_MIN_SELLERS) {
+      await upsertGraphEdge({ srcType: "entity", srcId: e.id, dstType: "entity", dstId: e.id, relation: "BUNDLE_AVAILABLE", weight: agg.sellerCount });
+      bundles++;
+    }
+  }
+
+  const result: GraphEdgeResult = { substitutes, arbitrage, bundles };
+  log.info(result, "discovery.graph.edges");
   return result;
 }

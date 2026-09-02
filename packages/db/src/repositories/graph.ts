@@ -106,3 +106,47 @@ export async function entityPriceStats(entityId: string): Promise<EntityPriceSta
     currency: rows[0]!.currency,
   };
 }
+
+/** Store an entity's embedding (jsonb float array; pgvector drop-in later). */
+export async function setEntityEmbedding(entityId: string, vector: number[]): Promise<void> {
+  await getDb().updateTable("entities").set({ embedding: JSON.stringify(vector) }).where("id", "=", entityId).execute();
+}
+
+export interface EntityEmbeddingRow {
+  id: string;
+  category: string | null;
+  embedding: number[];
+}
+
+/** All entities with an embedding (for similarity/substitute detection). */
+export async function listEntityEmbeddings(): Promise<EntityEmbeddingRow[]> {
+  const rows = await getDb()
+    .selectFrom("entities")
+    .select(["id", "category", "embedding"])
+    .where("embedding", "is not", null)
+    .execute();
+  return rows.map((r) => ({ id: r.id, category: r.category, embedding: Array.isArray(r.embedding) ? (r.embedding as number[]) : [] }));
+}
+
+/** Seller count + total available quantity for an entity (bundle readiness). */
+export async function entitySupplyAgg(entityId: string): Promise<{ sellerCount: number; totalQuantity: number }> {
+  const row = await getDb()
+    .selectFrom("entity_members as em")
+    .innerJoin("supply as s", "s.id", "em.member_id")
+    .where("em.entity_id", "=", entityId)
+    .where("em.member_type", "=", "supply")
+    .where("s.availability_status", "=", "available")
+    .select((eb) => [eb.fn.count<string>("s.id").as("sellers"), eb.fn.sum<string>("s.quantity").as("qty")])
+    .executeTakeFirst();
+  return { sellerCount: Number(row?.sellers ?? 0), totalQuantity: Number(row?.qty ?? 0) };
+}
+
+/** All graph edges originating from a node (for the intelligence surface). */
+export async function listEdgesFrom(srcType: string, srcId: string) {
+  return getDb()
+    .selectFrom("graph_edges")
+    .select(["dst_type", "dst_id", "relation", "weight"])
+    .where("src_type", "=", srcType)
+    .where("src_id", "=", srcId)
+    .execute();
+}

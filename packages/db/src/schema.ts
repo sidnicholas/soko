@@ -296,6 +296,7 @@ export interface EntitiesTable {
   canonical_key: string;
   title: string;
   attributes_json: Json;
+  embedding: JsonNullable;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

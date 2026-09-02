@@ -9,6 +9,7 @@ import {
   projectMissionDemand,
   synthesizeOpportunities,
   resolveEntities,
+  buildGraphEdges,
 } from "@opportunity-os/discovery";
 import { createLogger } from "@opportunity-os/observability";
 
@@ -22,6 +23,9 @@ export interface RefreshSummary {
   opportunitiesPersisted: number;
   synthesizedOpportunities: number;
   entitiesResolved: number;
+  substituteEdges: number;
+  arbitrageEntities: number;
+  bundleEntities: number;
 }
 
 /**
@@ -59,6 +63,7 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
 
   // Resolve canonical entities + market-graph edges over the refreshed rows.
   const entities = await resolveEntities();
+  const graph = await buildGraphEdges();
 
   const summary: RefreshSummary = {
     expiredOpportunities,
@@ -68,6 +73,9 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
     opportunitiesPersisted,
     synthesizedOpportunities: synthesis.opportunitiesPersisted,
     entitiesResolved: entities.entitiesTouched,
+    substituteEdges: graph.substitutes,
+    arbitrageEntities: graph.arbitrage,
+    bundleEntities: graph.bundles,
   };
   log.info(summary, "lifecycle.refresh.cycle");
   return summary;

@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { getEntity, listEntityMembers, entityPriceStats, listComparableSupply } from "@opportunity-os/db";
+import { getEntity, listEntityMembers, entityPriceStats, listComparableSupply, listEdgesFrom } from "@opportunity-os/db";
 
 @Injectable()
 export class EntityService {
@@ -7,11 +7,12 @@ export class EntityService {
   async intelligence(id: string) {
     const entity = await getEntity(id);
     if (!entity) throw new NotFoundException(`Entity ${id} not found`);
-    const [members, priceStats, comparables] = await Promise.all([
+    const [members, priceStats, comparables, edges] = await Promise.all([
       listEntityMembers(id),
       entityPriceStats(id),
       listComparableSupply(id),
+      listEdgesFrom("entity", id),
     ]);
-    return { ...entity, members, price_stats: priceStats, comparables };
+    return { ...entity, members, price_stats: priceStats, comparables, graph_edges: edges };
   }
 }
