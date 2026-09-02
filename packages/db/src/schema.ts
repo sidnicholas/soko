@@ -254,6 +254,41 @@ export interface OutboxTable {
   published_at: Timestamp | null;
 }
 
+export interface SignalsTable {
+  id: Generated<string>;
+  channel: string;
+  kind: string;
+  source_id: string;
+  external_ref: string | null;
+  title: string | null;
+  description: string;
+  category: string | null;
+  price: JsonNullable;
+  geo_point: JsonNullable;
+  raw_json: Json;
+  content_hash: string;
+  source_reliability: number;
+  status: string;
+  resolved_entity_type: string | null;
+  resolved_entity_id: string | null;
+  captured_at: Timestamp;
+  created_at: Timestamp;
+}
+
+export interface OutcomesTable {
+  id: Generated<string>;
+  opportunity_id: string | null;
+  transaction_id: string | null;
+  status: string;
+  realized_amount: JsonNullable;
+  realized_profit: JsonNullable;
+  days_to_close: number | null;
+  shipping_cost: JsonNullable;
+  notes: string | null;
+  metadata_json: Json;
+  created_at: Timestamp;
+}
+
 export interface Database {
   users: UsersTable;
   missions: MissionsTable;
@@ -271,4 +306,6 @@ export interface Database {
   evidence: EvidenceTable;
   audit_events: AuditEventsTable;
   outbox: OutboxTable;
+  signals: SignalsTable;
+  outcomes: OutcomesTable;
 }

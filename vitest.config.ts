@@ -11,5 +11,8 @@ export default defineConfig({
   test: {
     include: ["packages/**/*.test.ts", "tests/**/*.test.ts"],
     environment: "node",
+    // DB e2e tests share one Postgres; run files serially so global cross-source
+    // synthesis in one file cannot race another file's assertions.
+    fileParallelism: false,
   },
 });

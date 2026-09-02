@@ -21,6 +21,10 @@ import {
   NegotiationState,
   AutonomyPolicy,
   PaymentMethodFamily,
+  SignalChannel,
+  SignalKind,
+  SignalStatus,
+  OutcomeStatus,
 } from "./enums";
 
 /** §6.1 */
@@ -290,3 +294,50 @@ export const AuditEvent = z.object({
   created_at: zIso,
 });
 export type AuditEvent = z.infer<typeof AuditEvent>;
+
+/**
+ * §signals — a source-agnostic raw claim ("supply available" / "demand
+ * wanted") captured upstream of Supply/Demand. Kept even when it never
+ * resolves, as graph + learning fuel. Provenance via content_hash + channel.
+ */
+export const Signal = z.object({
+  id: zId,
+  channel: SignalChannel,
+  kind: SignalKind,
+  source_id: z.string(),
+  external_ref: z.string().nullable(),
+  title: z.string().nullable(),
+  description: z.string(),
+  category: z.string().nullable(),
+  price: Money.nullable(),
+  geo_point: GeoPoint.nullable(),
+  raw_json: z.record(z.unknown()).default({}),
+  content_hash: zHash,
+  source_reliability: z.number().min(0).max(1),
+  status: SignalStatus,
+  resolved_entity_type: z.string().nullable(),
+  resolved_entity_id: zId.nullable(),
+  captured_at: zIso,
+  created_at: zIso,
+});
+export type Signal = z.infer<typeof Signal>;
+
+/**
+ * §outcomes — the realized result of a pursued opportunity/transaction. This
+ * ledger (what sold, at what price, in how long, at what profit) is the
+ * learning-loop dataset that calibrates scoring over time.
+ */
+export const Outcome = z.object({
+  id: zId,
+  opportunity_id: zId.nullable(),
+  transaction_id: zId.nullable(),
+  status: OutcomeStatus,
+  realized_amount: Money.nullable(),
+  realized_profit: Money.nullable(),
+  days_to_close: z.number().nullable(),
+  shipping_cost: Money.nullable(),
+  notes: z.string().nullable(),
+  metadata_json: z.record(z.unknown()).default({}),
+  created_at: zIso,
+});
+export type Outcome = z.infer<typeof Outcome>;

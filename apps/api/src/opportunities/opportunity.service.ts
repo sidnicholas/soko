@@ -7,13 +7,14 @@ import {
   getNegotiationContext,
   getOpportunity,
   listOpportunitiesForOperator,
+  recordOutcome,
 } from "@opportunity-os/db";
 import { draftNegotiation } from "@opportunity-os/negotiation";
 import { readMoney } from "../common/money";
 import { getConfig } from "@opportunity-os/config";
 import { hashProposalTerms } from "@opportunity-os/audit";
 import type { Principal } from "../common/current-user";
-import type { RequestApprovalBody } from "./opportunity.dto";
+import type { RecordOutcomeBody, RequestApprovalBody } from "./opportunity.dto";
 
 @Injectable()
 export class OpportunityService {
@@ -93,6 +94,22 @@ export class OpportunityService {
         body.summary ?? `Propose a transaction for opportunity ${id} at ${body.grossAmountMinor} ${body.currency} (minor units)`,
       riskSummary: body.riskSummary ?? null,
       expiresAt: new Date(Date.now() + getConfig().policy.approvalTimeoutMinutes * 60_000).toISOString(),
+    });
+  }
+
+  /** §outcomes record a realized result for the learning loop. */
+  async recordOutcome(id: string, body: RecordOutcomeBody) {
+    await this.get(id);
+    return recordOutcome({
+      opportunityId: id,
+      transactionId: body.transactionId ?? null,
+      status: body.status,
+      realizedAmountMinor: body.realizedAmountMinor ?? null,
+      realizedProfitMinor: body.realizedProfitMinor ?? null,
+      daysToClose: body.daysToClose ?? null,
+      shippingCostMinor: body.shippingCostMinor ?? null,
+      currency: body.currency,
+      notes: body.notes ?? null,
     });
   }
 }

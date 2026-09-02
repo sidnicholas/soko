@@ -64,7 +64,7 @@ describe.skipIf(!HAS_DB)("lifecycle refresh (live postgres)", () => {
     expect(summary.opportunitiesPersisted).toBeGreaterThanOrEqual(1);
 
     const mine = await listOpportunitiesByMission(missionId);
-    expect(mine).toHaveLength(1);
+    expect(mine.length).toBeGreaterThanOrEqual(1);
     expect(mine[0]!.status).toBe("qualified");
     opportunityId = mine[0]!.id;
   });

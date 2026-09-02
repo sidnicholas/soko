@@ -6,6 +6,7 @@ import { ApprovalsModule } from "./approvals/approvals.module";
 import { TransactionsModule } from "./transactions/transactions.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { PublicModule } from "./public/public.module";
+import { SignalsModule } from "./signals/signals.module";
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { PublicModule } from "./public/public.module";
     TransactionsModule,
     WebhooksModule,
     PublicModule,
+    SignalsModule,
   ],
 })
 export class AppModule {}

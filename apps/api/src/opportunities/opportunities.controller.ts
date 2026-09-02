@@ -3,7 +3,12 @@ import { Controller, Get, Param, Post } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
 import { ZodBody } from "../common/zod-validation.pipe";
-import { RequestApprovalSchema, type RequestApprovalBody } from "./opportunity.dto";
+import {
+  RecordOutcomeSchema,
+  RequestApprovalSchema,
+  type RecordOutcomeBody,
+  type RequestApprovalBody,
+} from "./opportunity.dto";
 import { OpportunityService } from "./opportunity.service";
 
 @ApiTags("opportunities")
@@ -48,5 +53,16 @@ export class OpportunitiesController {
   ) {
     requirePermission(user, "approval:create");
     return this.opportunities.requestApproval(id, user, body);
+  }
+
+  @Post(":id/outcome")
+  @ApiOperation({ summary: "Record the realized outcome of an opportunity (learning loop)" })
+  recordOutcome(
+    @CurrentUser() user: Principal,
+    @Param("id") id: string,
+    @ZodBody(RecordOutcomeSchema) body: RecordOutcomeBody,
+  ) {
+    requirePermission(user, "outcome:record");
+    return this.opportunities.recordOutcome(id, body);
   }
 }

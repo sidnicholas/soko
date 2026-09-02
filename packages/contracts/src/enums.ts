@@ -118,3 +118,25 @@ export type NegotiationState = z.infer<typeof NegotiationState>;
 /** Mission-level autonomy ceiling. maySend is false by default in V1 (§7). */
 export const AutonomyPolicy = z.enum(["discover_only", "prepare_negotiation", "full_prepare"]);
 export type AutonomyPolicy = z.infer<typeof AutonomyPolicy>;
+
+/** Ingestion channel a raw signal arrived on (§ multi-channel discovery). */
+export const SignalChannel = z.enum([
+  "public_web",
+  "official_api",
+  "browser_extension",
+  "user_submitted",
+  "merchant_feed",
+  "request_mining",
+  "internal",
+]);
+export type SignalChannel = z.infer<typeof SignalChannel>;
+
+export const SignalKind = z.enum(["supply", "demand"]);
+export type SignalKind = z.infer<typeof SignalKind>;
+
+export const SignalStatus = z.enum(["captured", "resolved", "discarded"]);
+export type SignalStatus = z.infer<typeof SignalStatus>;
+
+/** Realized result of a pursued opportunity — the learning-loop record. */
+export const OutcomeStatus = z.enum(["won", "lost", "expired", "cancelled"]);
+export type OutcomeStatus = z.infer<typeof OutcomeStatus>;

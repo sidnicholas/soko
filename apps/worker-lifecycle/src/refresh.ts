@@ -4,7 +4,7 @@ import {
   expireOverdueDemands,
   markStaleSupplyUnavailable,
 } from "@opportunity-os/db";
-import { runDiscoveryCycle, projectMissionDemand } from "@opportunity-os/discovery";
+import { runDiscoveryCycle, projectMissionDemand, synthesizeOpportunities } from "@opportunity-os/discovery";
 import { createLogger } from "@opportunity-os/observability";
 
 const log = createLogger("worker-lifecycle:refresh");
@@ -15,6 +15,7 @@ export interface RefreshSummary {
   staleSupply: number;
   missionsSwept: number;
   opportunitiesPersisted: number;
+  synthesizedOpportunities: number;
 }
 
 /**
@@ -46,12 +47,17 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
     opportunitiesPersisted += result.opportunitiesPersisted;
   }
 
+  // Cross-source synthesis: match every open demand against all available
+  // supply, so opportunities arise from independent signals (no listing).
+  const synthesis = await synthesizeOpportunities();
+
   const summary: RefreshSummary = {
     expiredOpportunities,
     expiredDemands,
     staleSupply,
     missionsSwept: missions.length,
     opportunitiesPersisted,
+    synthesizedOpportunities: synthesis.opportunitiesPersisted,
   };
   log.info(summary, "lifecycle.refresh.cycle");
   return summary;

@@ -26,10 +26,12 @@ export type Permission =
   | "settlement:plan"
   | "settlement:execute"
   | "notification:deliver"
+  | "signal:submit"
+  | "outcome:record"
   | "audit:read";
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
-  user: ["mission:create", "mission:read", "mission:update", "mission:archive", "opportunity:read", "transaction:read"],
+  user: ["mission:create", "mission:read", "mission:update", "mission:archive", "opportunity:read", "transaction:read", "signal:submit"],
   operator: [
     "mission:read",
     "opportunity:read",
@@ -41,6 +43,8 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "transaction:propose",
     "settlement:plan",
     "audit:read",
+    "signal:submit",
+    "outcome:record",
   ],
   reviewer: ["mission:read", "opportunity:read", "approval:read", "approval:decide", "audit:read"],
   admin: [
@@ -60,10 +64,12 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "settlement:execute",
     "notification:deliver",
     "audit:read",
+    "signal:submit",
+    "outcome:record",
   ],
   service: ["settlement:execute", "audit:read"],
   // Agents may propose but never approve, send, or move money (§8, §13.5).
-  agent: ["opportunity:read", "opportunity:reverify", "approval:create", "negotiation:prepare"],
+  agent: ["opportunity:read", "opportunity:reverify", "approval:create", "negotiation:prepare", "signal:submit"],
 };
 
 export function permissionsFor(role: UserRole): readonly Permission[] {

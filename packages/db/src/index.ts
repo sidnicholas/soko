@@ -11,3 +11,6 @@ export * from "./repositories/approvals";
 export * from "./repositories/audit";
 export * from "./repositories/transactions";
 export * from "./repositories/negotiations";
+export * from "./repositories/signals";
+export * from "./repositories/market";
+export * from "./repositories/outcomes";
