@@ -11,7 +11,8 @@ import {
   entityPriceStats,
   entitySupplyAgg,
   isPgvectorBackend,
-  nearestEntitiesByVector,
+  buildSubstituteEdgesSql,
+  buildArbitrageEdgesSql,
 } from "@opportunity-os/db";
 import { embedTexts, cosineSimilarity } from "./embed";
 import { createLogger } from "@opportunity-os/observability";
@@ -117,10 +118,10 @@ export async function resolveEntities(opts: { supplyLimit?: number; demandLimit?
 const SUBSTITUTE_MIN_SIM = 0.6;
 const ARBITRAGE_MIN_SPREAD = 0.2;
 const BUNDLE_MIN_SELLERS = 2;
-
 export interface GraphEdgeResult {
   substitutes: number;
   arbitrage: number;
+  crossArbitrage: number;
   bundles: number;
 }
 
@@ -137,12 +138,7 @@ export async function buildGraphEdges(): Promise<GraphEdgeResult> {
   // Substitutes: pgvector nearest-neighbour (scale) or jsonb pairwise cosine.
   let substitutes = 0;
   if (isPgvectorBackend()) {
-    for (const e of entities) {
-      for (const near of await nearestEntitiesByVector(e.id, 10, SUBSTITUTE_MIN_SIM)) {
-        await upsertGraphEdge({ srcType: "entity", srcId: e.id, dstType: "entity", dstId: near.id, relation: "SUBSTITUTE_OF", weight: near.sim });
-        substitutes++;
-      }
-    }
+    substitutes = await buildSubstituteEdgesSql(SUBSTITUTE_MIN_SIM, 10);
   } else {
     const byCategory = new Map<string, typeof entities>();
     for (const e of entities) {
@@ -183,7 +179,11 @@ export async function buildGraphEdges(): Promise<GraphEdgeResult> {
     }
   }
 
-  const result: GraphEdgeResult = { substitutes, arbitrage, bundles };
+  // Cross-entity arbitrage (vector+price join): buy a cheap item, sell into a
+  // dearer substitute market. Reads SUBSTITUTE_OF edges built above.
+  const crossArbitrage = await buildArbitrageEdgesSql(ARBITRAGE_MIN_SPREAD);
+
+  const result: GraphEdgeResult = { substitutes, arbitrage, crossArbitrage, bundles };
   log.info(result, "discovery.graph.edges");
   return result;
 }

@@ -42,11 +42,14 @@ describe.skipIf(!HAS_DB)("market graph edges (live postgres)", () => {
 
     const edges = await listEdgesFrom("entity", entXm4);
     expect(edges.some((e) => e.relation === "SUBSTITUTE_OF" && e.dst_id === entXm5)).toBe(true);
-    expect(edges.some((e) => e.relation === "ARBITRAGE")).toBe(true);
     expect(edges.some((e) => e.relation === "BUNDLE_AVAILABLE")).toBe(true);
 
-    // The arbitrage edge weight is the price spread (max-min)/max = 0.5 here.
-    const arb = edges.find((e) => e.relation === "ARBITRAGE")!;
-    expect(Number(arb.weight)).toBeCloseTo(0.5, 6);
+    // Within-entity arbitrage: same item, two source prices (20000 vs 10000) -> spread 0.5.
+    const selfArb = edges.find((e) => e.relation === "ARBITRAGE" && e.dst_id === entXm4)!;
+    expect(Number(selfArb.weight)).toBeCloseTo(0.5, 6);
+
+    // Cross-entity arbitrage: buy XM4 (min 10000), sell into XM5 substitute (min 15000).
+    const crossArb = edges.find((e) => e.relation === "ARBITRAGE" && e.dst_id === entXm5)!;
+    expect(Number(crossArb.weight)).toBeCloseTo((15000 - 10000) / 15000, 4);
   });
 });

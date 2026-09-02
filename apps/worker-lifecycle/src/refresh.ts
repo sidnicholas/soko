@@ -25,6 +25,7 @@ export interface RefreshSummary {
   entitiesResolved: number;
   substituteEdges: number;
   arbitrageEntities: number;
+  crossArbitrageEdges: number;
   bundleEntities: number;
 }
 
@@ -75,6 +76,7 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
     entitiesResolved: entities.entitiesTouched,
     substituteEdges: graph.substitutes,
     arbitrageEntities: graph.arbitrage,
+    crossArbitrageEdges: graph.crossArbitrage,
     bundleEntities: graph.bundles,
   };
   log.info(summary, "lifecycle.refresh.cycle");

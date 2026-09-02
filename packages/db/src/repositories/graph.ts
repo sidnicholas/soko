@@ -140,6 +140,58 @@ export async function nearestEntitiesByVector(entityId: string, limit = 10, minS
   return result.rows.filter((r) => Number(r.sim) >= minSim).map((r) => ({ id: r.id, sim: Number(r.sim) }));
 }
 
+/**
+ * Build SUBSTITUTE_OF edges entirely in SQL: top-K nearest neighbours per
+ * entity via a LATERAL join on `<=>` (pgvector only). Returns rows affected.
+ */
+export async function buildSubstituteEdgesSql(minSim = 0.6, k = 10): Promise<number> {
+  const res = await sql<{ src_id: string }>`
+    insert into graph_edges (src_type, src_id, dst_type, dst_id, relation, weight)
+    select 'entity', e.id, 'entity', nn.id, 'SUBSTITUTE_OF', nn.sim
+    from entities e
+    cross join lateral (
+      select e2.id, 1 - (e.embedding_vec <=> e2.embedding_vec) as sim
+      from entities e2
+      where e2.id <> e.id and e2.category is not distinct from e.category and e2.embedding_vec is not null
+      order by e.embedding_vec <=> e2.embedding_vec asc
+      limit ${k}
+    ) nn
+    where e.embedding_vec is not null and nn.sim >= ${minSim}
+    on conflict (src_type, src_id, dst_type, dst_id, relation) do update set weight = excluded.weight
+    returning src_id
+  `.execute(getDb());
+  return res.rows.length;
+}
+
+/**
+ * Cross-entity arbitrage in SQL (vector + price join): for each SUBSTITUTE_OF
+ * edge, if the destination substitute's cheapest price exceeds the source's by
+ * >= minSpread, emit an ARBITRAGE edge src->dst (buy cheap, sell into the dearer
+ * substitute market), weight = spread. Backend-agnostic. Returns rows affected.
+ */
+export async function buildArbitrageEdgesSql(minSpread = 0.2): Promise<number> {
+  const res = await sql<{ src_id: string }>`
+    with prices as (
+      select entity_id, min(amount_minor) as min_price, max(currency) as currency
+      from price_observations group by entity_id
+    )
+    insert into graph_edges (src_type, src_id, dst_type, dst_id, relation, weight, metadata_json)
+    select 'entity', se.src_id, 'entity', se.dst_id, 'ARBITRAGE',
+           (dear.min_price - cheap.min_price)::float8 / dear.min_price,
+           jsonb_build_object('buyMinor', cheap.min_price, 'sellRefMinor', dear.min_price, 'currency', cheap.currency)
+    from graph_edges se
+    join prices cheap on cheap.entity_id = se.src_id
+    join prices dear on dear.entity_id = se.dst_id
+    where se.relation = 'SUBSTITUTE_OF' and se.src_type = 'entity'
+      and dear.min_price > 0
+      and (dear.min_price - cheap.min_price)::float8 / dear.min_price >= ${minSpread}
+    on conflict (src_type, src_id, dst_type, dst_id, relation)
+      do update set weight = excluded.weight, metadata_json = excluded.metadata_json
+    returning src_id
+  `.execute(getDb());
+  return res.rows.length;
+}
+
 export interface EntityEmbeddingRow {
   id: string;
   category: string | null;
