@@ -103,7 +103,10 @@ export interface MatchesTable {
 
 export interface OpportunitiesTable {
   id: Generated<string>;
-  match_id: string;
+  match_id: string | null;
+  kind: Generated<string>;
+  dedupe_key: string | null;
+  source_json: JsonNullable;
   status: string;
   transaction_role: string;
   expected_revenue: JsonNullable;

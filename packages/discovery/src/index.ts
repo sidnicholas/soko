@@ -4,3 +4,4 @@ export * from "./score";
 export * from "./synthesize";
 export * from "./entities";
 export * from "./embed";
+export * from "./deals";

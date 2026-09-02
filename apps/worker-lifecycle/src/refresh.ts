@@ -10,6 +10,7 @@ import {
   synthesizeOpportunities,
   resolveEntities,
   buildGraphEdges,
+  opportunitiesFromGraph,
 } from "@opportunity-os/discovery";
 import { createLogger } from "@opportunity-os/observability";
 
@@ -27,6 +28,8 @@ export interface RefreshSummary {
   arbitrageEntities: number;
   crossArbitrageEdges: number;
   bundleEntities: number;
+  arbitrageDeals: number;
+  bundleDeals: number;
 }
 
 /**
@@ -66,6 +69,9 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
   const entities = await resolveEntities();
   const graph = await buildGraphEdges();
 
+  // Surface graph edges as first-class deals (arbitrage/bundle) on the feed.
+  const deals = await opportunitiesFromGraph();
+
   const summary: RefreshSummary = {
     expiredOpportunities,
     expiredDemands,
@@ -78,6 +84,8 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
     arbitrageEntities: graph.arbitrage,
     crossArbitrageEdges: graph.crossArbitrage,
     bundleEntities: graph.bundles,
+    arbitrageDeals: deals.arbitrage,
+    bundleDeals: deals.bundle,
   };
   log.info(summary, "lifecycle.refresh.cycle");
   return summary;

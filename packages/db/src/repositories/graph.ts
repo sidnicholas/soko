@@ -192,6 +192,30 @@ export async function buildArbitrageEdgesSql(minSpread = 0.2): Promise<number> {
   return res.rows.length;
 }
 
+/** Cross-entity arbitrage edges (src != dst) with buy/sell metadata, for deal creation. */
+export async function listArbitrageEdges() {
+  return getDb()
+    .selectFrom("graph_edges as g")
+    .innerJoin("entities as se", "se.id", "g.src_id")
+    .innerJoin("entities as de", "de.id", "g.dst_id")
+    .where("g.relation", "=", "ARBITRAGE")
+    .where("g.src_type", "=", "entity")
+    .whereRef("g.src_id", "<>", "g.dst_id")
+    .select(["g.src_id as srcId", "g.dst_id as dstId", "se.title as srcTitle", "de.title as dstTitle", "g.weight as spread", "g.metadata_json as meta"])
+    .execute();
+}
+
+/** BUNDLE_AVAILABLE entities (aggregatable sellers), for deal creation. */
+export async function listBundleEntities() {
+  return getDb()
+    .selectFrom("graph_edges as g")
+    .innerJoin("entities as e", "e.id", "g.src_id")
+    .where("g.relation", "=", "BUNDLE_AVAILABLE")
+    .where("g.src_type", "=", "entity")
+    .select(["g.src_id as entityId", "e.title as title", "g.weight as sellerCount"])
+    .execute();
+}
+
 export interface EntityEmbeddingRow {
   id: string;
   category: string | null;
