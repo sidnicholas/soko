@@ -1,8 +1,8 @@
 # Opportunity OS — Project Memory (Implementation State)
 
-**Status:** V1 in active build — Phases 0–2 complete, Phase 3 (Native Money Rails) ~70% built, Phases 4–5 partial.
+**Status:** V1 in active build — Phases 0–2 complete, Phase 3 (Native Money Rails) ~85% built, Phases 4–5 partial.
 **Last updated:** 2026-09-02
-**HEAD:** `467f7d6` (origin/main, clean)
+**HEAD:** `9dfc3bb` (origin/main, clean) + uncommitted ST-11 refund/dispute execution (this session)
 **Purpose:** Living memory of *what actually exists in the codebase* and *what is next*. This supersedes the original concept-capture memory (`AI_Opportunity_Operating_System_Project_Memory.md`) for engineering purposes. Requirements live in `Opportunity_OS_TECHNICAL_REQUIREMENTS.md`; rationale lives in `docs/adr/`.
 
 ---
@@ -22,8 +22,8 @@ Monorepo: pnpm workspaces + Turborepo, TypeScript strict, ESM. Node via `.nvmrc`
 
 - **19 packages** (`packages/*`): `contracts`, `config`, `ids`-in-contracts, `domain`, `audit`, `auth`, `risk`, `scoring`, `demand`, `discovery`, `connectors-sdk`, `verifiers-sdk`, `escrow`, `settlement`, `chain`, `llm-gateway`, `observability`, `db`, `ui`.
 - **8 apps** (`apps/*`): `api` (NestJS/Fastify), `web` (Next.js), `worker-outbox`, `worker-connectors`, `worker-lifecycle`, `worker-temporal`, `worker-notifications`, `worker-agents`.
-- **10 SQL migrations** (`packages/db/migrations/0001`–`0010`), 22 tables, forward-only idempotent runner.
-- **30 ADRs** (`docs/adr/ADR-001`–`030`).
+- **11 SQL migrations** (`packages/db/migrations/0001`–`0011`), 22 tables, forward-only idempotent runner.
+- **31 ADRs** (`docs/adr/ADR-001`–`031`).
 - **CI**: GitHub Actions — typecheck + unit/integration (vitest) + a Postgres job running migrations (incl. idempotency) + a pgvector job.
 
 ### Package roles
@@ -75,6 +75,7 @@ Migrations:
 - `0008_graph_opportunities` — opportunities gain `kind`, nullable `match_id`, `dedupe_key`, `source_json`.
 - `0009_escrow` — `evidence` becomes append-only hash-chained ledger (verifier, trust_tier, predicate_type, prev/evidence_hash).
 - `0010_settlement_provider_ref` — `settlement_plans.provider_ref` (rail contract/intent reference).
+- `0011_settlement_dispute_refund` — `disputed_at`/`frozen_at`/`refunded_at` on plans, `disputed_at`/`refunded_at`/`external_refund_ref` on milestones, milestone status check widened to include `'refunded'`.
 
 ## 4. Event model
 
@@ -102,7 +103,7 @@ Monorepo, CI, typed config, Postgres/Supabase-portable, migrations + runner, dom
 - Notifications worker: real delivery loop (Telegram/email/log), marks notified once.
 - Temporal: durable Opportunity Execution Workflow requests a human gate, waits for the approval signal (bounded timeout), executes the gated proposal on approve; reject/timeout do nothing. Verified end-to-end against the time-skipping test server with real activities + Postgres.
 
-### Phase 3 — Native Money Rails 🟡 (~70%)
+### Phase 3 — Native Money Rails 🟡 (~85%)
 Built:
 - Rail-neutral settlement abstraction (`SettlementService` + `SettlementRail`), Stripe fiat rail (test/simulated), stablecoin rail, programmable-chain adapter (local/testnet reference).
 - **Escrow condition/release engine** (ADR-029): versioned AND/OR predicate DSL (`shipment_delivered`, `document_signed`, `gps_within_geofence`, `sensor_threshold`, `time_elapsed`, `milestone_attested`, `oracle_true`); pure `evaluateCondition` is the only authority for `MILESTONE_PENDING → MILESTONE_VERIFIED`; `decideRelease` policy (dispute→hold, deadman→auto_refund, auto below threshold, human approval above, optimistic window).
@@ -110,12 +111,13 @@ Built:
 - **Evidence ledger**: `evidence` table is append-only + hash-chained per entity; `verifyEvidenceChain` detects tampering.
 - **Settlement repos + API**: fund plan, add milestone, submit evidence (verify→ledger→evaluate→verify milestone), release (engine decides auto vs token-gated). Settles the transaction once all milestones release; every hop guarded by the state machine + audit chain.
 - **Rail execution** (ADR-030): release actually moves funds — authorize (`prepare`) at fund, capture/settle (`execute`) at release, rail selected by `plan.rail_family`, `provider_ref` + `external_transaction_ref` persisted. `SettlementService.execute` refuses an empty approval-token hash.
+- **Refund/dispute execution** (ADR-031, migration `0011`): `SettlementStatus` gains a terminal `REFUNDED`; `SETTLEMENT_TRANSITIONS` reaches it from any funds-held state. New db repo fns `disputeMilestone`/`freezeSettlementPlan`/`refundMilestone` (audit + outbox events `settlement.disputed.v1`/`settlement.frozen.v1`/`settlement.refunded.v1`); new endpoints `POST /settlement/milestones/:id/dispute`, `POST /settlement/plans/:id/freeze` (permission `settlement:dispute`, no token — they block money, don't move it), `POST /settlement/milestones/:id/refund` (permission `settlement:release` + approval token bound via new `hashRefundTerms`, a distinct action from `hashReleaseTerms`). `release()` now reads the plan's real DISPUTED/FROZEN state into `decideRelease` instead of a hardcoded `disputed: false`, and its `auto_refund` branch calls the rail's `refund()` (new optional `dispute?`/`freeze?` on `SettlementRail` too) instead of throwing.
 
 Remaining (Phase 3):
-1. Refund/dispute execution — wire `decideRelease` `auto_refund`/`hold` to real rail refund + `DISPUTED`/`FROZEN` state operations.
-2. Multi-party splits — populate `recipients` and execute multi-recipient payouts (rails already advertise `supportsMultiRecipient`).
-3. Persist optimistic/deadman windows on milestones + drive Temporal-durable release waits.
-4. Milestone/release UI.
+1. Multi-party splits — populate `recipients` and execute multi-recipient payouts (rails already advertise `supportsMultiRecipient`).
+2. Persist optimistic/deadman windows on milestones + drive Temporal-durable release waits — this is also what makes ST-11's `auto_refund` path fire automatically on a deadman timeout rather than only via the new manual refund endpoint.
+3. Milestone/release UI.
+4. Dispute *resolution* back to a releasable state isn't modeled yet — today a dispute only resolves via refund, not by clearing the flag and retrying release.
 
 ### Phase 4 — Public Demand Marketplace 🟡 (scaffolded)
 All 9 required screens exist as Next.js pages (home/search, missions/[id], opportunities, opportunities/[id], approvals, transactions/[id], payments, archive, settings) with a typed API client. Remaining: polish Search/Ask, mission history/archive depth, richer transaction timeline + payments views, sharing permissions, user↔agent steering.
@@ -148,13 +150,12 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 
 ## 9. ADR index
 
-001 TS monorepo · 002 Next.js FE · 003 NestJS/Fastify · 004 modular-first · 005 Postgres/Supabase SoR · 006 Temporal durable workflows · 007 transactional outbox · 008 central LLM gateway · 009 policy-enforced human approval · 010 rail-neutral settlement · 011 blockchain for settlement proofs only · 012 hash-chained audit · 013 Railway-first/AWS-portable · 014 permitted/authorized sources only · 015 deterministic final scoring · 016 V1 decision-packet defaults · 017 lifecycle worker drives V1 discovery · 018 demand parser LLM+heuristic · 019 approval tokens + synchronous execution · 020 LLM negotiation drafting · 021 durable approval-wait workflow · 022 signals→outcomes transaction-discovery network · 023 market graph + entity resolution · 024 embeddings + graph edges · 025 embedding provider · 026 pgvector backend · 027 graph-derived opportunities · 028 risk-gated channel adapters · 029 escrow condition/release engine · 030 rail execution.
+001 TS monorepo · 002 Next.js FE · 003 NestJS/Fastify · 004 modular-first · 005 Postgres/Supabase SoR · 006 Temporal durable workflows · 007 transactional outbox · 008 central LLM gateway · 009 policy-enforced human approval · 010 rail-neutral settlement · 011 blockchain for settlement proofs only · 012 hash-chained audit · 013 Railway-first/AWS-portable · 014 permitted/authorized sources only · 015 deterministic final scoring · 016 V1 decision-packet defaults · 017 lifecycle worker drives V1 discovery · 018 demand parser LLM+heuristic · 019 approval tokens + synchronous execution · 020 LLM negotiation drafting · 021 durable approval-wait workflow · 022 signals→outcomes transaction-discovery network · 023 market graph + entity resolution · 024 embeddings + graph edges · 025 embedding provider · 026 pgvector backend · 027 graph-derived opportunities · 028 risk-gated channel adapters · 029 escrow condition/release engine · 030 rail execution · 031 refund/dispute execution.
 
 ## 10. Immediate next options
 
 Ordered by leverage on the Transaction-OS thesis:
-1. **Refund/dispute execution** — closes the release engine's `auto_refund`/`hold` decisions with real rail refunds + dispute/freeze state ops.
-2. **Multi-party splits** — multi-recipient payouts (arbitrage/broker deals need this).
-3. **Persist optimistic/deadman + Temporal release waits** — durable, capital-efficient auto-release.
-4. **Phase 4 polish** — sharing permissions + user↔agent steering + richer timeline/payments views.
-5. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.
+1. **Multi-party splits** — multi-recipient payouts (arbitrage/broker deals need this).
+2. **Persist optimistic/deadman + Temporal release waits** — durable, capital-efficient auto-release; also makes ST-11's `auto_refund` path fire on a real deadman timeout instead of only via the manual refund endpoint.
+3. **Phase 4 polish** — sharing permissions + user↔agent steering + richer timeline/payments views.
+4. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.

@@ -15,3 +15,19 @@ export const ReleaseMilestoneSchema = z.object({
   externalTransactionRef: z.string().min(1).optional(),
 });
 export type ReleaseMilestoneBody = z.infer<typeof ReleaseMilestoneSchema>;
+
+export const DisputeMilestoneSchema = z.object({
+  reason: z.string().min(1),
+});
+export type DisputeMilestoneBody = z.infer<typeof DisputeMilestoneSchema>;
+
+export const FreezeSettlementPlanSchema = z.object({
+  reason: z.string().min(1),
+});
+export type FreezeSettlementPlanBody = z.infer<typeof FreezeSettlementPlanSchema>;
+
+export const RefundMilestoneSchema = z.object({
+  externalRefundRef: z.string().min(1).optional(),
+  reason: z.string().min(1),
+});
+export type RefundMilestoneBody = z.infer<typeof RefundMilestoneSchema>;

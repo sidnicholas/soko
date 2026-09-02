@@ -62,6 +62,7 @@ export const SettlementStatus = z.enum([
   "PARTIALLY_SETTLED",
   "DISPUTED",
   "FROZEN",
+  "REFUNDED",
   "SETTLED",
 ]);
 export type SettlementStatus = z.infer<typeof SettlementStatus>;

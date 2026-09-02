@@ -167,13 +167,13 @@ export class ProgrammableSettlementAdapter implements SettlementRail {
     return { status: "pending", externalRef: ref };
   }
 
-  dispute(reference: string): void {
+  async dispute(reference: string): Promise<void> {
     const c = this.require(reference);
     c.status = "DISPUTED";
     this.record(c, { reference, type: "disputed", at: now() });
   }
 
-  freeze(reference: string): void {
+  async freeze(reference: string): Promise<void> {
     const c = this.require(reference);
     c.status = "FROZEN";
     this.record(c, { reference, type: "frozen", at: now() });

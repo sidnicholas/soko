@@ -3,8 +3,14 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { ApprovalToken, CurrentUser, requirePermission, type Principal } from "../common/current-user";
 import { ZodBody } from "../common/zod-validation.pipe";
 import {
+  DisputeMilestoneSchema,
+  FreezeSettlementPlanSchema,
+  RefundMilestoneSchema,
   ReleaseMilestoneSchema,
   SubmitEvidenceSchema,
+  type DisputeMilestoneBody,
+  type FreezeSettlementPlanBody,
+  type RefundMilestoneBody,
   type ReleaseMilestoneBody,
   type SubmitEvidenceBody,
 } from "./settlement.dto";
@@ -50,5 +56,39 @@ export class SettlementController {
   ) {
     requirePermission(user, "settlement:release");
     return this.settlement.release(milestoneId, user, token, body);
+  }
+
+  @Post("milestones/:milestoneId/dispute")
+  @ApiOperation({ summary: "Dispute a milestone (blocks release; moves plan/milestone/transaction to DISPUTED)" })
+  dispute(
+    @CurrentUser() user: Principal,
+    @Param("milestoneId") milestoneId: string,
+    @ZodBody(DisputeMilestoneSchema) body: DisputeMilestoneBody,
+  ) {
+    requirePermission(user, "settlement:dispute");
+    return this.settlement.dispute(milestoneId, user, body);
+  }
+
+  @Post("plans/:planId/freeze")
+  @ApiOperation({ summary: "Freeze a settlement plan (refuses further release/refund until resolved)" })
+  freeze(
+    @CurrentUser() user: Principal,
+    @Param("planId") planId: string,
+    @ZodBody(FreezeSettlementPlanSchema) body: FreezeSettlementPlanBody,
+  ) {
+    requirePermission(user, "settlement:dispute");
+    return this.settlement.freeze(planId, user, body);
+  }
+
+  @Post("milestones/:milestoneId/refund")
+  @ApiOperation({ summary: "Refund a milestone on its rail (human approval token required, §13.5)" })
+  refund(
+    @CurrentUser() user: Principal,
+    @ApprovalToken() token: string | undefined,
+    @Param("milestoneId") milestoneId: string,
+    @ZodBody(RefundMilestoneSchema) body: RefundMilestoneBody,
+  ) {
+    requirePermission(user, "settlement:release");
+    return this.settlement.refund(milestoneId, user, token, body);
   }
 }

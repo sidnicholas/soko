@@ -62,6 +62,9 @@ export interface SettlementRail {
   execute(approved: ApprovedSettlement): Promise<ExecutionResult>;
   status(ref: string): Promise<ProviderSettlementStatus>;
   refund?(ref: string, amount: Money): Promise<RefundResult>;
+  /** Best-effort on-rail dispute/freeze signal; DISPUTED/FROZEN is authoritative in the domain state machine regardless (§20). */
+  dispute?(ref: string): Promise<void>;
+  freeze?(ref: string): Promise<void>;
 }
 
 /**

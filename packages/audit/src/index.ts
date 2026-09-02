@@ -37,6 +37,22 @@ export function hashReleaseTerms(terms: { milestoneId: string; amountMinor: numb
   );
 }
 
+/**
+ * Canonical hash of a milestone-refund command's terms (§14/§22, ST-11).
+ * Distinct action string from `hashReleaseTerms` so a release token can never
+ * authorize a refund or vice versa.
+ */
+export function hashRefundTerms(terms: { milestoneId: string; amountMinor: number; currency: string }): string {
+  return sha256Hex(
+    canonicalJson({
+      action: "refund_milestone",
+      milestoneId: terms.milestoneId,
+      amountMinor: terms.amountMinor,
+      currency: terms.currency,
+    }),
+  );
+}
+
 /** An audit event before the chain assigns its linking hashes. */
 export type AuditEventDraft = Omit<AuditEvent, "event_hash" | "previous_event_hash">;
 

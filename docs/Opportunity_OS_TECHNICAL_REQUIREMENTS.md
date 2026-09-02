@@ -1,6 +1,6 @@
 # Opportunity OS — V1 Technical Requirements
 
-**Version:** 1.1 (build-reflecting)
+**Version:** 1.2 (build-reflecting)
 **Status:** Living. Phases 0–2 satisfied; Phase 3 partial; Phases 4–5 partial.
 **Date:** 2026-09-02
 **Reads with:** `Opportunity_OS_PROJECT_MEMORY.md` (state), `Opportunity_OS_V1_Technical_Specification.md` (original spec, section numbers `§` referenced here), `docs/adr/*` (decisions).
@@ -112,9 +112,9 @@ Legend: **[DONE]** implemented + tested · **[PARTIAL]** implemented with named 
 - **ST-6** **Escrow condition engine**: versioned AND/OR predicate DSL; pure evaluator is the sole authority for MILESTONE_VERIFIED; minimum trust tier per leaf. **[DONE]** (ADR-029)
 - **ST-7** **Evidence ledger**: append-only, hash-chained per entity; verifier + trust tier + predicate recorded; `verifyEvidenceChain`. **[DONE]**
 - **ST-8** **Verifier adapters**: pluggable `EvidenceVerifier`; local attestation + deterministic e-signature references; production carrier/e-sign/oracle verifiers implement the same shape. **[DONE]**
-- **ST-9** **Release policy**: auto-release below threshold, human dual-control above (approval token bound via `hashReleaseTerms`), optimistic window, deadman auto-refund. **[DONE]** decision; **[PARTIAL]** effects (auto_refund/hold not yet executed on a rail).
+- **ST-9** **Release policy**: auto-release below threshold, human dual-control above (approval token bound via `hashReleaseTerms`), optimistic window, deadman auto-refund. **[DONE]** decision; effects now execute (ST-11) — deadman/optimistic windows themselves are still not persisted (ST-13).
 - **ST-10** **Rail execution on release**: prepare at fund, execute at release, `provider_ref` + `external_transaction_ref` persisted; execute refuses empty token hash; rail failure aborts DB release. **[DONE]** (ADR-030)
-- **ST-11** Refund/dispute execution: wire `auto_refund`/`hold` to rail refund + DISPUTED/FROZEN ops. **[TODO]**
+- **ST-11** Refund/dispute execution: wire `auto_refund`/`hold` to rail refund + DISPUTED/FROZEN ops. **[DONE]** (ADR-031: REFUNDED terminal status + migration 0011; `disputeMilestone`/`freezeSettlementPlan`/`refundMilestone` repos; `POST /settlement/milestones/:id/{dispute,refund}` + `POST /settlement/plans/:id/freeze`; `release()` reads real disputed state and executes refund on `auto_refund`. Automatic deadman-triggered refund still needs ST-13's persisted timestamps.)
 - **ST-12** Multi-party splits: populate `recipients` + execute multi-recipient payout. **[TODO]**
 - **ST-13** Async provider status reconciliation (outbox-driven) + idempotent execute for production rails. **[TODO]**
 - **ST-14** Off-chain/on-chain split: only hashes/attestations on-chain; PII + terms off-chain. **[DONE]** (`chain` anchor helpers)
@@ -177,18 +177,17 @@ Legend: **[DONE]** implemented + tested · **[PARTIAL]** implemented with named 
 - **Phase 0** Foundation — **MET.**
 - **Phase 1** Economic Nervous System — exit: real/test-source opportunities automatically enter the DB, match, score, refresh, and appear without manual hunting — **MET.**
 - **Phase 2** Human-Controlled Execution — exit: an approved command executes a binding proposal behind a cryptographic human gate with audit-backed execution, verified durably — **MET.**
-- **Phase 3** Native Money Rails — exit: a release moves funds on a selected rail behind the escrow engine + evidence ledger + release policy — **CORE MET (ST-1..ST-10, ST-14);** open: refund/dispute (ST-11), splits (ST-12), reconciliation (ST-13), durable settlement waits (WF-3), release UI (UI-4).
+- **Phase 3** Native Money Rails — exit: a release moves funds on a selected rail behind the escrow engine + evidence ledger + release policy — **CORE MET (ST-1..ST-11, ST-14);** open: splits (ST-12), reconciliation (ST-13), durable settlement waits (WF-3), release UI (UI-4).
 - **Phase 4** Public Demand Marketplace — exit: polished operator/user surface with sharing + steering. **PARTIAL** (screens scaffolded).
 - **Phase 5** Learning & Scale — exit: outcome-driven calibration + search/graph scale + increased policy-bounded automation. **TODO.**
 
 ## 21. Open requirement backlog (net-new, ordered)
 
-1. ST-11 Refund/dispute execution + DISPUTED/FROZEN ops.
-2. ST-12 Multi-party splits.
-3. ST-13 + WF-3 Async reconciliation + durable settlement waits; persist optimistic/deadman.
-4. UI-4 + UI-1/2/3 polish: milestone/release UI, sharing permissions, agent steering.
-5. R-4/R-5 Financial per-day accounting + full anti-gaming detectors.
-6. OB-1/OB-2 Telemetry surface + operator dashboards.
-7. G-5 Graph analytics at scale; SC/Phase-5 outcome-driven score calibration + connector-yield optimization; search index.
-8. AZ-1 Supabase JWT production auth; API-7 verified webhooks; API-9 generated client.
-9. DE-1/2/3 Infra hardening + retention + AWS templates.
+1. ST-12 Multi-party splits.
+2. ST-13 + WF-3 Async reconciliation + durable settlement waits; persist optimistic/deadman (unblocks automatic deadman-triggered refund via ST-11's now-wired execution path).
+3. UI-4 + UI-1/2/3 polish: milestone/release UI, sharing permissions, agent steering.
+4. R-4/R-5 Financial per-day accounting + full anti-gaming detectors.
+5. OB-1/OB-2 Telemetry surface + operator dashboards.
+6. G-5 Graph analytics at scale; SC/Phase-5 outcome-driven score calibration + connector-yield optimization; search index.
+7. AZ-1 Supabase JWT production auth; API-7 verified webhooks; API-9 generated client.
+8. DE-1/2/3 Infra hardening + retention + AWS templates.

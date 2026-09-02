@@ -372,3 +372,153 @@ export async function releaseMilestone(input: ReleaseMilestoneInput): Promise<Re
       return { planSettled: allReleased, transactionSettled };
     });
 }
+
+/** Move a transaction to `disputed` if it's in a state that legally allows it (§20). */
+async function markTransactionDisputed(tx: Tx, transactionId: string): Promise<void> {
+  const txn = await tx.selectFrom("transactions").selectAll().where("id", "=", transactionId).executeTakeFirst();
+  if (!txn) return;
+  const status = txn.status as TransactionStatus;
+  if (status === "funded" || status === "fulfilling") {
+    assertTransition("transaction", TRANSACTION_TRANSITIONS, status, "disputed");
+    await tx.updateTable("transactions").set({ status: "disputed" }).where("id", "=", transactionId).where("status", "=", status).execute();
+  }
+}
+
+export interface DisputeMilestoneInput {
+  milestoneId: string;
+  actorId: string;
+  reason: string;
+}
+
+/**
+ * Mark a milestone (and its plan + transaction) DISPUTED. Blocks release —
+ * `decideRelease` reads this back and returns "hold" (§escrow, §20).
+ */
+export async function disputeMilestone(input: DisputeMilestoneInput): Promise<{ settlementPlanId: string }> {
+  return getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const milestone = await tx
+        .selectFrom("settlement_milestones")
+        .selectAll()
+        .where("id", "=", input.milestoneId)
+        .executeTakeFirstOrThrow();
+      const plan = await planRow(tx, milestone.settlement_plan_id);
+      const now = new Date().toISOString();
+
+      await stepPlan(tx, plan.id, plan.status as SettlementStatus, "DISPUTED");
+      await tx.updateTable("settlement_plans").set({ disputed_at: now }).where("id", "=", plan.id).execute();
+      await tx
+        .updateTable("settlement_milestones")
+        .set({ status: "disputed", disputed_at: now })
+        .where("id", "=", input.milestoneId)
+        .execute();
+      await markTransactionDisputed(tx, plan.transaction_id);
+
+      await appendAuditEvent(tx, {
+        actorType: "operator",
+        actorId: input.actorId,
+        action: "settlement.disputed",
+        entityType: "settlement_milestone",
+        entityId: input.milestoneId,
+      });
+      await enqueueEvent(tx, {
+        eventName: "settlement.disputed.v1",
+        aggregateType: "settlement_milestone",
+        aggregateId: input.milestoneId,
+        idempotencyKey: `settlement.disputed:${input.milestoneId}`,
+        payload: { milestoneId: input.milestoneId, settlementPlanId: plan.id, reason: input.reason },
+      });
+      return { settlementPlanId: plan.id };
+    });
+}
+
+export interface FreezeSettlementPlanInput {
+  planId: string;
+  actorId: string;
+  reason: string;
+}
+
+/** Freeze a plan: refuses further release/refund on the rail until resolved (§20). */
+export async function freezeSettlementPlan(input: FreezeSettlementPlanInput): Promise<void> {
+  await getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const plan = await planRow(tx, input.planId);
+      const now = new Date().toISOString();
+
+      await stepPlan(tx, plan.id, plan.status as SettlementStatus, "FROZEN");
+      await tx.updateTable("settlement_plans").set({ frozen_at: now }).where("id", "=", plan.id).execute();
+
+      await appendAuditEvent(tx, {
+        actorType: "operator",
+        actorId: input.actorId,
+        action: "settlement.frozen",
+        entityType: "settlement_plan",
+        entityId: plan.id,
+      });
+      await enqueueEvent(tx, {
+        eventName: "settlement.frozen.v1",
+        aggregateType: "settlement_plan",
+        aggregateId: plan.id,
+        idempotencyKey: `settlement.frozen:${plan.id}`,
+        payload: { settlementPlanId: plan.id, reason: input.reason },
+      });
+    });
+}
+
+export interface RefundMilestoneInput {
+  milestoneId: string;
+  actorId: string;
+  externalRefundRef?: string | null;
+  reason: string;
+}
+
+/**
+ * Refund a milestone: the rail has already moved money back (or the caller
+ * verified nothing was ever captured); this persists REFUNDED on the plan +
+ * milestone and pushes the transaction toward `cancelled` (§20, §21).
+ */
+export async function refundMilestone(input: RefundMilestoneInput): Promise<void> {
+  await getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const milestone = await tx
+        .selectFrom("settlement_milestones")
+        .selectAll()
+        .where("id", "=", input.milestoneId)
+        .executeTakeFirstOrThrow();
+      const plan = await planRow(tx, milestone.settlement_plan_id);
+      const now = new Date().toISOString();
+
+      await stepPlan(tx, plan.id, plan.status as SettlementStatus, "REFUNDED");
+      await tx.updateTable("settlement_plans").set({ refunded_at: now }).where("id", "=", plan.id).execute();
+      await tx
+        .updateTable("settlement_milestones")
+        .set({ status: "refunded", refunded_at: now, external_refund_ref: input.externalRefundRef ?? null })
+        .where("id", "=", input.milestoneId)
+        .execute();
+
+      await markTransactionDisputed(tx, plan.transaction_id);
+      const txn = await tx.selectFrom("transactions").selectAll().where("id", "=", plan.transaction_id).executeTakeFirst();
+      if (txn && (txn.status as TransactionStatus) === "disputed") {
+        assertTransition("transaction", TRANSACTION_TRANSITIONS, "disputed", "cancelled");
+        await tx.updateTable("transactions").set({ status: "cancelled" }).where("id", "=", plan.transaction_id).where("status", "=", "disputed").execute();
+      }
+
+      await appendAuditEvent(tx, {
+        actorType: "operator",
+        actorId: input.actorId,
+        action: "settlement.refunded",
+        entityType: "settlement_milestone",
+        entityId: input.milestoneId,
+      });
+      await enqueueEvent(tx, {
+        eventName: "settlement.refunded.v1",
+        aggregateType: "settlement_milestone",
+        aggregateId: input.milestoneId,
+        idempotencyKey: `settlement.refunded:${input.milestoneId}`,
+        payload: { milestoneId: input.milestoneId, settlementPlanId: plan.id, reason: input.reason },
+      });
+    });
+}

@@ -197,6 +197,9 @@ export interface SettlementPlansTable {
   status: string;
   human_release_policy: string;
   provider_ref: string | null;
+  disputed_at: Timestamp | null;
+  frozen_at: Timestamp | null;
+  refunded_at: Timestamp | null;
   created_at: Timestamp;
 }
 
@@ -212,6 +215,9 @@ export interface SettlementMilestonesTable {
   approved_at: Timestamp | null;
   released_at: Timestamp | null;
   external_transaction_ref: string | null;
+  disputed_at: Timestamp | null;
+  refunded_at: Timestamp | null;
+  external_refund_ref: string | null;
 }
 
 export interface EvidenceTable {
