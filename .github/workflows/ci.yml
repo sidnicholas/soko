@@ -56,3 +56,38 @@ jobs:
         run: pnpm db:migrate
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/opportunity_os
+
+  pgvector:
+    name: pgvector (supabase-style)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: opportunity_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/opportunity_os
+      EMBEDDING_BACKEND: pgvector
+      EMBEDDING_DIM: "512"
+      PGVECTOR_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Apply migrations
+        run: pnpm db:migrate
+      - name: Bootstrap pgvector (extension + vector column + hnsw + backfill)
+        run: pnpm db:pgvector
+      - name: pgvector nearest-neighbour tests
+        run: pnpm exec vitest run tests/e2e/pgvector.test.ts

@@ -10,6 +10,8 @@ import {
   listEntityEmbeddings,
   entityPriceStats,
   entitySupplyAgg,
+  isPgvectorBackend,
+  nearestEntitiesByVector,
 } from "@opportunity-os/db";
 import { embedTexts, cosineSimilarity } from "./embed";
 import { createLogger } from "@opportunity-os/observability";
@@ -132,24 +134,32 @@ export interface GraphEdgeResult {
 export async function buildGraphEdges(): Promise<GraphEdgeResult> {
   const entities = await listEntityEmbeddings();
 
-  // Substitutes: pairwise cosine within a category.
-  const byCategory = new Map<string, typeof entities>();
-  for (const e of entities) {
-    const key = e.category ?? "uncategorized";
-    const group = byCategory.get(key);
-    if (group) group.push(e);
-    else byCategory.set(key, [e]);
-  }
-
+  // Substitutes: pgvector nearest-neighbour (scale) or jsonb pairwise cosine.
   let substitutes = 0;
-  for (const group of byCategory.values()) {
-    for (let i = 0; i < group.length; i++) {
-      for (let j = i + 1; j < group.length; j++) {
-        const sim = cosineSimilarity(group[i]!.embedding, group[j]!.embedding);
-        if (sim < SUBSTITUTE_MIN_SIM) continue;
-        await upsertGraphEdge({ srcType: "entity", srcId: group[i]!.id, dstType: "entity", dstId: group[j]!.id, relation: "SUBSTITUTE_OF", weight: sim });
-        await upsertGraphEdge({ srcType: "entity", srcId: group[j]!.id, dstType: "entity", dstId: group[i]!.id, relation: "SUBSTITUTE_OF", weight: sim });
-        substitutes += 2;
+  if (isPgvectorBackend()) {
+    for (const e of entities) {
+      for (const near of await nearestEntitiesByVector(e.id, 10, SUBSTITUTE_MIN_SIM)) {
+        await upsertGraphEdge({ srcType: "entity", srcId: e.id, dstType: "entity", dstId: near.id, relation: "SUBSTITUTE_OF", weight: near.sim });
+        substitutes++;
+      }
+    }
+  } else {
+    const byCategory = new Map<string, typeof entities>();
+    for (const e of entities) {
+      const key = e.category ?? "uncategorized";
+      const group = byCategory.get(key);
+      if (group) group.push(e);
+      else byCategory.set(key, [e]);
+    }
+    for (const group of byCategory.values()) {
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const sim = cosineSimilarity(group[i]!.embedding, group[j]!.embedding);
+          if (sim < SUBSTITUTE_MIN_SIM) continue;
+          await upsertGraphEdge({ srcType: "entity", srcId: group[i]!.id, dstType: "entity", dstId: group[j]!.id, relation: "SUBSTITUTE_OF", weight: sim });
+          await upsertGraphEdge({ srcType: "entity", srcId: group[j]!.id, dstType: "entity", dstId: group[i]!.id, relation: "SUBSTITUTE_OF", weight: sim });
+          substitutes += 2;
+        }
       }
     }
   }

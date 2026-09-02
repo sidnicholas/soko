@@ -27,6 +27,7 @@ const EnvSchema = z.object({
   EMBEDDING_PROVIDER: z.enum(["echo", "openai", "voyage"]).default("echo"),
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIM: z.coerce.number().int().positive().default(512),
+  EMBEDDING_BACKEND: z.enum(["jsonb", "pgvector"]).default("jsonb"),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -65,6 +66,7 @@ export interface AppConfig {
     embeddingProvider: "echo" | "openai" | "voyage";
     embeddingModel: string;
     embeddingDim: number;
+    embeddingBackend: "jsonb" | "pgvector";
   };
   settlement: {
     stripeSecretKey?: string;
@@ -107,6 +109,7 @@ function toConfig(env: Env): AppConfig {
       embeddingProvider: env.EMBEDDING_PROVIDER,
       embeddingModel: env.EMBEDDING_MODEL,
       embeddingDim: env.EMBEDDING_DIM,
+      embeddingBackend: env.EMBEDDING_BACKEND,
     },
     settlement: {
       stripeSecretKey: env.STRIPE_SECRET_KEY,

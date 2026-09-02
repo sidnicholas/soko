@@ -14,7 +14,8 @@
     "lint": "turbo run lint",
     "dev": "turbo run dev",
     "clean": "turbo run clean && rm -rf node_modules",
-    "db:migrate": "tsx packages/db/src/migrate.ts"
+    "db:migrate": "tsx packages/db/src/migrate.ts",
+    "db:pgvector": "tsx packages/db/src/pgvector.ts"
   },
   "devDependencies": {
     "@temporalio/testing": "1.23.0",

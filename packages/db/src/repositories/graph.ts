@@ -1,3 +1,5 @@
+import { sql } from "kysely";
+import { getConfig } from "@opportunity-os/config";
 import { getDb } from "../pool";
 
 /** Upsert a canonical entity by its deterministic key; returns its id. */
@@ -107,9 +109,35 @@ export async function entityPriceStats(entityId: string): Promise<EntityPriceSta
   };
 }
 
-/** Store an entity's embedding (jsonb float array; pgvector drop-in later). */
+/** True when the pgvector backend is active (vector column + <=> queries). */
+export function isPgvectorBackend(): boolean {
+  return getConfig().llm.embeddingBackend === "pgvector";
+}
+
+/**
+ * Store an entity's embedding. Always jsonb (portable); on the pgvector backend
+ * also writes the `vector` column so <=> nearest-neighbour works (ADR-026).
+ */
 export async function setEntityEmbedding(entityId: string, vector: number[]): Promise<void> {
+  if (isPgvectorBackend()) {
+    const literal = `[${vector.join(",")}]`;
+    await sql`update entities set embedding = ${JSON.stringify(vector)}::jsonb, embedding_vec = ${literal}::vector where id = ${entityId}`.execute(getDb());
+    return;
+  }
   await getDb().updateTable("entities").set({ embedding: JSON.stringify(vector) }).where("id", "=", entityId).execute();
+}
+
+/** pgvector nearest neighbours in the same category (cosine via `<=>`), ADR-026. */
+export async function nearestEntitiesByVector(entityId: string, limit = 10, minSim = 0.6): Promise<{ id: string; sim: number }[]> {
+  const result = await sql<{ id: string; sim: number }>`
+    select e2.id, 1 - (e1.embedding_vec <=> e2.embedding_vec) as sim
+    from entities e1
+    join entities e2 on e2.category is not distinct from e1.category and e2.id <> e1.id
+    where e1.id = ${entityId} and e1.embedding_vec is not null and e2.embedding_vec is not null
+    order by e1.embedding_vec <=> e2.embedding_vec asc
+    limit ${limit}
+  `.execute(getDb());
+  return result.rows.filter((r) => Number(r.sim) >= minSim).map((r) => ({ id: r.id, sim: Number(r.sim) }));
 }
 
 export interface EntityEmbeddingRow {
