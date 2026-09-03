@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import { sha256Hex, canonicalJson } from "@opportunity-os/audit";
-import { assertTransition, SETTLEMENT_TRANSITIONS, TRANSACTION_TRANSITIONS } from "@opportunity-os/domain";
-import type { EscrowCondition, EvidenceClaim, SettlementStatus, TransactionStatus } from "@opportunity-os/contracts";
+import { assertTransition, InvalidTransitionError, SETTLEMENT_TRANSITIONS, TRANSACTION_TRANSITIONS } from "@opportunity-os/domain";
+import type { EscrowCondition, EvidenceClaim, MilestoneRecipient, SettlementStatus, TransactionStatus } from "@opportunity-os/contracts";
 import { getDb } from "../pool";
 import { enqueueEvent } from "../outbox";
 import { appendAuditEvent } from "./audit";
@@ -37,6 +37,16 @@ export async function setSettlementPlanProviderRef(planId: string, providerRef: 
   await getDb().updateTable("settlement_plans").set({ provider_ref: providerRef }).where("id", "=", planId).execute();
 }
 
+/** For rails that can't phase-capture one plan-level reference (e.g. Stripe) — each milestone gets its own. */
+export async function setMilestoneProviderRef(milestoneId: string, providerRef: string): Promise<void> {
+  await getDb().updateTable("settlement_milestones").set({ provider_ref: providerRef }).where("id", "=", milestoneId).execute();
+}
+
+/** Webhook reconciliation correlates an inbound provider event back to our row by its reference (§ST-13). */
+export async function getMilestoneByProviderRef(providerRef: string) {
+  return getDb().selectFrom("settlement_milestones").selectAll().where("provider_ref", "=", providerRef).executeTakeFirst();
+}
+
 export async function listMilestones(planId: string) {
   return getDb()
     .selectFrom("settlement_milestones")
@@ -58,6 +68,11 @@ export interface AddMilestoneInput {
   requiredEvidence?: unknown[];
   /** The release-condition tree evaluated by the escrow engine. */
   releaseConditions: EscrowCondition;
+  /** ST-13 release-engine windows (ISO); both optional, independently settable. */
+  optimisticAfterAt?: string | null;
+  deadmanAt?: string | null;
+  /** ST-12 multi-party split; empty/omitted means the plan's single implicit recipient. */
+  recipients?: Omit<MilestoneRecipient, "externalRef">[];
 }
 
 export async function addMilestone(input: AddMilestoneInput): Promise<{ id: string }> {
@@ -74,6 +89,10 @@ export async function addMilestone(input: AddMilestoneInput): Promise<{ id: stri
       approved_at: null,
       released_at: null,
       external_transaction_ref: null,
+      optimistic_after_at: input.optimisticAfterAt ?? null,
+      deadman_at: input.deadmanAt ?? null,
+      recipients_json: JSON.stringify(input.recipients ?? []),
+      provider_ref: null,
     })
     .returning(["id"])
     .executeTakeFirstOrThrow();
@@ -294,6 +313,8 @@ export interface ReleaseMilestoneInput {
   actorId: string;
   externalTransactionRef?: string | null;
   reason: string;
+  /** ST-12: executed recipients (with their rail-assigned externalRef), if this release split. */
+  executedRecipients?: MilestoneRecipient[];
 }
 
 export interface ReleaseMilestoneResult {
@@ -333,6 +354,7 @@ export async function releaseMilestone(input: ReleaseMilestoneInput): Promise<Re
           status: "released",
           released_at: new Date().toISOString(),
           external_transaction_ref: input.externalTransactionRef ?? null,
+          ...(input.executedRecipients ? { recipients_json: JSON.stringify(input.executedRecipients) } : {}),
         })
         .where("id", "=", input.milestoneId)
         .where("status", "=", "verified")
@@ -405,12 +427,17 @@ export async function disputeMilestone(input: DisputeMilestoneInput): Promise<{ 
         .executeTakeFirstOrThrow();
       const plan = await planRow(tx, milestone.settlement_plan_id);
       const now = new Date().toISOString();
+      const preDisputePlanStatus = plan.status as SettlementStatus;
 
-      await stepPlan(tx, plan.id, plan.status as SettlementStatus, "DISPUTED");
-      await tx.updateTable("settlement_plans").set({ disputed_at: now }).where("id", "=", plan.id).execute();
+      await stepPlan(tx, plan.id, preDisputePlanStatus, "DISPUTED");
+      await tx
+        .updateTable("settlement_plans")
+        .set({ disputed_at: now, pre_dispute_status: preDisputePlanStatus })
+        .where("id", "=", plan.id)
+        .execute();
       await tx
         .updateTable("settlement_milestones")
-        .set({ status: "disputed", disputed_at: now })
+        .set({ status: "disputed", disputed_at: now, pre_dispute_status: milestone.status })
         .where("id", "=", input.milestoneId)
         .execute();
       await markTransactionDisputed(tx, plan.transaction_id);
@@ -446,9 +473,14 @@ export async function freezeSettlementPlan(input: FreezeSettlementPlanInput): Pr
     .execute(async (tx) => {
       const plan = await planRow(tx, input.planId);
       const now = new Date().toISOString();
+      const preFreezeStatus = plan.status as SettlementStatus;
 
-      await stepPlan(tx, plan.id, plan.status as SettlementStatus, "FROZEN");
-      await tx.updateTable("settlement_plans").set({ frozen_at: now }).where("id", "=", plan.id).execute();
+      await stepPlan(tx, plan.id, preFreezeStatus, "FROZEN");
+      await tx
+        .updateTable("settlement_plans")
+        .set({ frozen_at: now, pre_freeze_status: preFreezeStatus })
+        .where("id", "=", plan.id)
+        .execute();
 
       await appendAuditEvent(tx, {
         actorType: "operator",
@@ -463,6 +495,106 @@ export async function freezeSettlementPlan(input: FreezeSettlementPlanInput): Pr
         aggregateId: plan.id,
         idempotencyKey: `settlement.frozen:${plan.id}`,
         payload: { settlementPlanId: plan.id, reason: input.reason },
+      });
+    });
+}
+
+export interface ResolveDisputeInput {
+  milestoneId: string;
+  actorId: string;
+  reason: string;
+}
+
+/**
+ * Resolve a dispute without refunding: restore the plan and milestone to
+ * whatever status they were disputed from (`pre_dispute_status`), so release
+ * can be retried normally. The reverse `DISPUTED -> <prior status>` edges live
+ * in `SETTLEMENT_TRANSITIONS` alongside the forward ones (§20 follow-up).
+ */
+export async function resolveDispute(input: ResolveDisputeInput): Promise<{ settlementPlanId: string }> {
+  return getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const milestone = await tx
+        .selectFrom("settlement_milestones")
+        .selectAll()
+        .where("id", "=", input.milestoneId)
+        .executeTakeFirstOrThrow();
+      const plan = await planRow(tx, milestone.settlement_plan_id);
+      if (milestone.status !== "disputed" || plan.status !== "DISPUTED" || !plan.pre_dispute_status) {
+        throw new InvalidTransitionError("settlement_milestone_dispute", milestone.status, "resolved");
+      }
+      const restoredPlanStatus = plan.pre_dispute_status as SettlementStatus;
+      const restoredMilestoneStatus = milestone.pre_dispute_status ?? "pending";
+
+      await stepPlan(tx, plan.id, plan.status as SettlementStatus, restoredPlanStatus);
+      await tx
+        .updateTable("settlement_plans")
+        .set({ pre_dispute_status: null })
+        .where("id", "=", plan.id)
+        .execute();
+      await tx
+        .updateTable("settlement_milestones")
+        .set({ status: restoredMilestoneStatus, pre_dispute_status: null })
+        .where("id", "=", input.milestoneId)
+        .where("status", "=", "disputed")
+        .execute();
+
+      await appendAuditEvent(tx, {
+        actorType: "operator",
+        actorId: input.actorId,
+        action: "settlement.dispute_resolved",
+        entityType: "settlement_milestone",
+        entityId: input.milestoneId,
+      });
+      await enqueueEvent(tx, {
+        eventName: "settlement.dispute_resolved.v1",
+        aggregateType: "settlement_milestone",
+        aggregateId: input.milestoneId,
+        idempotencyKey: `settlement.dispute_resolved:${input.milestoneId}`,
+        payload: { milestoneId: input.milestoneId, settlementPlanId: plan.id, reason: input.reason, restoredStatus: restoredPlanStatus },
+      });
+      return { settlementPlanId: plan.id };
+    });
+}
+
+export interface UnfreezeSettlementPlanInput {
+  planId: string;
+  actorId: string;
+  reason: string;
+}
+
+/** Undo `freezeSettlementPlan`: restore whatever status the plan was frozen from (§20 follow-up). */
+export async function unfreezeSettlementPlan(input: UnfreezeSettlementPlanInput): Promise<void> {
+  await getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const plan = await planRow(tx, input.planId);
+      if (plan.status !== "FROZEN" || !plan.pre_freeze_status) {
+        throw new InvalidTransitionError("settlement_plan_freeze", plan.status, "resolved");
+      }
+      const restoredStatus = plan.pre_freeze_status as SettlementStatus;
+
+      await stepPlan(tx, plan.id, plan.status as SettlementStatus, restoredStatus);
+      await tx
+        .updateTable("settlement_plans")
+        .set({ pre_freeze_status: null })
+        .where("id", "=", plan.id)
+        .execute();
+
+      await appendAuditEvent(tx, {
+        actorType: "operator",
+        actorId: input.actorId,
+        action: "settlement.unfrozen",
+        entityType: "settlement_plan",
+        entityId: plan.id,
+      });
+      await enqueueEvent(tx, {
+        eventName: "settlement.unfrozen.v1",
+        aggregateType: "settlement_plan",
+        aggregateId: plan.id,
+        idempotencyKey: `settlement.unfrozen:${plan.id}`,
+        payload: { settlementPlanId: plan.id, reason: input.reason, restoredStatus },
       });
     });
 }

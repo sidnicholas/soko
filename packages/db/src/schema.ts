@@ -27,6 +27,7 @@ export interface MissionsTable {
   created_at: Timestamp;
   updated_at: Timestamp;
   archived_at: Timestamp | null;
+  temporal_workflow_id: string | null;
 }
 
 export interface MissionVersionsTable {
@@ -200,6 +201,8 @@ export interface SettlementPlansTable {
   disputed_at: Timestamp | null;
   frozen_at: Timestamp | null;
   refunded_at: Timestamp | null;
+  pre_dispute_status: string | null;
+  pre_freeze_status: string | null;
   created_at: Timestamp;
 }
 
@@ -218,6 +221,11 @@ export interface SettlementMilestonesTable {
   disputed_at: Timestamp | null;
   refunded_at: Timestamp | null;
   external_refund_ref: string | null;
+  pre_dispute_status: string | null;
+  optimistic_after_at: Timestamp | null;
+  deadman_at: Timestamp | null;
+  recipients_json: Json;
+  provider_ref: string | null;
 }
 
 export interface EvidenceTable {

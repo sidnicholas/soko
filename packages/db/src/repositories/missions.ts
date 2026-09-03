@@ -89,3 +89,12 @@ export async function setMissionStatus(id: string, status: string): Promise<void
     .where("id", "=", id)
     .execute();
 }
+
+/**
+ * Record the durable discovery workflow driving this mission (or clear it with
+ * `null`) — `listActiveMissionsForDiscovery` excludes missions with one set, so
+ * the Temporal-driven and worker-lifecycle-driven schedulers never overlap.
+ */
+export async function setMissionTemporalWorkflowId(id: string, workflowId: string | null): Promise<void> {
+  await getDb().updateTable("missions").set({ temporal_workflow_id: workflowId }).where("id", "=", id).execute();
+}

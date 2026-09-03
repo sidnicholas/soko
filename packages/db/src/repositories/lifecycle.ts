@@ -9,13 +9,17 @@ export interface ActiveMissionForDiscovery {
 
 /**
  * Active missions paired with their current immutable demand_spec — the input
- * set the scheduler re-drives discovery over each sweep (§11.1(10)).
+ * set the scheduler re-drives discovery over each sweep (§11.1(10)). Excludes
+ * missions with a running `missionDiscoveryWorkflow` (`temporal_workflow_id`
+ * set) so the durable, per-mission Temporal path and this global sweep never
+ * double-drive the same mission.
  */
 export async function listActiveMissionsForDiscovery(): Promise<ActiveMissionForDiscovery[]> {
   const rows = await getDb()
     .selectFrom("missions as m")
     .innerJoin("mission_versions as v", "v.id", "m.current_version_id")
     .where("m.status", "=", "active")
+    .where("m.temporal_workflow_id", "is", null)
     .select(["m.id as missionId", "v.demand_spec_json as demandSpec"])
     .execute();
   // demand_spec_json was persisted from a validated DemandSpecification (§6.3).

@@ -3,6 +3,7 @@ import { zId, zIso, zHash } from "./ids";
 import { Money } from "./money";
 import { GeoPoint, GeoLocation } from "./geo";
 import { Constraint, DemandSpecification } from "./demand-spec";
+import { EscrowPredicateType } from "./escrow";
 import {
   UserRole,
   UserStatus,
@@ -241,6 +242,23 @@ export const SettlementPlan = z.object({
 });
 export type SettlementPlan = z.infer<typeof SettlementPlan>;
 
+/**
+ * ST-12 — one payout split on a milestone. `address` is rail-specific (a
+ * connected-account id, a wallet address, ...); percentages are relative to
+ * the milestone's own resolved amount, not the plan total.
+ */
+export const MilestoneRecipient = z.object({
+  address: z.string().min(1),
+  amount: z.object({
+    kind: z.enum(["amount", "percentage"]),
+    value: z.number(),
+  }),
+  counterpartyId: zId.nullable().default(null),
+  /** Set once the rail executes this recipient's payout (§19/§29). */
+  externalRef: z.string().nullable().default(null),
+});
+export type MilestoneRecipient = z.infer<typeof MilestoneRecipient>;
+
 /** §6.13 */
 export const SettlementMilestone = z.object({
   id: zId,
@@ -253,14 +271,28 @@ export const SettlementMilestone = z.object({
   }),
   required_evidence_json: z.array(z.record(z.unknown())).default([]),
   release_conditions_json: z.record(z.unknown()).default({}),
-  status: z.enum(["pending", "verified", "released", "disputed"]),
+  status: z.enum(["pending", "verified", "released", "disputed", "refunded"]),
   approved_at: zIso.nullable(),
   released_at: zIso.nullable(),
   external_transaction_ref: z.string().nullable(),
+  /** Release engine windows (ST-13): after this instant, release even without full evidence. */
+  optimistic_after_at: zIso.nullable().default(null),
+  /** After this instant with conditions still unmet, auto-refund the buyer. */
+  deadman_at: zIso.nullable().default(null),
+  /** ST-12 multi-party splits; empty means the plan's single implicit recipient. */
+  recipients_json: z.array(MilestoneRecipient).default([]),
+  /** This milestone's own rail reference, for rails that can't phase-capture one plan-level reference (e.g. Stripe). */
+  provider_ref: z.string().nullable().default(null),
 });
 export type SettlementMilestone = z.infer<typeof SettlementMilestone>;
 
-/** §6.14 — captured provenance for every observation/decision. */
+/**
+ * §6.14/§21 — captured provenance for every observation/decision. Migration
+ * 0009 turned this into an append-only, hash-chained ledger per (entity_type,
+ * entity_id): `verifier`/`trust_tier`/`predicate_type` record what a claim
+ * attests, `previous_evidence_hash`/`evidence_hash` chain it (null on rows
+ * predating that migration, or non-escrow evidence that never chains).
+ */
 export const Evidence = z.object({
   id: zId,
   entity_type: z.string(),
@@ -271,6 +303,12 @@ export const Evidence = z.object({
   captured_at: zIso,
   expires_at: zIso.nullable(),
   metadata_json: z.record(z.unknown()).default({}),
+  verifier: z.string().nullable().default(null),
+  trust_tier: TrustTier.nullable().default(null),
+  predicate_type: EscrowPredicateType.nullable().default(null),
+  satisfies_json: z.record(z.unknown()).default({}),
+  previous_evidence_hash: z.string().nullable().default(null),
+  evidence_hash: z.string().nullable().default(null),
 });
 export type Evidence = z.infer<typeof Evidence>;
 

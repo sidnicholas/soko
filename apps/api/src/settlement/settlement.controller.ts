@@ -3,16 +3,22 @@ import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { ApprovalToken, CurrentUser, requirePermission, type Principal } from "../common/current-user";
 import { ZodBody } from "../common/zod-validation.pipe";
 import {
+  CreateMilestoneSchema,
   DisputeMilestoneSchema,
   FreezeSettlementPlanSchema,
   RefundMilestoneSchema,
   ReleaseMilestoneSchema,
+  ResolveDisputeSchema,
   SubmitEvidenceSchema,
+  UnfreezeSettlementPlanSchema,
+  type CreateMilestoneBody,
   type DisputeMilestoneBody,
   type FreezeSettlementPlanBody,
   type RefundMilestoneBody,
   type ReleaseMilestoneBody,
+  type ResolveDisputeBody,
   type SubmitEvidenceBody,
+  type UnfreezeSettlementPlanBody,
 } from "./settlement.dto";
 import { SettlementService } from "./settlement.service";
 
@@ -26,6 +32,17 @@ export class SettlementController {
   fund(@CurrentUser() user: Principal, @Param("planId") planId: string) {
     requirePermission(user, "settlement:plan");
     return this.settlement.fund(planId, user);
+  }
+
+  @Post("plans/:planId/milestones")
+  @ApiOperation({ summary: "Create a milestone under a plan, optionally with ST-13 optimistic/deadman release windows" })
+  createMilestone(
+    @CurrentUser() user: Principal,
+    @Param("planId") planId: string,
+    @ZodBody(CreateMilestoneSchema) body: CreateMilestoneBody,
+  ) {
+    requirePermission(user, "settlement:plan");
+    return this.settlement.createMilestone(planId, body);
   }
 
   @Post("milestones/:milestoneId/evidence")
@@ -78,6 +95,28 @@ export class SettlementController {
   ) {
     requirePermission(user, "settlement:dispute");
     return this.settlement.freeze(planId, user, body);
+  }
+
+  @Post("milestones/:milestoneId/resolve-dispute")
+  @ApiOperation({ summary: "Resolve a dispute without refunding: restore the plan/milestone to their pre-dispute status" })
+  resolveDispute(
+    @CurrentUser() user: Principal,
+    @Param("milestoneId") milestoneId: string,
+    @ZodBody(ResolveDisputeSchema) body: ResolveDisputeBody,
+  ) {
+    requirePermission(user, "settlement:dispute");
+    return this.settlement.resolveDispute(milestoneId, user, body);
+  }
+
+  @Post("plans/:planId/unfreeze")
+  @ApiOperation({ summary: "Undo a freeze: restore the plan to its pre-freeze status" })
+  unfreeze(
+    @CurrentUser() user: Principal,
+    @Param("planId") planId: string,
+    @ZodBody(UnfreezeSettlementPlanSchema) body: UnfreezeSettlementPlanBody,
+  ) {
+    requirePermission(user, "settlement:dispute");
+    return this.settlement.unfreeze(planId, user, body);
   }
 
   @Post("milestones/:milestoneId/refund")

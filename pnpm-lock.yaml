@@ -147,6 +147,9 @@ importers:
       '@opportunity-os/demand':
         specifier: workspace:*
         version: link:../../packages/demand
+      '@opportunity-os/discovery':
+        specifier: workspace:*
+        version: link:../../packages/discovery
       '@opportunity-os/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -174,6 +177,9 @@ importers:
       '@opportunity-os/verifiers-sdk':
         specifier: workspace:*
         version: link:../../packages/verifiers-sdk
+      '@temporalio/client':
+        specifier: ^1.11.5
+        version: 1.23.0
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
@@ -183,6 +189,9 @@ importers:
       rxjs:
         specifier: ^7.8.1
         version: 7.8.2
+      stripe:
+        specifier: ^17.3.1
+        version: 17.7.0
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -325,6 +334,9 @@ importers:
       '@opportunity-os/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@opportunity-os/chain':
+        specifier: workspace:*
+        version: link:../../packages/chain
       '@opportunity-os/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -340,9 +352,15 @@ importers:
       '@opportunity-os/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@opportunity-os/escrow':
+        specifier: workspace:*
+        version: link:../../packages/escrow
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@opportunity-os/settlement':
+        specifier: workspace:*
+        version: link:../../packages/settlement
       '@temporalio/activity':
         specifier: ^1.11.5
         version: 1.23.0

@@ -6,6 +6,7 @@ import type { ApprovalDecision, ApprovalStatus, EventName } from "@opportunity-o
 import type { Principal } from "../common/current-user";
 import { requirePermission } from "../common/current-user";
 import type { ApprovalDecisionBody, DecisionKind } from "./approval.dto";
+import { signalOpportunityExecutionDecision } from "../opportunities/temporal";
 
 interface DecisionOutcome {
   status: ApprovalStatus;
@@ -69,7 +70,20 @@ export class ApprovalService {
       },
     });
 
-    if (outcome.decision === "reject") return { approval: updated };
+    // Best-effort: if this approval is driving a durable opportunityExecutionWorkflow
+    // (started via `executeDurable` instead of the direct `requestApproval` path),
+    // deliver the decision — with the token already attached, in one signal, so
+    // the workflow's single wait resolves with everything it needs — so it can
+    // proceed instead of waiting out its timeout. A no-op for the default
+    // (non-durable) path: there is no workflow to find.
+    const isOpportunityExecution = updated.action_type === "propose_transaction" && updated.entity_type === "opportunity";
+
+    if (outcome.decision === "reject") {
+      if (isOpportunityExecution) {
+        await signalOpportunityExecutionDecision(updated.entity_id, { approved: false, decidedBy: principal.userId });
+      }
+      return { approval: updated };
+    }
 
     const cfg = getConfig();
     const approval_token = mintApprovalToken(cfg.security.approvalTokenSecret, {
@@ -80,6 +94,13 @@ export class ApprovalService {
       payloadHash: updated.payload_hash,
       expiresAt: new Date(Date.now() + cfg.policy.approvalTimeoutMinutes * 60_000).toISOString(),
     });
+    if (isOpportunityExecution) {
+      await signalOpportunityExecutionDecision(updated.entity_id, {
+        approved: true,
+        token: approval_token,
+        decidedBy: principal.userId,
+      });
+    }
     return { approval: updated, approval_token };
   }
 }

@@ -1,6 +1,8 @@
 import { Inject } from "@nestjs/common";
-import { Body, Controller, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Headers, Param, Post, Req } from "@nestjs/common";
+import type { RawBodyRequest } from "@nestjs/common";
 import { ApiExcludeController } from "@nestjs/swagger";
+import type { FastifyRequest } from "fastify";
 import { WebhooksService } from "./webhooks.service";
 
 /** External provider callbacks; excluded from the public OpenAPI doc. */
@@ -12,9 +14,9 @@ export class WebhooksController {
   @Post("stripe")
   stripe(
     @Headers("stripe-signature") signature: string | undefined,
-    @Body() body: Record<string, unknown>,
+    @Req() req: RawBodyRequest<FastifyRequest>,
   ) {
-    return this.webhooks.handleStripe(signature, body ?? {});
+    return this.webhooks.handleStripe(signature, req.rawBody);
   }
 
   @Post("telegram")

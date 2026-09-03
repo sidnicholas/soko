@@ -12,6 +12,11 @@ const { requestApprovalActivity, executeProposalActivity } = proxyActivities<typ
   retry: { maximumAttempts: 3 },
 });
 
+const { checkMilestoneTimerActivity } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "1 minute",
+  retry: { maximumAttempts: 3 },
+});
+
 export interface MissionDiscoveryInput extends DiscoveryInput {
   refreshIntervalMinutes: number;
   maxCycles?: number;
@@ -110,4 +115,39 @@ export async function opportunityExecutionWorkflow(input: OpportunityExecutionIn
     token: decision!.token ?? "",
   });
   return { status: "executed", approvalId, transactionId };
+}
+
+export interface SettlementMilestoneTimerInput {
+  milestoneId: string;
+}
+
+export interface SettlementMilestoneTimerResult {
+  action: "none" | "held" | "refunded" | "released";
+}
+
+/**
+ * §20/ST-13 Settlement Milestone Timer Workflow — the durable half of the
+ * release engine's optimistic/deadman windows (packages/escrow/src/release.ts).
+ * Sleeps to the next relevant instant, re-checks real state, and acts
+ * (auto-refund on deadman, auto-release on an elapsed optimistic window below
+ * threshold); a disputed plan or an above-threshold optimistic release needs a
+ * human, so the workflow reports "held" and stops rather than guessing (§13.5).
+ */
+export async function settlementMilestoneTimerWorkflow(
+  input: SettlementMilestoneTimerInput,
+): Promise<SettlementMilestoneTimerResult> {
+  for (;;) {
+    const result = await checkMilestoneTimerActivity(input.milestoneId);
+    if (result.action !== "waiting") return { action: result.action };
+
+    const now = Date.now();
+    const nextWakeMs = [result.optimisticAfterIso, result.deadmanAtIso]
+      .filter((iso): iso is string => Boolean(iso))
+      .map((iso) => new Date(iso).getTime())
+      .filter((t) => t > now)
+      .reduce((min, t) => Math.min(min, t), Infinity);
+    if (!Number.isFinite(nextWakeMs)) return { action: "none" };
+
+    await sleep(nextWakeMs - now);
+  }
 }

@@ -1,6 +1,6 @@
 import { Client, Connection } from "@temporalio/client";
 import { getConfig } from "@opportunity-os/config";
-import type { ApprovalDecisionSignal, OpportunityExecutionInput } from "./workflows";
+import type { ApprovalDecisionSignal, OpportunityExecutionInput, SettlementMilestoneTimerInput } from "./workflows";
 
 let client: Client | undefined;
 
@@ -34,4 +34,23 @@ export async function startOpportunityExecution(input: OpportunityExecutionInput
 export async function signalApprovalDecision(workflowId: string, decision: ApprovalDecisionSignal): Promise<void> {
   const c = await getTemporalClient();
   await c.workflow.getHandle(workflowId).signal("approval", decision);
+}
+
+/**
+ * Start the durable settlement-timer workflow for a milestone (§20/ST-13).
+ * Deterministic workflow id per milestone so a duplicate start is a no-op
+ * collision. Not yet wired into a live request path — same status as
+ * `startOpportunityExecution` above, verified via scripts/verify-*.ts against
+ * the Temporal time-skipping test server.
+ */
+export async function startSettlementMilestoneTimer(input: SettlementMilestoneTimerInput): Promise<string> {
+  const cfg = getConfig();
+  const c = await getTemporalClient();
+  const workflowId = `settlement-timer:${input.milestoneId}`;
+  await c.workflow.start("settlementMilestoneTimerWorkflow", {
+    taskQueue: cfg.temporal.taskQueue,
+    workflowId,
+    args: [input],
+  });
+  return workflowId;
 }

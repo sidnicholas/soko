@@ -33,6 +33,8 @@ export const EVENT_NAMES = [
   "settlement.disputed.v1",
   "settlement.frozen.v1",
   "settlement.refunded.v1",
+  "settlement.dispute_resolved.v1",
+  "settlement.unfrozen.v1",
   "fulfillment.started.v1",
   "fulfillment.completed.v1",
   "transaction.disputed.v1",

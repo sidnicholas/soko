@@ -7,6 +7,7 @@ import type {
   SettlementPlan,
   SettlementMilestone,
   AuditEvent,
+  Evidence,
   Negotiation,
   DemandSpecification,
   AutonomyPolicy,
@@ -53,6 +54,29 @@ export interface UpdateMissionInput {
   demand_spec?: DemandSpecification;
 }
 
+/** Body for POST /settlement/plans/:planId/milestones — see `CreateMilestoneSchema` (§20, ST-12/ST-13). */
+export interface CreateMilestoneInput {
+  sequence: number;
+  name: string;
+  amount: { kind: "amount" | "percentage"; value: number };
+  releaseConditions: Record<string, unknown>;
+  requiredEvidence?: unknown[];
+  optimisticAfterAt?: string;
+  deadmanAt?: string;
+  recipients?: { address: string; amount: { kind: "amount" | "percentage"; value: number }; counterpartyId?: string | null }[];
+}
+
+export interface SubmitEvidenceInput {
+  predicateType: string;
+  payload?: Record<string, unknown>;
+  verifier?: string;
+  sourceUri?: string;
+}
+
+export interface ReasonInput {
+  reason: string;
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -92,6 +116,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+/** A release/refund is a policy-enforced command (§13.5): the token, when present, rides the `x-approval-token` header. */
+async function requestWithToken<T>(path: string, body: unknown, approvalToken?: string): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    body: JSON.stringify(body ?? {}),
+    headers: approvalToken ? { "x-approval-token": approvalToken } : undefined,
+  });
+}
+
 const jsonBody = (value: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(value ?? {}) });
 
 export const api = {
@@ -122,6 +156,26 @@ export const api = {
   getTransactionTimeline: (id: string) => request<AuditEvent[]>(`/transactions/${id}/timeline`),
   createSettlementPlan: (id: string, body?: Record<string, unknown>) =>
     request<SettlementPlan>(`/transactions/${id}/settlement-plan`, jsonBody(body ?? {})),
+
+  // Settlement plan/milestone actions (§20, UI-4)
+  fundSettlementPlan: (planId: string) => request<SettlementPlan>(`/settlement/plans/${planId}/fund`, jsonBody({})),
+  createMilestone: (planId: string, body: CreateMilestoneInput) =>
+    request<SettlementMilestone>(`/settlement/plans/${planId}/milestones`, jsonBody(body)),
+  submitEvidence: (milestoneId: string, body: SubmitEvidenceInput) =>
+    request<{ evaluation: { satisfied: boolean }; verified: boolean }>(`/settlement/milestones/${milestoneId}/evidence`, jsonBody(body)),
+  getEvidenceLedger: (milestoneId: string) => request<Evidence[]>(`/settlement/milestones/${milestoneId}/evidence`),
+  releaseMilestone: (milestoneId: string, approvalToken?: string) =>
+    requestWithToken(`/settlement/milestones/${milestoneId}/release`, {}, approvalToken),
+  disputeMilestone: (milestoneId: string, body: ReasonInput) =>
+    request<{ settlementPlanId: string }>(`/settlement/milestones/${milestoneId}/dispute`, jsonBody(body)),
+  resolveDispute: (milestoneId: string, body: ReasonInput) =>
+    request<{ settlementPlanId: string }>(`/settlement/milestones/${milestoneId}/resolve-dispute`, jsonBody(body)),
+  refundMilestone: (milestoneId: string, body: ReasonInput & { externalRefundRef?: string }, approvalToken?: string) =>
+    requestWithToken(`/settlement/milestones/${milestoneId}/refund`, body, approvalToken),
+  freezeSettlementPlan: (planId: string, body: ReasonInput) =>
+    request<void>(`/settlement/plans/${planId}/freeze`, jsonBody(body)),
+  unfreezeSettlementPlan: (planId: string, body: ReasonInput) =>
+    request<void>(`/settlement/plans/${planId}/unfreeze`, jsonBody(body)),
 };
 
-export type { Mission, MissionVersion, Opportunity, Approval, Transaction, SettlementPlan, SettlementMilestone, AuditEvent };
+export type { Mission, MissionVersion, Opportunity, Approval, Transaction, SettlementPlan, SettlementMilestone, AuditEvent, Evidence };

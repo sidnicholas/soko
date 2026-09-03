@@ -41,6 +41,8 @@ export interface ExecutionResult {
   railId: string;
   externalRef: string;
   status: "pending" | "confirmed" | "failed";
+  /** Per-recipient outcome when `ApprovedSettlement.recipients` was set (ST-12). */
+  recipients?: readonly { address: string; amount: Money; externalRef: string }[];
 }
 
 export interface ProviderSettlementStatus {

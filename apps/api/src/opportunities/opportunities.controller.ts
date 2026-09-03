@@ -55,6 +55,17 @@ export class OpportunitiesController {
     return this.opportunities.requestApproval(id, user, body);
   }
 
+  @Post(":id/execute-durable")
+  @ApiOperation({ summary: "Durable variant of request-approval: runs the Temporal opportunityExecutionWorkflow (approval + execution survive process restarts)" })
+  executeDurable(
+    @CurrentUser() user: Principal,
+    @Param("id") id: string,
+    @ZodBody(RequestApprovalSchema) body: RequestApprovalBody,
+  ) {
+    requirePermission(user, "approval:create");
+    return this.opportunities.executeDurable(id, user, body);
+  }
+
   @Post(":id/outcome")
   @ApiOperation({ summary: "Record the realized outcome of an opportunity (learning loop)" })
   recordOutcome(

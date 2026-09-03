@@ -44,8 +44,13 @@ export const SETTLEMENT_TRANSITIONS: TransitionMap<SettlementStatus> = {
   AWAITING_RELEASE_APPROVAL: ["RELEASE_PENDING", "DISPUTED", "REFUNDED"],
   RELEASE_PENDING: ["PARTIALLY_SETTLED", "SETTLED", "DISPUTED"],
   PARTIALLY_SETTLED: ["MILESTONE_PENDING", "SETTLED", "DISPUTED", "REFUNDED"],
-  DISPUTED: ["FROZEN", "PARTIALLY_SETTLED", "SETTLED", "REFUNDED"],
-  FROZEN: ["DISPUTED", "SETTLED", "REFUNDED"],
+  // The reverse edges (MILESTONE_PENDING/MILESTONE_VERIFIED/AWAITING_RELEASE_APPROVAL/
+  // RELEASE_PENDING) let a resolved dispute restore the plan to wherever it was
+  // disputed from (`resolveDispute`, ST-11 follow-up) instead of only refunding.
+  DISPUTED: ["FROZEN", "MILESTONE_PENDING", "MILESTONE_VERIFIED", "AWAITING_RELEASE_APPROVAL", "RELEASE_PENDING", "PARTIALLY_SETTLED", "SETTLED", "REFUNDED"],
+  // Reverse edges let `unfreezeSettlementPlan` restore whatever status the
+  // plan was frozen from.
+  FROZEN: ["DISPUTED", "AWAITING_FUNDING_APPROVAL", "FUNDING_PENDING", "FUNDED", "MILESTONE_PENDING", "SETTLED", "REFUNDED"],
   REFUNDED: [],
   SETTLED: [],
 };

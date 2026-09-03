@@ -17,6 +17,7 @@ import { getConfig } from "@opportunity-os/config";
 import { hashProposalTerms } from "@opportunity-os/audit";
 import type { Principal } from "../common/current-user";
 import type { RecordOutcomeBody, RequestApprovalBody } from "./opportunity.dto";
+import { startOpportunityExecutionDurable } from "./temporal";
 
 @Injectable()
 export class OpportunityService {
@@ -102,6 +103,25 @@ export class OpportunityService {
       riskSummary: body.riskSummary ?? null,
       expiresAt: new Date(Date.now() + getConfig().policy.approvalTimeoutMinutes * 60_000).toISOString(),
     });
+  }
+
+  /**
+   * Durable variant of `requestApproval`: starts `opportunityExecutionWorkflow`
+   * (worker-temporal) instead of creating the approval directly — the
+   * workflow's own first activity creates it, so it shows up in the normal
+   * approvals list/decide flow unchanged. `ApprovalService.decide` signals the
+   * workflow on decision instead of the caller needing a separate propose call.
+   */
+  async executeDurable(id: string, principal: Principal, body: RequestApprovalBody) {
+    await this.get(id);
+    const workflowId = await startOpportunityExecutionDurable({
+      opportunityId: id,
+      grossAmountMinor: body.grossAmountMinor,
+      currency: body.currency,
+      requestedByAgent: principal.userId,
+      approvalTimeoutMinutes: getConfig().policy.approvalTimeoutMinutes,
+    });
+    return { workflowId };
   }
 
   /** §outcomes record a realized result for the learning loop. */

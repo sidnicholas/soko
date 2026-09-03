@@ -28,6 +28,9 @@
     "@opportunity-os/auth": "workspace:*",
     "@opportunity-os/audit": "workspace:*",
     "@opportunity-os/discovery": "workspace:*",
-    "@opportunity-os/observability": "workspace:*"
+    "@opportunity-os/observability": "workspace:*",
+    "@opportunity-os/escrow": "workspace:*",
+    "@opportunity-os/settlement": "workspace:*",
+    "@opportunity-os/chain": "workspace:*"
   }
 }

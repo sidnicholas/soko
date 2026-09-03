@@ -1,7 +1,16 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
-import { enqueueEvent, getDb } from "@opportunity-os/db";
+import { Injectable, Logger, UnauthorizedException } from "@nestjs/common";
+import Stripe from "stripe";
+import {
+  disputeMilestone,
+  enqueueEvent,
+  getDb,
+  getMilestoneByProviderRef,
+  getSettlementPlan,
+  refundMilestone,
+  releaseMilestone,
+} from "@opportunity-os/db";
 import { getConfig } from "@opportunity-os/config";
-import type { EventName } from "@opportunity-os/contracts";
+import type { EventName, Money } from "@opportunity-os/contracts";
 import {
   payloadIdempotencyKey,
   timingSafeStringEqual,
@@ -10,29 +19,129 @@ import {
 
 type Payload = Record<string, unknown>;
 
+function milestoneAmountMinor(total: Money, amount: { kind: "amount" | "percentage"; value: number }): number {
+  return amount.kind === "amount" ? Math.round(amount.value) : Math.round((total.amount * amount.value) / 100);
+}
+
+/** Which PaymentIntent id (our `settlement_milestones.provider_ref`) a Stripe event is about, if any. */
+function paymentIntentRef(event: Stripe.Event): string | null {
+  const object = event.data.object as { id?: string; payment_intent?: string | { id: string } | null };
+  switch (event.type) {
+    case "payment_intent.succeeded":
+    case "payment_intent.payment_failed":
+      return typeof object.id === "string" ? object.id : null;
+    case "charge.refunded":
+    case "charge.dispute.created":
+      if (typeof object.payment_intent === "string") return object.payment_intent;
+      if (object.payment_intent && typeof object.payment_intent === "object") return object.payment_intent.id;
+      return null;
+    default:
+      return null;
+  }
+}
+
 /**
  * Inbound provider webhooks. Each verifies its signature/secret, then enqueues
  * a domain event on the transactional outbox for the owning worker to process
- * (§10). Verification is over the canonical JSON serialization of the parsed
- * body; production must verify against the raw request bytes (Stripe's exact
- * scheme) once a raw-body parser is wired into the Fastify adapter.
+ * (§10).
  */
 @Injectable()
 export class WebhooksService {
-  async handleStripe(signature: string | undefined, body: Payload) {
+  private readonly logger = new Logger("WebhooksService");
+
+  /**
+   * §ST-13 async provider-status reconciliation. Verifies Stripe's real HMAC
+   * scheme over the raw request bytes (`Stripe.webhooks.constructEvent` —
+   * re-serializing the parsed body, as before, can differ byte-for-byte and
+   * always fails verification; `req.rawBody` is populated by `main.ts`'s
+   * `rawBody: true`). Then reconciles by the PaymentIntent id we stored as the
+   * milestone's `provider_ref` (ST-12/real-provider follow-up) — release/refund
+   * paths already execute synchronously and are idempotent (guarded DB
+   * updates), so this closes the gap where that synchronous call reported
+   * "pending" (some payment methods capture/refund asynchronously) or the
+   * process died before persisting the result. An unexpected async failure
+   * disputes the milestone (blocks money, reversible) rather than guessing.
+   */
+  async handleStripe(signature: string | undefined, rawBody: Buffer | undefined) {
     const secret = getConfig().settlement.stripeWebhookSecret;
-    const raw = JSON.stringify(body);
-    if (!secret || !signature || !verifyHmacSignature(secret, raw, signature)) {
+    if (!secret || !signature || !rawBody) {
       throw new UnauthorizedException("Invalid Stripe webhook signature");
     }
-    const object = (body["data"] as Payload | undefined)?.["object"] as Payload | undefined;
-    const reference = typeof object?.["id"] === "string" ? object["id"] : "stripe-event";
-    await this.enqueue("settlement.released.v1", "transaction", reference, payloadIdempotencyKey("stripe", raw), {
-      provider: "stripe",
-      eventType: body["type"] ?? null,
-      reference,
-    });
+    let event: Stripe.Event;
+    try {
+      event = Stripe.webhooks.constructEvent(rawBody, signature, secret);
+    } catch (err) {
+      throw new UnauthorizedException(`Invalid Stripe webhook signature: ${String(err)}`);
+    }
+
+    await this.enqueue(
+      "settlement.released.v1",
+      "settlement_milestone",
+      paymentIntentRef(event) ?? event.id,
+      payloadIdempotencyKey("stripe", event.id),
+      { provider: "stripe", eventType: event.type, eventId: event.id },
+    );
+    try {
+      await this.reconcileStripeEvent(event);
+    } catch (err) {
+      // A benign state conflict (e.g. the plan is already DISPUTED/FROZEN, or
+      // this event arrived after we'd already reconciled via another path)
+      // must not make Stripe retry forever — acknowledge receipt regardless.
+      this.logger.warn(`could not reconcile Stripe event ${event.id} (${event.type}): ${String(err)}`);
+    }
     return { received: true };
+  }
+
+  private async reconcileStripeEvent(event: Stripe.Event): Promise<void> {
+    const ref = paymentIntentRef(event);
+    if (!ref) return;
+    const milestone = await getMilestoneByProviderRef(ref);
+    if (!milestone) return; // Not ours, or not a milestone-scoped rail — nothing to reconcile.
+    if (milestone.status === "released" || milestone.status === "refunded") return; // Already settled; idempotent no-op.
+
+    const plan = await getSettlementPlan(milestone.settlement_plan_id);
+    if (!plan) return;
+    const total = plan.total_amount as Money;
+    const amount = milestone.amount_or_percentage as { kind: "amount" | "percentage"; value: number };
+    const amountMinor = milestoneAmountMinor(total, amount);
+
+    switch (event.type) {
+      case "payment_intent.succeeded":
+        // We normally record "released" synchronously at capture time; this
+        // only does work if that write never landed (e.g. the process died
+        // right after Stripe confirmed the capture).
+        if (milestone.status === "verified") {
+          await releaseMilestone({
+            milestoneId: milestone.id,
+            amountMinor,
+            currency: total.currency,
+            actorId: "stripe-webhook",
+            externalTransactionRef: ref,
+            reason: "stripe_webhook_reconciliation",
+          });
+        }
+        return;
+      case "charge.refunded":
+        await refundMilestone({
+          milestoneId: milestone.id,
+          actorId: "stripe-webhook",
+          externalRefundRef: ref,
+          reason: "stripe_webhook_reconciliation",
+        });
+        return;
+      case "payment_intent.payment_failed":
+      case "charge.dispute.created":
+        if (milestone.status !== "disputed") {
+          await disputeMilestone({
+            milestoneId: milestone.id,
+            actorId: "stripe-webhook",
+            reason: `Stripe reported ${event.type} on ${ref}`,
+          });
+        }
+        return;
+      default:
+        return;
+    }
   }
 
   async handleTelegram(secretToken: string | undefined, body: Payload) {

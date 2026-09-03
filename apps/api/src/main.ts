@@ -13,6 +13,10 @@ async function bootstrap(): Promise<void> {
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
     logger: ["error", "warn", "log"],
+    // Stripe (and most webhook providers) sign the exact raw request bytes;
+    // re-serializing the parsed JSON body can differ byte-for-byte and always
+    // fails verification. `req.rawBody` is populated on every request.
+    rawBody: true,
   });
   app.setGlobalPrefix("v1");
 

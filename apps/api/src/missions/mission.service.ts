@@ -7,11 +7,15 @@ import {
   listMissions,
   listOpportunitiesByMission,
   setMissionStatus,
+  setMissionTemporalWorkflowId,
 } from "@opportunity-os/db";
 import { canTransition, type TransitionMap } from "@opportunity-os/domain";
+import { projectMissionDemand } from "@opportunity-os/discovery";
+import { getConfig } from "@opportunity-os/config";
 import type { DemandSpecification, EventName } from "@opportunity-os/contracts";
 import type { MissionAction, MissionCreateBody, MissionUpdateBody } from "./mission.dto";
 import { parseDemand } from "@opportunity-os/demand";
+import { startMissionDiscovery, signalMissionWorkflow } from "./temporal";
 
 /** §6.2 mission lifecycle guard. Draft auto-activates on create (see repo). */
 const MISSION_TRANSITIONS: TransitionMap<string> = {
@@ -151,6 +155,31 @@ export class MissionService {
       idempotencyKey: `mission.${action}:${id}:${Date.now()}`,
       payload: { missionId: id, from: mission.status, to: target },
     });
+    if (mission.temporal_workflow_id) {
+      await signalMissionWorkflow(mission.temporal_workflow_id, action);
+    }
+    return this.detail(id);
+  }
+
+  /**
+   * Start the durable `missionDiscoveryWorkflow` for this mission (ST-13-style
+   * wiring): once started, `listActiveMissionsForDiscovery` excludes it from
+   * worker-lifecycle's own sweep so the two schedulers never overlap. Opt-in —
+   * a mission with no durable workflow keeps working exactly as before.
+   */
+  async startDurableDiscovery(id: string) {
+    const mission = await this.detail(id);
+    if (mission.status !== "active") throw new ConflictException(`Mission ${id} is not active`);
+    if (mission.temporal_workflow_id) throw new ConflictException(`Mission ${id} already has a running discovery workflow`);
+    if (!mission.demand_spec) throw new ConflictException(`Mission ${id} has no demand spec to drive discovery`);
+
+    const workflowId = await startMissionDiscovery({
+      missionId: id,
+      demand: projectMissionDemand(mission.demand_spec),
+      refreshIntervalMinutes: getConfig().policy.missionRefreshIntervalMinutes,
+    });
+    if (!workflowId) throw new ConflictException("Could not start the discovery workflow (Temporal unreachable)");
+    await setMissionTemporalWorkflowId(id, workflowId);
     return this.detail(id);
   }
 

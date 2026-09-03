@@ -47,7 +47,12 @@ export class StablecoinRail implements SettlementRail {
 
   async execute(approved: ApprovedSettlement): Promise<ExecutionResult> {
     const txHash = `0xsim${simpleHash(approved.reference + approved.approvalTokenHash)}`;
-    return { railId: this.railId, externalRef: txHash, status: "confirmed" };
+    const recipients = approved.recipients?.map((r) => ({
+      address: r.address,
+      amount: r.amount,
+      externalRef: `0xsim${simpleHash(approved.reference + r.address)}`,
+    }));
+    return { railId: this.railId, externalRef: txHash, status: "confirmed", ...(recipients ? { recipients } : {}) };
   }
 
   async status(ref: string): Promise<ProviderSettlementStatus> {

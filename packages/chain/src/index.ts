@@ -156,7 +156,12 @@ export class ProgrammableSettlementAdapter implements SettlementRail {
     c.status = "SETTLED";
     const externalRef = `0x${canonicalHash({ ref: approved.reference, token: approved.approvalTokenHash }).slice(0, 40)}`;
     this.record(c, { reference: approved.reference, type: "released", at: now(), data: { externalRef } });
-    return { railId: this.railId, externalRef, status: "confirmed" };
+    const recipients = approved.recipients?.map((r) => ({
+      address: r.address,
+      amount: r.amount,
+      externalRef: `0x${canonicalHash({ ref: approved.reference, to: r.address }).slice(0, 40)}`,
+    }));
+    return { railId: this.railId, externalRef, status: "confirmed", ...(recipients ? { recipients } : {}) };
   }
 
   async status(ref: string): Promise<ProviderSettlementStatus> {

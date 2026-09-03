@@ -43,6 +43,13 @@ export class MissionsController {
     return this.missions.update(id, user.userId, body);
   }
 
+  @Post(":id/discover-durable")
+  @ApiOperation({ summary: "Start the durable Temporal discovery workflow for this mission (opt-in; excludes it from the lifecycle-worker sweep)" })
+  discoverDurable(@CurrentUser() user: Principal, @Param("id") id: string) {
+    requirePermission(user, "mission:update");
+    return this.missions.startDurableDiscovery(id);
+  }
+
   @Post(":id/pause")
   @ApiOperation({ summary: "Pause an active mission" })
   pause(@CurrentUser() user: Principal, @Param("id") id: string) {
