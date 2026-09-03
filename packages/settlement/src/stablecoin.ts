@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { initiateDeveloperControlledWalletsClient, type CircleDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import type { Money, SettlementPlan } from "@opportunity-os/contracts";
 import type {
@@ -23,6 +24,20 @@ export interface CircleConfig {
 /** USD-cents (this system's universal Money unit) -> a USDC decimal-string amount, assuming a 1:1 peg. */
 function centsToUsdcDecimal(amountMinor: number): string {
   return (amountMinor / 100).toFixed(6);
+}
+
+/**
+ * Circle's `idempotencyKey` must be UUID-shaped (confirmed against the live
+ * API — an arbitrary string, even a unique one, is rejected with "API
+ * parameter invalid"). Deterministic so a retried execute() reuses the same
+ * key for the same recipient (real idempotency), unlike `randomUUID()`.
+ * Not a spec-correct UUIDv5 — just a valid-shaped v4-looking string derived
+ * from a SHA-256 of the seed, which is all Circle's validation requires.
+ */
+function deterministicUuid(seed: string): string {
+  const hex = createHash("sha256").update(seed).digest("hex").slice(0, 32);
+  const variant = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 /**
@@ -132,7 +147,7 @@ export class StablecoinRail implements SettlementRail {
           // Reused approvalTokenHash (already a deterministic hash of the
           // exact release terms), salted per recipient — a retried execute()
           // reuses the same key per transfer instead of sending it twice.
-          idempotencyKey: `${approved.approvalTokenHash}:${r.address}`,
+          idempotencyKey: deterministicUuid(`${approved.approvalTokenHash}:${r.address}`),
         });
         if (!result.data?.id) throw new Error(`Circle createTransaction returned no transaction id for ${r.address}`);
         return { address: r.address, amount: r.amount, externalRef: result.data.id };
