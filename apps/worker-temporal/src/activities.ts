@@ -10,6 +10,7 @@ import {
   getApprovalById,
   getMilestone,
   getSettlementPlan,
+  markMilestoneReleasePending,
   proposeTransaction,
   refundMilestone,
   releaseMilestone,
@@ -106,7 +107,19 @@ export async function executeProposalActivity(input: ExecuteProposalActivityInpu
 function createSettlementService(config: AppConfig): SettlementService {
   const service = new SettlementService();
   service.register(new StripeFiatRail(config.settlement.stripeSecretKey));
-  service.register(new StablecoinRail(config.settlement.defaultStablecoinNetwork));
+  service.register(
+    new StablecoinRail(
+      config.settlement.defaultStablecoinNetwork,
+      undefined,
+      config.settlement.circleApiKey && config.settlement.circleEntitySecret && config.settlement.circleWalletId
+        ? {
+            apiKey: config.settlement.circleApiKey,
+            entitySecret: config.settlement.circleEntitySecret,
+            walletId: config.settlement.circleWalletId,
+          }
+        : undefined,
+    ),
+  );
   service.register(new ProgrammableSettlementAdapter(config.settlement.chainRpcUrl ? "testnet" : "local"));
   return service;
 }
@@ -171,7 +184,7 @@ function resolveRecipients(
   return resolved;
 }
 
-export type MilestoneTimerAction = "none" | "waiting" | "held" | "refunded" | "released";
+export type MilestoneTimerAction = "none" | "waiting" | "held" | "refunded" | "released" | "pending";
 
 export interface MilestoneTimerResult {
   action: MilestoneTimerAction;
@@ -273,6 +286,15 @@ export async function checkMilestoneTimerActivity(milestoneId: string): Promise<
     const authored = rawRecipients.find((raw) => raw.address === r.address);
     return { address: r.address, amount: authored?.amount ?? { kind: "amount" as const, value: r.amount.amount }, counterpartyId: authored?.counterpartyId ?? null, externalRef: r.externalRef };
   });
+
+  if (execution.status === "pending") {
+    // Same reasoning as settlement.service.ts's release(): an async transfer
+    // (e.g. on-chain) can't be confirmed synchronously — record the reference
+    // for webhook correlation and stop; a webhook finalizes via
+    // releaseMilestone once the rail actually confirms it (§ST-13).
+    await markMilestoneReleasePending({ milestoneId, externalTransactionRef: execution.externalRef, executedRecipients });
+    return { action: "pending" };
+  }
 
   await releaseMilestone({
     milestoneId,

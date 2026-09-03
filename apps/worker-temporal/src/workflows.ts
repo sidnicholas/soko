@@ -122,7 +122,7 @@ export interface SettlementMilestoneTimerInput {
 }
 
 export interface SettlementMilestoneTimerResult {
-  action: "none" | "held" | "refunded" | "released";
+  action: "none" | "held" | "refunded" | "released" | "pending";
 }
 
 /**
@@ -132,6 +132,8 @@ export interface SettlementMilestoneTimerResult {
  * (auto-refund on deadman, auto-release on an elapsed optimistic window below
  * threshold); a disputed plan or an above-threshold optimistic release needs a
  * human, so the workflow reports "held" and stops rather than guessing (§13.5).
+ * An async rail (e.g. an on-chain transfer) reports "pending" and stops too —
+ * confirming it is a webhook's job now, not this workflow's.
  */
 export async function settlementMilestoneTimerWorkflow(
   input: SettlementMilestoneTimerInput,

@@ -13,7 +13,19 @@ import type { AppConfig } from "@opportunity-os/config";
 export function createSettlementService(config: AppConfig): SettlementService {
   const service = new SettlementService();
   service.register(new StripeFiatRail(config.settlement.stripeSecretKey));
-  service.register(new StablecoinRail(config.settlement.defaultStablecoinNetwork));
+  service.register(
+    new StablecoinRail(
+      config.settlement.defaultStablecoinNetwork,
+      undefined,
+      config.settlement.circleApiKey && config.settlement.circleEntitySecret && config.settlement.circleWalletId
+        ? {
+            apiKey: config.settlement.circleApiKey,
+            entitySecret: config.settlement.circleEntitySecret,
+            walletId: config.settlement.circleWalletId,
+          }
+        : undefined,
+    ),
+  );
   service.register(new ProgrammableSettlementAdapter(config.settlement.chainRpcUrl ? "testnet" : "local"));
   return service;
 }

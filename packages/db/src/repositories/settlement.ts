@@ -47,6 +47,11 @@ export async function getMilestoneByProviderRef(providerRef: string) {
   return getDb().selectFrom("settlement_milestones").selectAll().where("provider_ref", "=", providerRef).executeTakeFirst();
 }
 
+/** Same correlation, but by the *execution* reference (§ST-13 pending releases — see markMilestoneReleasePending). */
+export async function getMilestoneByExternalTransactionRef(ref: string) {
+  return getDb().selectFrom("settlement_milestones").selectAll().where("external_transaction_ref", "=", ref).executeTakeFirst();
+}
+
 export async function listMilestones(planId: string) {
   return getDb()
     .selectFrom("settlement_milestones")
@@ -320,6 +325,35 @@ export interface ReleaseMilestoneInput {
 export interface ReleaseMilestoneResult {
   planSettled: boolean;
   transactionSettled: boolean;
+}
+
+export interface MarkMilestoneReleasePendingInput {
+  milestoneId: string;
+  externalTransactionRef: string;
+  /** ST-12: recipients as submitted to the rail, so their pending refs are visible before confirmation. */
+  executedRecipients?: MilestoneRecipient[];
+}
+
+/**
+ * Record a rail's pending (not yet confirmed) execution reference WITHOUT
+ * marking the milestone released — for a rail whose execute() can't
+ * synchronously confirm (e.g. an async on-chain transfer). The milestone
+ * stays "verified"; a webhook reconciling to COMPLETE later calls the real
+ * `releaseMilestone` (§ST-13). Doing this instead of releasing immediately on
+ * any non-"failed" result is what actually makes "pending" meaningful — the
+ * hardcoded-`conditionSatisfied: true`-era code treated pending the same as
+ * confirmed.
+ */
+export async function markMilestoneReleasePending(input: MarkMilestoneReleasePendingInput): Promise<void> {
+  await getDb()
+    .updateTable("settlement_milestones")
+    .set({
+      external_transaction_ref: input.externalTransactionRef,
+      ...(input.executedRecipients ? { recipients_json: JSON.stringify(input.executedRecipients) } : {}),
+    })
+    .where("id", "=", input.milestoneId)
+    .where("status", "=", "verified")
+    .execute();
 }
 
 /**

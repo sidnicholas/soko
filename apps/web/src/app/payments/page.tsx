@@ -256,6 +256,12 @@ function CreateMilestoneForm({ planId, nextSequence, onCreated }: { planId: stri
   const [predicateType, setPredicateType] = useState<string>(EscrowPredicateType.options[0]);
   const [optimisticAfterAt, setOptimisticAfterAt] = useState("");
   const [deadmanAt, setDeadmanAt] = useState("");
+  const [recipientKind, setRecipientKind] = useState<"amount" | "percentage">("percentage");
+  const [recipients, setRecipients] = useState<{ address: string; value: string }[]>([]);
+
+  function updateRecipient(i: number, patch: Partial<{ address: string; value: string }>) {
+    setRecipients((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
 
   if (!open) {
     return (
@@ -306,6 +312,49 @@ function CreateMilestoneForm({ planId, nextSequence, onCreated }: { planId: stri
             <Input type="datetime-local" value={deadmanAt} onChange={(e) => setDeadmanAt(e.target.value)} />
           </Field>
         </div>
+
+        <div className="oos-stack" style={{ gap: tokens.space.sm }}>
+          <div style={{ fontSize: tokens.fontSize.sm, fontWeight: tokens.weight.medium }}>
+            Recipients
+          </div>
+          <div style={{ fontSize: tokens.fontSize.xs, color: tokens.color.inkSubtle }}>
+            Optional for card payouts (defaults to the plan's own account). Required for a stablecoin/crypto
+            milestone — an on-chain transfer has no implicit destination, so without at least one recipient here
+            release will fail.
+          </div>
+          {recipients.length > 0 && (
+            <Field label="Split by">
+              <Select value={recipientKind} onChange={(e) => setRecipientKind(e.target.value as "amount" | "percentage")} style={{ maxWidth: 220 }}>
+                <option value="percentage">% of milestone (must sum to 100)</option>
+                <option value="amount">Fixed amount (minor units, must sum to the milestone total)</option>
+              </Select>
+            </Field>
+          )}
+          {recipients.map((r, i) => (
+            <div key={i} style={{ display: "flex", gap: tokens.space.sm, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: 2, minWidth: 240 }}>
+                <Field label={`Recipient ${i + 1} address`}>
+                  <Input value={r.address} onChange={(e) => updateRecipient(i, { address: e.target.value })} placeholder="0x... or a connected-account id" />
+                </Field>
+              </div>
+              <Field label={recipientKind === "percentage" ? "%" : "Amount"}>
+                <Input type="number" value={r.value} onChange={(e) => updateRecipient(i, { value: e.target.value })} style={{ width: 100 }} />
+              </Field>
+              <Button variant="ghost" onClick={() => setRecipients((rows) => rows.filter((_, idx) => idx !== i))}>
+                Remove
+              </Button>
+            </div>
+          ))}
+          <div>
+            <Button
+              size="sm"
+              onClick={() => setRecipients((rows) => [...rows, { address: "", value: rows.length === 0 ? "100" : "" }])}
+            >
+              + Add recipient
+            </Button>
+          </div>
+        </div>
+
         <div style={{ display: "flex", gap: tokens.space.sm }}>
           <Button
             variant="primary"
@@ -315,6 +364,7 @@ function CreateMilestoneForm({ planId, nextSequence, onCreated }: { planId: stri
               setBusy(true);
               setError(null);
               try {
+                const filledRecipients = recipients.filter((r) => r.address.trim() && r.value.trim());
                 await api.createMilestone(planId, {
                   sequence: nextSequence,
                   name: name.trim(),
@@ -322,9 +372,13 @@ function CreateMilestoneForm({ planId, nextSequence, onCreated }: { planId: stri
                   releaseConditions: { predicate: { type: predicateType } },
                   ...(optimisticAfterAt ? { optimisticAfterAt: new Date(optimisticAfterAt).toISOString() } : {}),
                   ...(deadmanAt ? { deadmanAt: new Date(deadmanAt).toISOString() } : {}),
+                  ...(filledRecipients.length > 0
+                    ? { recipients: filledRecipients.map((r) => ({ address: r.address.trim(), amount: { kind: recipientKind, value: Number(r.value) } })) }
+                    : {}),
                 });
                 setOpen(false);
                 setName("");
+                setRecipients([]);
                 onCreated();
               } catch (err) {
                 setError(err instanceof ApiError ? err.message : "Could not create the milestone.");

@@ -1,9 +1,12 @@
+import { createPublicKey, verify as verifyEcdsa } from "node:crypto";
 import { Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import Stripe from "stripe";
+import { initiateDeveloperControlledWalletsClient, type CircleDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import {
   disputeMilestone,
   enqueueEvent,
   getDb,
+  getMilestoneByExternalTransactionRef,
   getMilestoneByProviderRef,
   getSettlementPlan,
   refundMilestone,
@@ -18,6 +21,47 @@ import {
 } from "../common/webhook-signature";
 
 type Payload = Record<string, unknown>;
+
+let circleClient: CircleDeveloperControlledWalletsClient | undefined;
+
+/** Lazily built — read-only calls (getNotificationSignature) don't need the entity secret's signing ceremony, but the client requires one to construct. */
+function circle(): CircleDeveloperControlledWalletsClient | undefined {
+  const cfg = getConfig().settlement;
+  if (!cfg.circleApiKey || !cfg.circleEntitySecret) return undefined;
+  if (!circleClient) {
+    circleClient = initiateDeveloperControlledWalletsClient({ apiKey: cfg.circleApiKey, entitySecret: cfg.circleEntitySecret });
+  }
+  return circleClient;
+}
+
+const circlePublicKeyCache = new Map<string, string>();
+
+/** Circle signs notifications asymmetrically; the key id names which of Circle's public keys to fetch and cache (§ST-13). */
+async function circlePublicKeyPem(keyId: string): Promise<string> {
+  const cached = circlePublicKeyCache.get(keyId);
+  if (cached) return cached;
+  const client = circle();
+  if (!client) throw new Error("Circle is not configured");
+  const result = await client.getNotificationSignature(keyId);
+  const pem = result.data?.publicKey;
+  if (!pem) throw new Error(`Circle returned no public key for key id ${keyId}`);
+  circlePublicKeyCache.set(keyId, pem);
+  return pem;
+}
+
+/**
+ * Pure crypto, no Circle account needed — exported so it's directly
+ * exercisable (e.g. `scripts/verify-circle-provider.ts`) with a locally
+ * generated EC keypair, the same way Stripe's `constructEvent` was checked
+ * with `generateTestHeaderString` rather than only through a live account.
+ * DER encoding is Node's default for `verify()` with an EC key, and the
+ * common convention for KMS/HSM-backed ECDSA signing (which is how Circle
+ * signs) — unverified against a live Circle account in this pass; double-
+ * check against a real notification once one is flowing.
+ */
+export function verifyCircleSignature(rawBody: Buffer, signatureBase64: string, publicKeyPem: string): boolean {
+  return verifyEcdsa("sha256", rawBody, createPublicKey(publicKeyPem), Buffer.from(signatureBase64, "base64"));
+}
 
 function milestoneAmountMinor(total: Money, amount: { kind: "amount" | "percentage"; value: number }): number {
   return amount.kind === "amount" ? Math.round(amount.value) : Math.round((total.amount * amount.value) / 100);
@@ -141,6 +185,99 @@ export class WebhooksService {
         return;
       default:
         return;
+    }
+  }
+
+  /**
+   * §ST-13 async provider-status reconciliation for the stablecoin rail
+   * (Circle Developer-Controlled Wallets). Circle transfers are asynchronous
+   * by nature — `execute()` always returns "pending" and records the
+   * transaction id via `markMilestoneReleasePending`'s `external_transaction_ref`
+   * (not `provider_ref`, which holds the shared wallet id here, not a
+   * per-transaction reference) — so this webhook is not just a fallback the
+   * way Stripe's mostly is, it's the *primary* way a Circle release ever
+   * finalizes. Verifies Circle's real ECDSA_SHA_256 signature (asymmetric,
+   * unlike Stripe/Telegram's shared-secret HMAC): fetch + cache the signing
+   * public key by the `X-Circle-Key-Id` header, verify over the raw body.
+   *
+   * Known gap: a multi-recipient (ST-12) release submits one Circle
+   * transaction per recipient but only the first's id is tracked on the
+   * milestone, so only that one reconciles here — same documented limitation
+   * as Stripe's un-reconciled Transfer events.
+   */
+  async handleCircle(signature: string | undefined, keyId: string | undefined, rawBody: Buffer | undefined) {
+    if (!getConfig().settlement.circleApiKey || !signature || !keyId || !rawBody) {
+      throw new UnauthorizedException("Invalid Circle webhook signature");
+    }
+    let publicKeyPem: string;
+    try {
+      publicKeyPem = await circlePublicKeyPem(keyId);
+    } catch (err) {
+      throw new UnauthorizedException(`Could not retrieve Circle's notification public key: ${String(err)}`);
+    }
+    let ok: boolean;
+    try {
+      ok = verifyCircleSignature(rawBody, signature, publicKeyPem);
+    } catch (err) {
+      throw new UnauthorizedException(`Invalid Circle webhook signature: ${String(err)}`);
+    }
+    if (!ok) throw new UnauthorizedException("Invalid Circle webhook signature");
+
+    let body: Payload;
+    try {
+      body = JSON.parse(rawBody.toString("utf8")) as Payload;
+    } catch {
+      throw new UnauthorizedException("Circle webhook body is not valid JSON");
+    }
+    const notification = (body["notification"] as Payload | undefined) ?? body;
+    const transactionId = typeof notification["id"] === "string" ? notification["id"] : undefined;
+    const state = typeof notification["state"] === "string" ? notification["state"] : undefined;
+
+    await this.enqueue(
+      "settlement.released.v1",
+      "settlement_milestone",
+      transactionId ?? "circle-event",
+      payloadIdempotencyKey("circle", rawBody.toString("utf8")),
+      { provider: "circle", state: state ?? null, transactionId: transactionId ?? null },
+    );
+    if (transactionId && state) {
+      try {
+        await this.reconcileCircleTransaction(transactionId, state);
+      } catch (err) {
+        this.logger.warn(`could not reconcile Circle transaction ${transactionId} (${state}): ${String(err)}`);
+      }
+    }
+    return { received: true };
+  }
+
+  private async reconcileCircleTransaction(transactionId: string, state: string): Promise<void> {
+    const milestone = await getMilestoneByExternalTransactionRef(transactionId);
+    if (!milestone) return; // Not ours, or a recipient-level transfer we don't track (see doc comment above).
+    if (milestone.status === "released" || milestone.status === "refunded") return; // Already settled; idempotent no-op.
+
+    const plan = await getSettlementPlan(milestone.settlement_plan_id);
+    if (!plan) return;
+    const total = plan.total_amount as Money;
+    const amount = milestone.amount_or_percentage as { kind: "amount" | "percentage"; value: number };
+    const amountMinor = milestoneAmountMinor(total, amount);
+
+    if (state === "COMPLETE") {
+      if (milestone.status === "verified") {
+        await releaseMilestone({
+          milestoneId: milestone.id,
+          amountMinor,
+          currency: total.currency,
+          actorId: "circle-webhook",
+          externalTransactionRef: transactionId,
+          reason: "circle_webhook_reconciliation",
+        });
+      }
+      return;
+    }
+    if (state === "FAILED" || state === "DENIED" || state === "CANCELLED" || state === "STUCK") {
+      if (milestone.status !== "disputed") {
+        await disputeMilestone({ milestoneId: milestone.id, actorId: "circle-webhook", reason: `Circle reported ${state} on ${transactionId}` });
+      }
     }
   }
 

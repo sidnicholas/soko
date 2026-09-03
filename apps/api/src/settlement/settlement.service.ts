@@ -9,6 +9,7 @@ import {
   getSettlementPlan,
   listEvidenceLedger,
   listEvidenceClaims,
+  markMilestoneReleasePending,
   refundMilestone,
   releaseMilestone,
   resolveDispute,
@@ -314,6 +315,19 @@ export class SettlementService {
       return { address: r.address, amount: authored?.amount ?? { kind: "amount", value: r.amount.amount }, counterpartyId: authored?.counterpartyId ?? null, externalRef: r.externalRef };
     });
 
+    if (execution.status === "pending") {
+      // The rail accepted the transfer but can't confirm it synchronously
+      // (e.g. an on-chain transfer, minutes from final) — record the
+      // reference for webhook correlation and stop here; a later webhook
+      // finalizes via releaseMilestone once the rail actually confirms it.
+      await markMilestoneReleasePending({
+        milestoneId,
+        externalTransactionRef: body.externalTransactionRef ?? execution.externalRef,
+        executedRecipients,
+      });
+      return { decision, execution, pending: true as const };
+    }
+
     const result = await releaseMilestone({
       milestoneId,
       amountMinor,
@@ -415,6 +429,12 @@ export class SettlementService {
       const reference = await this.ensurePrepared(plan, milestone);
       const result = await rail.refund(reference, { amount: amountMinor, currency: total.currency });
       if (result.status === "failed") throw new ConflictException(`Rail refund failed on ${rail.railId}`);
+      // Known gap, same shape as the release-side fix above but not yet
+      // applied here: a "pending" (not yet "refunded") result still marks
+      // this REFUNDED immediately below. No rail refunds asynchronously
+      // today (Circle's refund() always fails outright; Stripe's is
+      // synchronous in test mode), so this is currently unreachable rather
+      // than silently wrong — flagged for whenever that changes.
       externalRefundRef = result.externalRef;
     }
 

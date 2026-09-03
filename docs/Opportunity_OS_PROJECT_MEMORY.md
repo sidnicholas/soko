@@ -1,8 +1,8 @@
 # Opportunity OS — Project Memory (Implementation State)
 
-**Status:** V1 in active build — Phases 0–3 complete (Phase 3's fiat rail is real Stripe test-mode, not simulated; stablecoin/chain remain local references), Phases 4–5 partial.
+**Status:** V1 in active build — Phases 0–3 complete (Phase 3's fiat rail is real Stripe test-mode and the stablecoin rail is real Circle Developer-Controlled Wallets on Base Sepolia; the on-chain/`chain` family remains a local reference), Phases 4–5 partial.
 **Last updated:** 2026-09-03
-**HEAD:** `99d1643` (ST-11 refund/dispute execution, committed) + uncommitted across this session: ST-13 release windows/timer workflow, ST-12 multi-party splits, dispute/freeze resolution, mission-discovery + opportunity-execution durable wiring, milestone/release UI (UI-4), release()'s require_approval-while-unverified fix, and a real Stripe test-mode integration (per-milestone PaymentIntents, idempotent execute, verified webhook reconciliation)
+**HEAD:** `3341949` (ST-9/12/13, dispute resolution, durable mission/opportunity wiring, UI-4, real Stripe test-mode provider — committed) + uncommitted this session: real Circle Developer-Controlled Wallets stablecoin provider (per-milestone async transfers, idempotent execute, `POST /webhooks/circle` reconciliation) + the shared `"pending"` vs `"confirmed"` release fix it required (also benefits Stripe)
 **Purpose:** Living memory of *what actually exists in the codebase* and *what is next*. This supersedes the original concept-capture memory (`AI_Opportunity_Operating_System_Project_Memory.md`) for engineering purposes. Requirements live in `Opportunity_OS_TECHNICAL_REQUIREMENTS.md`; rationale lives in `docs/adr/`.
 
 ---
@@ -109,7 +109,7 @@ Monorepo, CI, typed config, Postgres/Supabase-portable, migrations + runner, dom
 - Notifications worker: real delivery loop (Telegram/email/log), marks notified once.
 - Temporal: durable Opportunity Execution Workflow requests a human gate, waits for the approval signal (bounded timeout), executes the gated proposal on approve; reject/timeout do nothing. Verified end-to-end against the time-skipping test server with real activities + Postgres.
 
-### Phase 3 — Native Money Rails ✅ (real fiat rail on Stripe test mode; stablecoin/chain still simulated)
+### Phase 3 — Native Money Rails ✅ (real fiat rail on Stripe test mode + real stablecoin rail on Circle/Base Sepolia; on-chain `chain` family still simulated)
 Built:
 - Rail-neutral settlement abstraction (`SettlementService` + `SettlementRail`), Stripe fiat rail (test/simulated), stablecoin rail, programmable-chain adapter (local/testnet reference).
 - **Escrow condition/release engine** (ADR-029): versioned AND/OR predicate DSL (`shipment_delivered`, `document_signed`, `gps_within_geofence`, `sensor_threshold`, `time_elapsed`, `milestone_attested`, `oracle_true`); pure `evaluateCondition` is the only authority for `MILESTONE_PENDING → MILESTONE_VERIFIED`; `decideRelease` policy (dispute→hold, deadman→auto_refund, auto below threshold, human approval above, optimistic window).
@@ -134,10 +134,20 @@ Built:
 
   **Verified against the live Stripe test API** (not simulated, real network calls, `sk_test_...`) by `scripts/verify-stripe-provider.ts` — all 9 checks passed: both milestones of one plan capture their own PaymentIntent independently (findings 1 and 5 together — this is the one that would have failed outright pre-fix, with a real "already captured" error from Stripe on the second milestone), a retried `execute()` with the same idempotency key doesn't double-capture, `refund()` correctly branches to `cancel()` pre-capture vs. a real `Refund` post-capture, and `constructEvent` accepts a correctly-signed payload while rejecting a wrong-secret or tampered one. Not yet reconciled: recipient-level Transfer events (`transfer.reversed`) — those live inside `recipients_json`, not a plain column, so `getMilestoneByProviderRef`'s exact-match lookup doesn't reach them.
 
+- **Real settlement provider — Circle stablecoin (Base Sepolia)**: the user explicitly required a *custodial* model here — Circle's MPC-based Developer-Controlled Wallets holds the platform's keys, not the platform itself, keeping §C-6 ("platform never holds private keys") intact the way a direct ethers/viem hot-wallet integration would not have. `StablecoinRail` (`packages/settlement/src/stablecoin.ts`) gained real `@circle-fin/developer-controlled-wallets` (v10.8.0) code paths alongside the existing simulated fallback, using `initiateDeveloperControlledWalletsClient({apiKey, entitySecret})`; `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID` config added, wired into both rail-composition sites (`apps/api/src/settlement/rails.ts`, the duplicated copy in `worker-temporal/src/activities.ts`).
+  - Unlike Stripe's authorize/capture split, there's nothing to prepare ahead of time on-chain — `prepare()` just returns the configured wallet id; the real work is at `execute()` (`createTransaction`, one Circle transfer per ST-12 recipient, USDC token id resolved once via `getWalletTokenBalance` and cached). On-chain transfers always need a **real destination address** — there is no implicit "platform balance" landing zone the way Stripe capture has — so `execute()` throws if no recipient is set, even for a "single payee" release.
+  - Circle transfers are **asynchronous by nature** (`INITIATED → CLEARED → QUEUED → SENT → CONFIRMED → COMPLETE`, minutes away) — `execute()` always returns `"pending"`, never a synchronous `"confirmed"`. This surfaced a real, shared bug: `release()`/`checkMilestoneTimerActivity` treated any non-`"failed"` result as fully released immediately, which was mostly invisible for Stripe (cards usually confirm synchronously) but would be *wrong every time* for Circle. Fixed in the shared code both rails go through: a new `markMilestoneReleasePending` repo fn persists the execution reference (`external_transaction_ref`) **without** flipping status to `"released"`; the milestone stays `"verified"` until a webhook confirms it. Benefits Stripe too (its own rare async-capture case was silently mishandled the same way before this).
+  - `POST /webhooks/circle` (new): Circle signs notifications asymmetrically (`ECDSA_SHA_256`, not a shared-secret HMAC like Stripe/Telegram) — verifies by fetching + caching the signing public key for the `X-Circle-Key-Id` header via `client.getNotificationSignature(keyId)`, then `crypto.verify("sha256", ...)` over the raw body (DER encoding — Node's default for an EC key, and the common KMS/HSM convention; **unverified against a live Circle account** in this pass). Reconciles by `external_transaction_ref` (not `provider_ref`, which holds the *shared wallet id* here, not a per-transaction reference) — `COMPLETE` finalizes via the real `releaseMilestone`; `FAILED`/`DENIED`/`CANCELLED`/`STUCK` disputes it. The ECDSA verification itself is extracted as a standalone `verifyCircleSignature` function specifically so it's checkable without a live account.
+  - `supportsRefund` stays `false` (already true of the pre-existing simulated rail): on-chain has no "reverse this charge" primitive, only "send more USDC somewhere," and no buyer refund address is tracked anywhere in the data model — an honest limitation, not a regression.
+  - **Verified**: a pure-crypto self-test (`scripts/verify-circle-provider.ts`, no account needed) proves `verifyCircleSignature` accepts a correctly-signed payload and rejects a wrong-key or tampered one — all 3 checks pass. **Not yet verified**: an actual Circle sandbox transfer — no `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID` were available this pass (the user opted to build the code now and complete Circle's account setup — generating + registering an entity secret, provisioning and funding a Base Sepolia wallet — afterward, unlike the Stripe pass where a key was pasted mid-session). The live half of the script (a real testnet USDC transfer to a freshly-created temporary destination wallet, polled to on-chain `COMPLETE`) is ready to run once those exist.
+  - **UI gap this surfaced, since closed**: the Payments page's create-milestone form (UI-4, built before this pass) had no recipients field. Fixed same session: an editor (address + a shared split-by-percentage/amount kind, add/remove rows) now lets a milestone get a real payout address through the console, not just the API — required for a stablecoin release to be driven from the UI at all. Smoke-tested in a real browser (Playwright, mocked API response) — renders and adds/removes rows with no console errors.
+
 Remaining (Phase 3):
-1. Recipient-level (ST-12 Transfer) webhook reconciliation.
-2. Durable milestone-*evidence* waits, as opposed to the release-window waits ST-13 already covers (WF-3 remainder).
-3. A real fiat rail is not the same as a *production* one (§C-6): going live needs a licensed money-transmitter partnership + an audit — a business/compliance decision, not a code change. Stablecoin/chain rails also remain local/simulated references pending a real provider.
+1. Live-verify the Circle wiring once sandbox credentials + a funded Base Sepolia wallet exist.
+2. Recipient-level webhook reconciliation for both providers (Stripe Transfers, Circle per-recipient transactions on a split).
+3. Durable milestone-*evidence* waits, as opposed to the release-window waits ST-13 already covers (WF-3 remainder).
+4. `executeRefund`'s parallel "pending refund" gap (documented, currently unreachable — no rail refunds asynchronously today).
+5. A real rail is not the same as a *production* one (§C-6): going live needs a licensed money-transmitter partnership + an audit for both Stripe and Circle — a business/compliance decision, not a code change. The on-chain/`chain` family remains a local/simulated reference pending its own real provider.
 
 ### Phase 4 — Public Demand Marketplace 🟡 (scaffolded)
 All 9 required screens exist as Next.js pages (home/search, missions/[id], opportunities, opportunities/[id], approvals, transactions/[id], payments, archive, settings) with a typed API client; payments is no longer read-only (UI-4, above). Remaining: polish Search/Ask, mission history/archive depth, richer transaction timeline, sharing permissions, user↔agent steering.
@@ -166,7 +176,7 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 
 ## 8. Configuration surface (env)
 
-`NODE_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `SUPABASE_*`, `REDIS_URL`, `TEMPORAL_*`, `LLM_DEFAULT_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`EMBEDDING_BACKEND`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `DEFAULT_STABLECOIN_NETWORK`, `CHAIN_RPC_URL`, `TELEGRAM_*`/`EMAIL_FROM`/`SMTP_URL`, `APPROVAL_TOKEN_SECRET`, `AUDIT_ANCHOR_ENABLED`, `APPROVAL_TIMEOUT_MINUTES`, `MISSION_REFRESH_INTERVAL_MINUTES`, `SUPPLY_STALE_MINUTES`, `SETTLEMENT_AUTO_RELEASE_THRESHOLD_MINOR`. All validated in `config`; safe defaults let dev/CI run keyless.
+`NODE_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `SUPABASE_*`, `REDIS_URL`, `TEMPORAL_*`, `LLM_DEFAULT_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`EMBEDDING_BACKEND`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `DEFAULT_STABLECOIN_NETWORK`, `CHAIN_RPC_URL`, `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID`, `TELEGRAM_*`/`EMAIL_FROM`/`SMTP_URL`, `APPROVAL_TOKEN_SECRET`, `AUDIT_ANCHOR_ENABLED`, `APPROVAL_TIMEOUT_MINUTES`, `MISSION_REFRESH_INTERVAL_MINUTES`, `SUPPLY_STALE_MINUTES`, `SETTLEMENT_AUTO_RELEASE_THRESHOLD_MINOR`. All validated in `config`; safe defaults let dev/CI run keyless.
 
 ## 9. ADR index
 
@@ -176,9 +186,10 @@ No new ADR filed for the ST-13 timer workflow — it applies ADR-006 (Temporal) 
 
 ## 10. Immediate next options
 
-Ordered by leverage on the Transaction-OS thesis. Phase 3's fiat rail is now real (Stripe test mode) — the honest next step for money rails is production readiness, not more rail-provider wiring:
-1. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds; a business/compliance decision, code changes alone can't cross it.
-2. **Recipient-level (ST-12 Transfer) webhook reconciliation** — the remaining Stripe reconciliation gap.
-3. **Phase 4 polish** — sharing permissions + user↔agent steering + richer mission/transaction timelines.
-4. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.
-5. **A full AND/OR escrow-condition builder in the UI** — the create-milestone form only offers a single predicate; the API already supports arbitrary trees.
+Ordered by leverage on the Transaction-OS thesis. Both money rails (fiat/Stripe, stablecoin/Circle) are now real and the create-milestone UI can drive both — the honest next step is verifying Circle live, not more wiring:
+1. **Live-verify Circle** — `scripts/verify-circle-provider.ts` is ready; run it once sandbox credentials + a funded Base Sepolia wallet exist.
+2. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds on either rail; a business/compliance decision, code changes alone can't cross it.
+3. **Recipient-level webhook reconciliation** — the remaining gap for both Stripe (Transfers) and Circle (per-recipient transactions on a split).
+4. **Phase 4 polish** — sharing permissions + user↔agent steering + richer mission/transaction timelines.
+5. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.
+6. **A full AND/OR escrow-condition builder in the UI** — the create-milestone form only offers a single predicate; the API already supports arbitrary trees.

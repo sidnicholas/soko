@@ -33,6 +33,12 @@ const EnvSchema = z.object({
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   DEFAULT_STABLECOIN_NETWORK: z.string().default("base-sepolia"),
   CHAIN_RPC_URL: z.string().optional(),
+  // Circle Developer-Controlled Wallets (stablecoin rail, §19.2). All three
+  // required together for real transfers; absent = simulated, same pattern
+  // as STRIPE_SECRET_KEY.
+  CIRCLE_API_KEY: z.string().optional(),
+  CIRCLE_ENTITY_SECRET: z.string().optional(),
+  CIRCLE_WALLET_ID: z.string().optional(),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
@@ -74,6 +80,9 @@ export interface AppConfig {
     stripeWebhookSecret?: string;
     defaultStablecoinNetwork: string;
     chainRpcUrl?: string;
+    circleApiKey?: string;
+    circleEntitySecret?: string;
+    circleWalletId?: string;
   };
   notifications: {
     telegramBotToken?: string;
@@ -122,6 +131,9 @@ function toConfig(env: Env): AppConfig {
       stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
       defaultStablecoinNetwork: env.DEFAULT_STABLECOIN_NETWORK,
       chainRpcUrl: env.CHAIN_RPC_URL,
+      circleApiKey: env.CIRCLE_API_KEY,
+      circleEntitySecret: env.CIRCLE_ENTITY_SECRET,
+      circleWalletId: env.CIRCLE_WALLET_ID,
     },
     notifications: {
       telegramBotToken: env.TELEGRAM_BOT_TOKEN,

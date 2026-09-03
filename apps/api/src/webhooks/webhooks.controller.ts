@@ -19,6 +19,15 @@ export class WebhooksController {
     return this.webhooks.handleStripe(signature, req.rawBody);
   }
 
+  @Post("circle")
+  circle(
+    @Headers("x-circle-signature") signature: string | undefined,
+    @Headers("x-circle-key-id") keyId: string | undefined,
+    @Req() req: RawBodyRequest<FastifyRequest>,
+  ) {
+    return this.webhooks.handleCircle(signature, keyId, req.rawBody);
+  }
+
   @Post("telegram")
   telegram(
     @Headers("x-telegram-bot-api-secret-token") secretToken: string | undefined,
