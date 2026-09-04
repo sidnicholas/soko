@@ -40,6 +40,17 @@ const EnvSchema = z.object({
   CIRCLE_ENTITY_SECRET: z.string().optional(),
   CIRCLE_WALLET_ID: z.string().optional(),
 
+  // eBay Browse API connector (§17/ADR-014, official_api). Both required
+  // together for real search; absent = fixtures only, same keyless-dev
+  // pattern as the Circle/Stripe rails.
+  EBAY_CLIENT_ID: z.string().optional(),
+  EBAY_CLIENT_SECRET: z.string().optional(),
+  EBAY_MARKETPLACE_ID: z.string().default("EBAY_US"),
+  // Unlike the fixture connectors, eBay Browse API rejects a blank query —
+  // a coarse stand-in seed term until ingestion is driven by live demand
+  // descriptions instead (see project memory backlog).
+  EBAY_SEED_QUERY: z.string().default("electronics"),
+
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -89,6 +100,12 @@ export interface AppConfig {
     telegramChatId?: string;
     emailFrom?: string;
     smtpUrl?: string;
+  };
+  connectors: {
+    ebayClientId?: string;
+    ebayClientSecret?: string;
+    ebayMarketplaceId: string;
+    ebaySeedQuery: string;
   };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
   policy: {
@@ -140,6 +157,12 @@ function toConfig(env: Env): AppConfig {
       telegramChatId: env.TELEGRAM_CHAT_ID,
       emailFrom: env.EMAIL_FROM,
       smtpUrl: env.SMTP_URL,
+    },
+    connectors: {
+      ebayClientId: env.EBAY_CLIENT_ID,
+      ebayClientSecret: env.EBAY_CLIENT_SECRET,
+      ebayMarketplaceId: env.EBAY_MARKETPLACE_ID,
+      ebaySeedQuery: env.EBAY_SEED_QUERY,
     },
     security: {
       approvalTokenSecret: env.APPROVAL_TOKEN_SECRET,

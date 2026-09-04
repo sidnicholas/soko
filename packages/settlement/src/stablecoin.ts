@@ -34,7 +34,7 @@ function centsToUsdcDecimal(amountMinor: number): string {
  * Not a spec-correct UUIDv5 — just a valid-shaped v4-looking string derived
  * from a SHA-256 of the seed, which is all Circle's validation requires.
  */
-function deterministicUuid(seed: string): string {
+export function deterministicUuid(seed: string): string {
   const hex = createHash("sha256").update(seed).digest("hex").slice(0, 32);
   const variant = ((parseInt(hex[16]!, 16) & 0x3) | 0x8).toString(16);
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${variant}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
@@ -172,7 +172,7 @@ export class StablecoinRail implements SettlementRail {
   }
 }
 
-function simpleHash(input: string): string {
+export function simpleHash(input: string): string {
   let h = 0;
   for (let i = 0; i < input.length; i++) h = (Math.imul(31, h) + input.charCodeAt(i)) | 0;
   return (h >>> 0).toString(16).padStart(8, "0");

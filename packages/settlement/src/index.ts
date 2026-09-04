@@ -3,6 +3,7 @@ import type { Money, RailFamily, SettlementPlan } from "@opportunity-os/contract
 export * from "./fiat";
 export * from "./stablecoin";
 export * from "./asset-transfer";
+export * from "./nft";
 
 /** §19 — the rail-neutral settlement abstraction. Native from day one. */
 export interface RailCapabilities {

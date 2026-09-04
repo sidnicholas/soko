@@ -55,7 +55,8 @@ export interface HttpConnectorConfig {
   policy: ConnectorPolicy;
   /** Injected for tests / custom auth; defaults to global fetch. */
   fetchImpl?: typeof fetch;
-  buildRequest(input: ConnectorSearch): { url: string; init?: RequestInit };
+  /** May be async — e.g. an OAuth client-credentials token fetched/cached before the request is built. */
+  buildRequest(input: ConnectorSearch): { url: string; init?: RequestInit } | Promise<{ url: string; init?: RequestInit }>;
 }
 
 /** Official-API / licensed-feed connector: fetch JSON, map to observations. */
@@ -68,7 +69,7 @@ export function makeHttpApiConnector(
     capabilities: cfg.capabilities,
     policy: cfg.policy,
     async search(input: ConnectorSearch): Promise<RawObservation[]> {
-      const { url, init } = cfg.buildRequest(input);
+      const { url, init } = await cfg.buildRequest(input);
       const res = await doFetch(url, init);
       if (!res.ok) throw new Error(`${cfg.id} api ${res.status}`);
       const json: unknown = await res.json();
@@ -95,7 +96,7 @@ export function makeCrawlConnector(
     capabilities: cfg.capabilities,
     policy: cfg.policy,
     async search(input: ConnectorSearch): Promise<RawObservation[]> {
-      const { url, init } = cfg.buildRequest(input);
+      const { url, init } = await cfg.buildRequest(input);
       const res = await doFetch(url, init);
       if (!res.ok) throw new Error(`${cfg.id} crawl ${res.status}`);
       return cfg.parse(await res.text(), input).map((item) => toObservation(cfg.id, cfg.policy.automation, item));

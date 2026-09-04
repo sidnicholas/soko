@@ -102,6 +102,29 @@ Monorepo, CI, typed config, Postgres/Supabase-portable, migrations + runner, dom
 - Graph-derived opportunities: arbitrage/bundle edges become first-class deals on the operator feed.
 - Lifecycle worker drives periodic refresh; opportunities enter the DB, match, score, refresh, and appear without manual hunting. **Phase 1 exit criterion met.**
 
+**Real connector, 2026-09-04**: `worker-connectors/main.ts` had only ever
+registered the two fixture connectors — `makeHttpApiConnector`/
+`makeCrawlConnector` (the real adapter shapes noted above) existed but were
+never instantiated by any app, so no real supply/demand data actually
+entered the system. First real source now wired: `makeEbayConnector`
+(`packages/connectors-sdk/src/ebay.ts`), the eBay Browse API — official
+OAuth2 client-credentials app token, `automation: "official_api"` (§17/
+ADR-014), gated on `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` (absent = fixtures
+only, same keyless-dev pattern as Stripe/Circle). `HttpConnectorConfig.
+buildRequest` was generalized to allow an async return so the connector can
+fetch/cache its OAuth token before building the search request — a change
+any future OAuth-based source (e.g. Etsy) will also need, not an eBay-only
+hack.
+Known limitation, not yet fixed: eBay's Browse API rejects a blank query,
+unlike the fixture connectors' "return everything" shape, so it can't just
+join the existing blank-query sweep — it runs as a second, separate
+`ingestConnectors` call each cycle against a single static
+`EBAY_SEED_QUERY` (default `"electronics"`). The real fix is querying by
+live demand descriptions instead of a static seed term — `packages/
+discovery/src/pipeline.ts` already calls connectors with a real `input.
+query` derived from demand, so that's the pattern to extend to the periodic
+worker sweep, not a new mechanism.
+
 ### Phase 2 — Human-Controlled Execution ✅
 - LLM negotiation drafting with deterministic template fallback (always non-binding; never auto-sends). Feeds market-graph comparables into the draft.
 - Approval service: request → mint HMAC approval token (bound to action + payload hash + expiry) → decision (approve/reject/modify/expire) → audit + events.
@@ -206,11 +229,26 @@ started before Circle):
 - `chain`: `ProgrammableAssetTransferAdapter` — in-memory reference rail
   (prepare/execute/status/verifyOwnership, plus dispute/freeze/reclaim for
   escrow clawback). No real chain/marketplace wired up yet.
+- `settlement`: `CircleNftRail` (`nft.ts`) — first real (non-in-memory)
+  `AssetTransferRail`, prototype tier. Reuses `StablecoinRail`'s Circle
+  Developer-Controlled Wallets custody rather than a new integration:
+  `createTransaction` with `tokenAddress` + `nftTokenIds` + `amount: ["1"]`
+  does an ERC-721 transfer; `getWalletNFTBalance`/`getWallet` back
+  `verifyOwnership`, honestly scoped to the platform's own custodial wallet
+  only (Circle can't attest an arbitrary external address's holdings).
+  Simulated with no Circle config, same duality as `StablecoinRail`. **Not**
+  live-verified against a real Circle account yet, **not** wired into any
+  service/route (see backlog item below) — importable and tested, otherwise
+  inert.
 
 Open ideas, unordered, add to freely:
-- A real NFT rail (e.g. Seaport/OpenSea-style protocol) behind
-  `AssetTransferRail` — first real implementation, lowest legal exposure of
-  the four kinds.
+- **Wire `CircleNftRail` into an `AssetTransferService`** + a NestJS provider
+  + an API route or Temporal activity + a `packages/db` table for
+  `AssetTransferPlan` (none of these exist yet — today the rail is
+  unreachable from the running app). Deliberately held back rather than done
+  alongside the prototype: wiring it in means a real transaction could hit
+  it before custody model and valuation (below) have answers, and unwiring
+  a live path is a bigger deal than not wiring one yet.
 - A real DeFi-position rail (e.g. an Aave/Uniswap LP position) — highest
   exposure of the four (`securities`/Howey-test adjacent); needs its own
   legal read before a live rail, not just a code integration.
@@ -233,7 +271,76 @@ Open ideas, unordered, add to freely:
   reporting) — likely a `packages/audit` or `packages/settlement` concern
   once a real rail exists.
 
-## 11. Immediate next options
+## 11. Multi-channel messaging intake, negotiation & transaction (open backlog)
+
+Unsequenced, add-to-freely — same style as §10. Goal: a person can text,
+email, or message Soko (SMS, email, Telegram, WhatsApp, group chats, ...)
+what they want to sell/buy, and Soko can respond, negotiate, and carry the
+deal to transaction **through that same channel**, not just a web console.
+
+What exists today that this builds on:
+- Outbound-only, operator-facing: `deliverApproval`
+  (`apps/worker-notifications/src/deliver.ts`) sends a fixed operator's
+  Telegram chat / email a one-way approval-link notification. Single
+  hardcoded destination (`TELEGRAM_CHAT_ID`/`EMAIL_FROM`), not per-counterparty,
+  and never expects a reply.
+- `POST /signals` (`apps/api/src/signals/`) — multi-channel intake, but
+  requires an authenticated `Principal` (`signal:submit` permission) and a
+  known `source_id`. No path for an anonymous inbound webhook (a stranger
+  texting a number has no platform session).
+  `SignalChannel` (`contracts/enums.ts`) has no SMS/email/Telegram/WhatsApp
+  values yet (`public_web, official_api, browser_extension, user_submitted,
+  merchant_feed, request_mining, internal`).
+- NL demand parser (`packages/demand`, ADR-018) already turns free text into
+  a `DemandSpecification` — the natural target for "here's what I want to
+  sell" arriving as an SMS/email body, once it can reach the parser at all.
+- `packages/negotiation` (ADR-020) drafts negotiation text but never sends
+  it (Phase 2 invariant, §14) — sending a draft *out* through a real channel
+  to a real counterparty is new work, not a relaxation of that invariant
+  (the human-approval gate on `negotiation:send` still applies).
+
+Open ideas, unordered:
+- **Inbound webhook receivers**, one per channel, same auth pattern as
+  `/webhooks/stripe`/`/webhooks/circle` (verify the provider's signature,
+  not a platform session) — Telegram bot webhook (smallest lift: bot token
+  already configured for outbound), Twilio SMS inbound, an email-inbound
+  provider (SendGrid Inbound Parse / Mailgun Routes / Postmark), WhatsApp
+  Business API webhook. Each needs its own signature-verification function,
+  same shape as `verifyCircleSignature`.
+- **Identity resolution**: an inbound message arrives from a phone
+  number/email/chat-id, not a `Principal`. Need counterparty lookup-or-create
+  by channel identity against `Counterparty` (contracts/entities.ts) — a
+  person messaging Soko is not necessarily a registered `User`.
+- **Channel → signal mapping**: extend `SignalChannel` with `sms`/`email`/
+  `telegram`/`whatsapp`/`group_chat` (or similar) and route inbound message
+  bodies through the existing NL demand parser rather than a new parser per
+  channel.
+- **Outbound negotiation dispatch keyed by channel + counterparty identity**,
+  not the single fixed operator destination `deliverApproval` uses today —
+  a reply has to land back in the same SMS thread / email thread / Telegram
+  chat it came from, addressed to whichever counterparty is on the other end
+  this time, still behind the existing `negotiation:send` approval gate.
+- **In-channel transaction actions**: "reply YES to accept" / a one-tap
+  approval link sent over SMS — extends `deliverApproval`'s existing
+  `actionUrl` pattern (already a link-based approve/reject flow) rather than
+  inventing a new one, but needs a signed, expiring, channel-deliverable
+  token an unauthenticated reply can carry back.
+- **Group messaging** is a different shape from 1:1 (multiple participants,
+  @mentions/threading, ambiguous "who is negotiating") — treat as its own
+  design pass once 1:1 works for at least one channel, not bundled in from
+  the start.
+- Abuse/spam surface: an inbound channel open to anyone is a new unauthenticated
+  attack surface (prompt injection into the demand parser, spam signal
+  flooding) — §13.2/13.3's "untrusted data is never instructions" invariant
+  applies here at least as much as it does to connector content today.
+
+Suggested first prototype (not yet built, pending user pick): **Telegram**,
+since outbound already exists (bot token, `deliverApproval`) — closing the
+loop to inbound webhook + reply is the smallest lift of the channels listed,
+and a good place to shape the identity-resolution + dispatch pattern before
+replicating it to SMS/email/WhatsApp.
+
+## 12. Immediate next options
 
 Ordered by leverage on the Transaction-OS thesis. Both money rails (fiat/Stripe, stablecoin/Circle) are now real, live-verified, and the create-milestone UI can drive both — the honest next step is production readiness, not more wiring:
 1. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds on either rail; a business/compliance decision, code changes alone can't cross it.
