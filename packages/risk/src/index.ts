@@ -25,6 +25,12 @@ const CATEGORY_POLICY: Record<string, CategoryPolicy> = {
   securities: "prohibited_for_v1",
   adult: "prohibited_for_v1",
   hazardous_materials: "prohibited_for_v1",
+  // §19 crypto-asset expansion — accepted risk (not hard-blocked); tighten
+  // per-category as jurisdiction-specific regulation lands, not preemptively.
+  nft: "allowed",
+  defi_position: "allowed",
+  data_feed_subscription: "allowed",
+  synthetic_position: "allowed",
 };
 
 export function classifyCategory(category: string | null | undefined): CategoryPolicy {

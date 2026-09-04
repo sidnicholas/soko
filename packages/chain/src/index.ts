@@ -10,6 +10,8 @@ import type {
   SettlementRail,
 } from "@opportunity-os/settlement";
 
+export * from "./asset-transfer";
+
 /** §19.4 — only hashes/attestations go on-chain; PII and terms stay off-chain. */
 function canonicalHash(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");

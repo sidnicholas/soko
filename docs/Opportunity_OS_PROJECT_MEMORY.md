@@ -185,7 +185,55 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 
 No new ADR filed for the ST-13 timer workflow — it applies ADR-006 (Temporal) and ADR-029's release engine to real timestamps rather than introducing a new decision.
 
-## 10. Immediate next options
+## 10. Crypto-asset & marketplace expansion (open backlog)
+
+Not a phase, not sequenced — an accepted-risk growth area we add to as ideas
+show up, distinct from §5's ordered roadmap. Scope: transacting asset
+*classes* beyond currency (an NFT, a DeFi position, a data-feed subscription,
+a synthetic position), as opposed to §19's settlement rails, which move
+currency to pay for any of the above. Decision on record: categories are
+**not** hard-blocked pending regulation — `risk.CATEGORY_POLICY` allows
+`nft`/`defi_position`/`data_feed_subscription`/`synthetic_position` today;
+tighten per-category only when a specific jurisdiction's rule requires it.
+
+Shipped so far (reference-tier, mirrors where `chain`'s settlement rail
+started before Circle):
+- `contracts`: `AssetKind`, `AssetDescriptor` (chain-agnostic locator),
+  `AssetTransferPlan`, `AssetTransferStatus`.
+- `settlement`: `AssetTransferRail` / `AssetTransferService` — a sibling
+  abstraction to `SettlementRail`, not a method on it, because a transfer
+  moves one specific object/position, not a fungible amount.
+- `chain`: `ProgrammableAssetTransferAdapter` — in-memory reference rail
+  (prepare/execute/status/verifyOwnership, plus dispute/freeze/reclaim for
+  escrow clawback). No real chain/marketplace wired up yet.
+
+Open ideas, unordered, add to freely:
+- A real NFT rail (e.g. Seaport/OpenSea-style protocol) behind
+  `AssetTransferRail` — first real implementation, lowest legal exposure of
+  the four kinds.
+- A real DeFi-position rail (e.g. an Aave/Uniswap LP position) — highest
+  exposure of the four (`securities`/Howey-test adjacent); needs its own
+  legal read before a live rail, not just a code integration.
+- A data-feed-subscription rail — closest to a plain service purchase;
+  escrow release can likely reuse the existing `oracle_true` predicate
+  (`escrow.ts`) rather than needing new condition types.
+- Synthetic-position rail — payout resolves off oracle data; same
+  derivative/securities-adjacent exposure as DeFi positions above.
+- Custody model for held assets: §19's "platform never holds keys/funds
+  directly" invariant needs an explicit answer for *assets* too — does an
+  escrowed NFT sit in a platform-controlled contract (like the programmable
+  settlement rail's escrow) or a third-party custodian?
+- Valuation/appraisal for illiquid or volatile assets mid-escrow — dispute
+  and refund math (ST-11-style) assumes a knowable amount; an NFT or DeFi
+  position doesn't have one without a price oracle.
+- Reclaim enforceability: `reclaim()` only *records* a state change today —
+  whether a real rail can actually claw back a transferred asset depends on
+  the asset kind and custody model above, not on this interface.
+- Tax/reporting surface for NFT/DeFi settlements (cost basis, 1099-DA-style
+  reporting) — likely a `packages/audit` or `packages/settlement` concern
+  once a real rail exists.
+
+## 11. Immediate next options
 
 Ordered by leverage on the Transaction-OS thesis. Both money rails (fiat/Stripe, stablecoin/Circle) are now real, live-verified, and the create-milestone UI can drive both — the honest next step is production readiness, not more wiring:
 1. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds on either rail; a business/compliance decision, code changes alone can't cross it.

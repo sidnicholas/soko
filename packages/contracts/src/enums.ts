@@ -107,6 +107,19 @@ export type ConnectorCapability = z.infer<typeof ConnectorCapability>;
 export const CategoryPolicy = z.enum(["allowed", "review_required", "prohibited_for_v1"]);
 export type CategoryPolicy = z.infer<typeof CategoryPolicy>;
 
+/**
+ * §19/crypto-asset expansion — non-fungible/position asset classes that move
+ * as a distinct object or position rather than a fungible Money amount.
+ * Deliberately open-ended on kind, not on legality: the risk category gate
+ * (@opportunity-os/risk `CATEGORY_POLICY`) still decides per-category what's
+ * actually transactable.
+ */
+export const AssetKind = z.enum(["nft", "defi_position", "data_feed_subscription", "synthetic_position"]);
+export type AssetKind = z.infer<typeof AssetKind>;
+
+export const AssetTransferStatus = z.enum(["pending", "confirmed", "failed", "reclaimed"]);
+export type AssetTransferStatus = z.infer<typeof AssetTransferStatus>;
+
 export const CounterpartyType = z.enum(["person", "organization"]);
 export type CounterpartyType = z.infer<typeof CounterpartyType>;
 
