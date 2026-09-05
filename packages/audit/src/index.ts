@@ -53,6 +53,24 @@ export function hashRefundTerms(terms: { milestoneId: string; amountMinor: numbe
   );
 }
 
+/**
+ * Canonical hash of a negotiation-send command's terms (§14/§22, §11
+ * messaging backlog). Binds the approval to this exact message text going to
+ * this exact channel+identity — approving a send is approving *this wording*
+ * to *this destination*, not open-ended permission to negotiate.
+ */
+export function hashNegotiationSendTerms(terms: { negotiationId: string; channel: string; identity: string; text: string }): string {
+  return sha256Hex(
+    canonicalJson({
+      action: "send_negotiation",
+      negotiationId: terms.negotiationId,
+      channel: terms.channel,
+      identity: terms.identity,
+      text: terms.text,
+    }),
+  );
+}
+
 /** An audit event before the chain assigns its linking hashes. */
 export type AuditEventDraft = Omit<AuditEvent, "event_hash" | "previous_event_hash">;
 

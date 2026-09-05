@@ -41,6 +41,20 @@ export function timingSafeStringEqual(a: string, b: string): boolean {
   return timingSafeEqual(aBuf, bBuf);
 }
 
+/**
+ * Mailgun signs inbound-route webhooks with HMAC-SHA256 over `timestamp +
+ * token` (both delivered as separate form fields alongside the signature,
+ * not derived from the request URL or raw body the way Stripe/Twilio work).
+ * See https://documentation.mailgun.com/docs/mailgun/user-manual/tracking-messages/#webhooks-security.
+ */
+export function verifyMailgunSignature(timestamp: string, token: string, signature: string, signingKey: string): boolean {
+  const expected = createHmac("sha256", signingKey).update(timestamp + token, "utf8").digest("hex");
+  const expectedBuf = Buffer.from(expected, "utf8");
+  const actualBuf = Buffer.from(signature, "utf8");
+  if (expectedBuf.length !== actualBuf.length) return false;
+  return timingSafeEqual(expectedBuf, actualBuf);
+}
+
 /** Replay-safe idempotency key derived from the raw payload (§10 outbox dedupe). */
 export function payloadIdempotencyKey(prefix: string, rawBody: string): string {
   return `${prefix}:${createHash("sha256").update(rawBody).digest("hex")}`;

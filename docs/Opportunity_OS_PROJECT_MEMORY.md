@@ -204,7 +204,7 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 
 ## 9. ADR index
 
-001 TS monorepo · 002 Next.js FE · 003 NestJS/Fastify · 004 modular-first · 005 Postgres/Supabase SoR · 006 Temporal durable workflows · 007 transactional outbox · 008 central LLM gateway · 009 policy-enforced human approval · 010 rail-neutral settlement · 011 blockchain for settlement proofs only · 012 hash-chained audit · 013 Railway-first/AWS-portable · 014 permitted/authorized sources only · 015 deterministic final scoring · 016 V1 decision-packet defaults · 017 lifecycle worker drives V1 discovery · 018 demand parser LLM+heuristic · 019 approval tokens + synchronous execution · 020 LLM negotiation drafting · 021 durable approval-wait workflow · 022 signals→outcomes transaction-discovery network · 023 market graph + entity resolution · 024 embeddings + graph edges · 025 embedding provider · 026 pgvector backend · 027 graph-derived opportunities · 028 risk-gated channel adapters · 029 escrow condition/release engine · 030 rail execution · 031 refund/dispute execution.
+001 TS monorepo · 002 Next.js FE · 003 NestJS/Fastify · 004 modular-first · 005 Postgres/Supabase SoR · 006 Temporal durable workflows · 007 transactional outbox · 008 central LLM gateway · 009 policy-enforced human approval · 010 rail-neutral settlement · 011 blockchain for settlement proofs only · 012 hash-chained audit · 013 Railway-first/AWS-portable · 014 permitted/authorized sources only · 015 deterministic final scoring · 016 V1 decision-packet defaults · 017 lifecycle worker drives V1 discovery · 018 demand parser LLM+heuristic · 019 approval tokens + synchronous execution · 020 LLM negotiation drafting · 021 durable approval-wait workflow · 022 signals→outcomes transaction-discovery network · 023 market graph + entity resolution · 024 embeddings + graph edges · 025 embedding provider · 026 pgvector backend · 027 graph-derived opportunities · 028 risk-gated channel adapters · 029 escrow condition/release engine · 030 rail execution · 031 refund/dispute execution · 032 multi-channel messaging + negotiation:send execution.
 
 No new ADR filed for the ST-13 timer workflow — it applies ADR-006 (Temporal) and ADR-029's release engine to real timestamps rather than introducing a new decision.
 
@@ -342,47 +342,76 @@ raw-buffer capture like Stripe's JSON parser needed here). `twilioSmsToSignal`
 (`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER`), same
 success/rejection-message pattern as the Telegram reply.
 
+**Shipped, 2026-09-05 — email + WhatsApp channels, and negotiation:send**
+(ADR-032 has the full decision record; summary here). Third/fourth inbound
+channels: `POST /webhooks/email` (Mailgun inbound routes,
+`verifyMailgunSignature` — HMAC-SHA256 over `timestamp + token`, a third
+distinct signing scheme alongside Twilio's URL-inclusive HMAC and Circle's
+ECDSA) and `GET`/`POST /webhooks/whatsapp` (Meta's verify-token handshake +
+`X-Hub-Signature-256`, reusing the existing `verifyHmacSignature` rather
+than a new function). `SignalChannel` gains `email`/`whatsapp`.
+Outbound sending was pulled out of `WebhooksService` into
+`apps/api/src/messaging` — a `MessageChannel` interface + `TelegramChannel`/
+`TwilioSmsChannel`/`EmailChannel`/`WhatsAppChannel` + a
+`MessageChannelRegistry`, composed in `messaging.module.ts` the same way
+`settlement/rails.ts` composes `SettlementService`. All four inbound
+handlers now share one `intakeAndAck` helper.
+Separately — and this is the bigger piece — **`negotiation:send` is now a
+real, callable action**: `POST /negotiations/:id/send`
+(`apps/api/src/negotiations/`), gated exactly like `transaction:propose`
+(mirrors `TransactionService.propose` line for line): verify the approval
+token against `hashNegotiationSendTerms({negotiationId, channel, identity,
+text})` (new, `packages/audit`), re-check the approval row, dispatch via
+`MessageChannelRegistry`, then persist via `sendNegotiation`
+(`packages/db`) — asserts `NEGOTIATION_TRANSITIONS` (new, `packages/domain`:
+`draft`/`countered` → `proposed`), appends the returned message id to
+`negotiations.outbound_message_ids`, hash-chained audit event, emits the
+already-allocated `negotiation.send_requested.v1`. Real gap-fill this
+required: `negotiation:send` was a declared `Permission` since ADR-020 but
+**granted to no role** — `ROLE_PERMISSIONS` never listed it, so the endpoint
+would have 403'd for everyone regardless of token. Now granted to
+`operator`/`admin`, same as `settlement:release`/`transaction:propose`.
+
 Open ideas, unordered:
-- **Identity resolution**: both channels above carry identity as
-  `source_id`/`raw.{chatId,from}`, not a resolved `Counterparty`
-  (`contracts/entities.ts`) — there's still no counterparty lookup-or-create
-  by channel identity anywhere in `packages/db`. Needed before a real
-  negotiation/transaction (as opposed to a logged signal) can happen through
-  a channel.
+- **Identity resolution**: every channel above carries identity as
+  `source_id`/`raw.{chatId,from}` (inbound) or an explicit `{channel,
+  identity}` in the request body (negotiation send) — never a resolved
+  `Counterparty` (`contracts/entities.ts`). There's still no counterparty
+  lookup-or-create by channel identity anywhere in `packages/db`.
+- **Inbound replies don't thread to an open negotiation.** This is the
+  answer to "does the channel become 2-way once opened": partially. The
+  counterparty *can* reply — the webhook is open — but every inbound
+  message today creates a brand-new signal (`kind: "supply"`, hardcoded),
+  never recognizes "this chat/number already has a `proposed` negotiation"
+  and advances it to `countered`/`accepted`/`rejected`. `NEGOTIATION_TRANSITIONS`
+  models those edges; nothing drives them from an inbound message yet. Until
+  this exists, "2-way" means: counterparty can always speak, but Soko's side
+  of the conversation stays one human-approved message at a time, never an
+  automatic reply loop.
 - **Route through the NL demand parser** instead of a raw signal
   description — today "I want $150 for my monitor" becomes signal free text,
-  not a structured price/category/item like `packages/demand` would extract
-  from the same text via `/missions`.
-- **Supply vs. demand classification**: both prototypes hardcode
-  `kind: "supply"` per the original ask ("send things they want to sell") —
-  a real version should decide from content, or ask.
-- **`PUBLIC_API_BASE_URL` correctness in a real deployment**: needs
-  verifying against whatever's actually in front of the API (load balancer,
-  Railway's own proxy, etc.) — the Twilio signature check silently rejects
-  everything if this doesn't match byte-for-byte.
-- **Other channels**: an email-inbound provider (SendGrid Inbound Parse /
-  Mailgun Routes / Postmark), WhatsApp Business API webhook — same shape as
-  the two receivers above (verify the provider's signature, map to a
-  `SignalSubmitBody`, reply in-channel), each needs its own
-  signature-verification function and `SignalChannel` value.
-- **Outbound negotiation dispatch keyed by channel + counterparty
-  identity** — the prototype's reply is a fixed acknowledgment string, not a
-  negotiation draft. Sending an actual `packages/negotiation` draft back
-  through the channel, still behind `negotiation:send`'s approval gate, is
-  separate work.
+  not a structured price/category/item like `packages/demand` would extract.
+- **Supply vs. demand classification**: all four inbound prototypes hardcode
+  `kind: "supply"` — a real version should decide from content, or ask.
+- **`PUBLIC_API_BASE_URL` correctness in a real deployment** (Twilio) and
+  **Mailgun's `multipart/form-data`** (only `x-www-form-urlencoded` is
+  registered in `main.ts` today, that's Twilio's content type, not
+  Mailgun's — needs `@fastify/multipart` for a real Mailgun route).
 - **In-channel transaction actions**: "reply YES to accept" / a one-tap
   approval link sent over SMS — extends `deliverApproval`'s existing
-  `actionUrl` pattern rather than inventing a new one, but needs a signed,
-  expiring, channel-deliverable token an unauthenticated reply can carry
-  back.
+  `actionUrl` pattern, but needs a signed, expiring, channel-deliverable
+  token an unauthenticated reply can carry back.
 - **Group messaging** is a different shape from 1:1 (multiple participants,
   @mentions/threading, ambiguous "who is negotiating") — its own design
   pass, not bundled into the 1:1 pattern above.
 - Abuse/spam surface: an inbound channel open to anyone is a new
   unauthenticated attack surface. `detectInjection` covers prompt injection
   (same as connector content), but there's no rate-limiting or spam
-  detection on inbound messages yet — a single Telegram chat or phone number
-  could submit unlimited signals today.
+  detection on inbound messages yet.
+- None of the four outbound channels (`MessageChannelRegistry`'s
+  implementations) has been exercised against a live provider account —
+  same "unverified against live account" caveat every provider integration
+  here has shipped with pre-verification.
 
 ## 12. Immediate next options
 

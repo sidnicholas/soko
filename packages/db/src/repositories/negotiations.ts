@@ -1,5 +1,8 @@
+import type { NegotiationState } from "@opportunity-os/contracts";
+import { assertTransition, NEGOTIATION_TRANSITIONS } from "@opportunity-os/domain";
 import { getDb } from "../pool";
 import { enqueueEvent } from "../outbox";
+import { appendAuditEvent } from "./audit";
 
 /**
  * Everything the drafter needs about an opportunity's counterparty and terms,
@@ -63,5 +66,79 @@ export async function createNegotiationDraft(input: CreateNegotiationDraftInput)
       });
 
       return negotiation;
+    });
+}
+
+export async function getNegotiation(id: string) {
+  return getDb().selectFrom("negotiations").selectAll().where("id", "=", id).executeTakeFirst();
+}
+
+export interface SendNegotiationInput {
+  negotiationId: string;
+  channel: string;
+  identity: string;
+  text: string;
+  externalRef: string | undefined;
+  decidedBy: string;
+  termsHash: string;
+}
+
+export interface SendNegotiationResult {
+  negotiationId: string;
+  state: NegotiationState;
+  auditEventHash: string;
+}
+
+/**
+ * §11 messaging backlog / §14 negotiation:send — record an already-dispatched
+ * negotiation message: advance `draft`/`countered` -> `proposed`
+ * (`NEGOTIATION_TRANSITIONS`), append the channel's message id to
+ * `outbound_message_ids`, write a hash-chained audit event, emit the
+ * pre-allocated `negotiation.send_requested.v1` event. Dispatch itself
+ * (the actual channel API call) happens in the caller *before* this, since
+ * this package has no business calling out to Telegram/Twilio/etc — this
+ * function only persists that it happened (§21).
+ */
+export async function sendNegotiation(input: SendNegotiationInput): Promise<SendNegotiationResult> {
+  return getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const negotiation = await tx.selectFrom("negotiations").selectAll().where("id", "=", input.negotiationId).executeTakeFirstOrThrow();
+      const from = negotiation.state as NegotiationState;
+      assertTransition("negotiation", NEGOTIATION_TRANSITIONS, from, "proposed");
+
+      const outboundIds = (negotiation.outbound_message_ids as string[] | null) ?? [];
+      const updatedIds = input.externalRef ? [...outboundIds, input.externalRef] : outboundIds;
+
+      await tx
+        .updateTable("negotiations")
+        .set({ state: "proposed", outbound_message_ids: JSON.stringify(updatedIds) })
+        .where("id", "=", input.negotiationId)
+        .execute();
+
+      const audit = await appendAuditEvent(tx, {
+        actorType: "operator",
+        actorId: input.decidedBy,
+        action: "negotiation.sent",
+        entityType: "negotiation",
+        entityId: input.negotiationId,
+        inputHash: input.termsHash,
+      });
+
+      await enqueueEvent(tx, {
+        eventName: "negotiation.send_requested.v1",
+        aggregateType: "negotiation",
+        aggregateId: input.negotiationId,
+        idempotencyKey: `negotiation.sent:${input.negotiationId}:${input.externalRef ?? audit.event_hash}`,
+        payload: {
+          negotiationId: input.negotiationId,
+          channel: input.channel,
+          identity: input.identity,
+          externalRef: input.externalRef ?? null,
+          auditEventHash: audit.event_hash,
+        },
+      });
+
+      return { negotiationId: input.negotiationId, state: "proposed" as const, auditEventHash: audit.event_hash };
     });
 }

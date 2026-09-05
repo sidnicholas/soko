@@ -1,5 +1,5 @@
 import { Inject } from "@nestjs/common";
-import { Body, Controller, Headers, Param, Post, Req } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post, Query, Req } from "@nestjs/common";
 import type { RawBodyRequest } from "@nestjs/common";
 import { ApiExcludeController } from "@nestjs/swagger";
 import type { FastifyRequest } from "fastify";
@@ -43,6 +43,28 @@ export class WebhooksController {
     @Req() req: FastifyRequest,
   ) {
     return this.webhooks.handleTwilioSms(signature, body ?? {}, req.url);
+  }
+
+  @Post("email")
+  email(@Body() body: Record<string, string>) {
+    return this.webhooks.handleEmail(body ?? {});
+  }
+
+  @Get("whatsapp")
+  whatsappVerify(
+    @Query("hub.mode") mode: string | undefined,
+    @Query("hub.verify_token") verifyToken: string | undefined,
+    @Query("hub.challenge") challenge: string | undefined,
+  ) {
+    return this.webhooks.verifyWhatsAppSubscription(mode, verifyToken, challenge);
+  }
+
+  @Post("whatsapp")
+  whatsapp(
+    @Headers("x-hub-signature-256") signature: string | undefined,
+    @Req() req: RawBodyRequest<FastifyRequest>,
+  ) {
+    return this.webhooks.handleWhatsApp(signature, req.rawBody);
   }
 
   @Post("chain/:network")

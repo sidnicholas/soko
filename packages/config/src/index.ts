@@ -68,6 +68,18 @@ const EnvSchema = z.object({
   // No default: absent means Twilio signature verification cannot run.
   PUBLIC_API_BASE_URL: z.string().optional(),
 
+  // Email inbound (Mailgun Routes, §11 messaging backlog) + outbound (SMTP,
+  // reusing EMAIL_FROM/SMTP_URL above rather than adding a parallel set).
+  MAILGUN_SIGNING_KEY: z.string().optional(),
+
+  // WhatsApp Business Cloud API (Meta), §11 messaging backlog.
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_APP_SECRET: z.string().optional(),
+  // Chosen by us, echoed back by Meta during the GET webhook-verification
+  // handshake — not a secret shared with Meta in advance like the others.
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+
   APPROVAL_TOKEN_SECRET: z.string().default("change-me"),
   AUDIT_ANCHOR_ENABLED: z.coerce.boolean().default(false),
 
@@ -116,6 +128,11 @@ export interface AppConfig {
     twilioAuthToken?: string;
     twilioFromNumber?: string;
     publicApiBaseUrl?: string;
+    mailgunSigningKey?: string;
+    whatsappAccessToken?: string;
+    whatsappPhoneNumberId?: string;
+    whatsappAppSecret?: string;
+    whatsappVerifyToken?: string;
   };
   connectors: {
     ebayClientId?: string;
@@ -177,6 +194,11 @@ function toConfig(env: Env): AppConfig {
       twilioAuthToken: env.TWILIO_AUTH_TOKEN,
       twilioFromNumber: env.TWILIO_FROM_NUMBER,
       publicApiBaseUrl: env.PUBLIC_API_BASE_URL,
+      mailgunSigningKey: env.MAILGUN_SIGNING_KEY,
+      whatsappAccessToken: env.WHATSAPP_ACCESS_TOKEN,
+      whatsappPhoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
+      whatsappAppSecret: env.WHATSAPP_APP_SECRET,
+      whatsappVerifyToken: env.WHATSAPP_VERIFY_TOKEN,
     },
     connectors: {
       ebayClientId: env.EBAY_CLIENT_ID,

@@ -144,6 +144,8 @@ export const SignalChannel = z.enum([
   "internal",
   "telegram",
   "sms",
+  "email",
+  "whatsapp",
 ]);
 export type SignalChannel = z.infer<typeof SignalChannel>;
 

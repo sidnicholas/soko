@@ -2,6 +2,7 @@ import type {
   SettlementStatus,
   TransactionStatus,
   OpportunityStatus,
+  NegotiationState,
 } from "@opportunity-os/contracts";
 
 /**
@@ -65,6 +66,23 @@ export const TRANSACTION_TRANSITIONS: TransitionMap<TransactionStatus> = {
   settled: ["closed"],
   closed: [],
   cancelled: [],
+};
+
+/**
+ * §11 messaging backlog — negotiation:send transitions. `draft`/`countered`
+ * -> `proposed` covers *our own* outbound send (first offer, or answering a
+ * counter); `proposed`/`countered` -> `accepted`/`rejected`/`expired` are
+ * left for whatever eventually processes the counterparty's reply (not built
+ * yet — inbound messages don't thread to a negotiation today, see project
+ * memory §11).
+ */
+export const NEGOTIATION_TRANSITIONS: TransitionMap<NegotiationState> = {
+  draft: ["proposed"],
+  proposed: ["countered", "accepted", "rejected", "expired"],
+  countered: ["proposed", "accepted", "rejected", "expired"],
+  accepted: [],
+  rejected: [],
+  expired: [],
 };
 
 export const OPPORTUNITY_TRANSITIONS: TransitionMap<OpportunityStatus> = {

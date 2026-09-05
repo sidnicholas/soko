@@ -18,10 +18,12 @@ import {
   payloadIdempotencyKey,
   timingSafeStringEqual,
   verifyHmacSignature,
+  verifyMailgunSignature,
   verifyTwilioSignature,
 } from "../common/webhook-signature";
 import { SignalsService } from "../signals/signals.service";
 import { SignalSubmitSchema, type SignalSubmitBody } from "../signals/signal.dto";
+import { MessageChannelRegistry } from "../messaging/channels";
 
 type Payload = Record<string, unknown>;
 
@@ -67,6 +69,56 @@ export function twilioSmsToSignal(body: Record<string, string>): SignalSubmitBod
     description: text,
     source_reliability: 0.4, // Same caution as the Telegram prototype — unauthenticated, no track record.
     raw: { from, to: body["To"] ?? null, messageSid: body["MessageSid"] ?? null },
+  });
+}
+
+/**
+ * §11 messaging backlog — Mailgun inbound-route webhook body, same shape as
+ * `telegramMessageToSignal`. Mailgun's documented field names for a "store
+ * and forward"/"forward" route: `sender`, `recipient`, `subject`,
+ * `body-plain`. **Not yet exercised against a live Mailgun route** — routes
+ * post `multipart/form-data`, and `main.ts` only registers a parser for
+ * `application/x-www-form-urlencoded` (Twilio's content type); a real
+ * deployment needs `@fastify/multipart` wired up too (see project memory
+ * §11). This function itself is content-type-agnostic — it just reads a flat
+ * string map, whatever parsed it.
+ */
+export function mailgunInboundToSignal(body: Record<string, string>): SignalSubmitBody | undefined {
+  const text = (body["body-plain"] ?? body["stripped-text"] ?? "").trim();
+  const sender = body["sender"] ?? body["from"];
+  if (text.length === 0 || !sender) return undefined;
+  return SignalSubmitSchema.parse({
+    channel: "email",
+    kind: "supply",
+    source_id: `email:${sender}`,
+    description: text,
+    source_reliability: 0.4, // Same caution as Telegram/SMS — unauthenticated, no track record.
+    raw: { from: sender, subject: body["subject"] ?? null, messageId: body["Message-Id"] ?? null },
+  });
+}
+
+/**
+ * §11 messaging backlog — WhatsApp Business Cloud API webhook body
+ * (Meta's nested `entry[].changes[].value.messages[]` shape). Reads only
+ * the first message of the first change/entry — a real deployment would
+ * loop all of them; this prototype mirrors the single-message assumption
+ * the other three channels make (one inbound event, one signal).
+ */
+export function whatsappMessageToSignal(body: Payload): SignalSubmitBody | undefined {
+  const entry = (body["entry"] as Payload[] | undefined)?.[0];
+  const change = (entry?.["changes"] as Payload[] | undefined)?.[0];
+  const value = change?.["value"] as Payload | undefined;
+  const message = (value?.["messages"] as Payload[] | undefined)?.[0];
+  const from = message?.["from"];
+  const text = ((message?.["text"] as Payload | undefined)?.["body"] as string | undefined)?.trim() ?? "";
+  if (text.length === 0 || typeof from !== "string") return undefined;
+  return SignalSubmitSchema.parse({
+    channel: "whatsapp",
+    kind: "supply",
+    source_id: `whatsapp:${from}`,
+    description: text,
+    source_reliability: 0.4,
+    raw: { from, messageId: message?.["id"] ?? null },
   });
 }
 
@@ -141,7 +193,10 @@ function paymentIntentRef(event: Stripe.Event): string | null {
 export class WebhooksService {
   private readonly logger = new Logger("WebhooksService");
 
-  constructor(@Inject(SignalsService) private readonly signals: SignalsService) {}
+  constructor(
+    @Inject(SignalsService) private readonly signals: SignalsService,
+    @Inject(MessageChannelRegistry) private readonly channels: MessageChannelRegistry,
+  ) {}
 
   /**
    * §ST-13 async provider-status reconciliation. Verifies Stripe's real HMAC
@@ -360,35 +415,10 @@ export class WebhooksService {
       const signal = telegramMessageToSignal(message);
       if (!signal) return { received: true }; // No text (a sticker, a photo, ...) — nothing to intake yet.
       const chatId = signal.raw?.["chatId"];
-      try {
-        await this.signals.submit(signal);
-        await this.replyTelegram(chatId, "Got it — logged as a listing on Soko. We'll follow up here.");
-      } catch (err) {
-        if (err instanceof BadRequestException) {
-          await this.replyTelegram(chatId, "Sorry, couldn't process that message.");
-        } else {
-          this.logger.warn(`telegram message intake failed: ${String(err)}`);
-        }
-      }
+      await this.intakeAndAck(signal, "telegram", typeof chatId === "number" ? String(chatId) : (chatId as string));
     }
     // Everything else is acknowledged and ignored (idempotent no-op).
     return { received: true };
-  }
-
-  /** Outbound reply to whoever's on the other end of the inbound message — not the fixed single operator chat `deliverApproval` notifies. */
-  private async replyTelegram(chatId: unknown, text: string): Promise<void> {
-    if (typeof chatId !== "number" && typeof chatId !== "string") return;
-    const token = getConfig().notifications.telegramBotToken;
-    if (!token) return;
-    try {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text }),
-      });
-    } catch (err) {
-      this.logger.warn(`telegram reply failed: ${String(err)}`);
-    }
   }
 
   /**
@@ -415,36 +445,88 @@ export class WebhooksService {
 
     const signal = twilioSmsToSignal(body);
     if (!signal) return { received: true }; // No Body/From — nothing to intake.
-    const from = signal.raw?.["from"];
-    try {
-      await this.signals.submit(signal);
-      await this.replyTwilioSms(from, "Got it — logged as a listing on Soko. We'll follow up here.");
-    } catch (err) {
-      if (err instanceof BadRequestException) {
-        await this.replyTwilioSms(from, "Sorry, couldn't process that message.");
-      } else {
-        this.logger.warn(`twilio sms intake failed: ${String(err)}`);
-      }
-    }
+    await this.intakeAndAck(signal, "sms", signal.raw?.["from"] as string);
     return { received: true };
   }
 
-  /** Outbound reply to the original sender's number — mirrors `replyTelegram`. */
-  private async replyTwilioSms(to: unknown, text: string): Promise<void> {
-    if (typeof to !== "string") return;
-    const { twilioAccountSid, twilioAuthToken, twilioFromNumber } = getConfig().notifications;
-    if (!twilioAccountSid || !twilioAuthToken || !twilioFromNumber) return;
+  /**
+   * §11 messaging backlog — email channel. Verifies Mailgun's HMAC over
+   * `timestamp + token` (not the body or a URL, unlike the other three
+   * providers here — see `verifyMailgunSignature`). See
+   * `mailgunInboundToSignal`'s doc comment for the multipart-parsing caveat.
+   */
+  async handleEmail(body: Record<string, string>) {
+    const signingKey = getConfig().notifications.mailgunSigningKey;
+    const { timestamp, token, signature } = body;
+    if (!signingKey || !timestamp || !token || !signature || !verifyMailgunSignature(timestamp, token, signature, signingKey)) {
+      throw new UnauthorizedException("Invalid Mailgun webhook signature");
+    }
+    const signal = mailgunInboundToSignal(body);
+    if (!signal) return { received: true };
+    await this.intakeAndAck(signal, "email", signal.raw?.["from"] as string);
+    return { received: true };
+  }
+
+  /**
+   * §11 messaging backlog — WhatsApp Business Cloud API (Meta) verification
+   * handshake. Meta calls this once when the webhook URL is configured;
+   * echo `hub.challenge` back verbatim only if `hub.verify_token` matches
+   * what we configured (never shared with Meta in advance, unlike the other
+   * providers' secrets — we choose it, Meta echoes it back to prove it's
+   * really hitting our configured URL).
+   */
+  verifyWhatsAppSubscription(mode: string | undefined, verifyToken: string | undefined, challenge: string | undefined): string {
+    const expected = getConfig().notifications.whatsappVerifyToken;
+    if (mode !== "subscribe" || !expected || !verifyToken || !challenge || !timingSafeStringEqual(expected, verifyToken)) {
+      throw new UnauthorizedException("Invalid WhatsApp webhook verification request");
+    }
+    return challenge;
+  }
+
+  /**
+   * §11 messaging backlog — WhatsApp inbound messages. Meta signs the raw
+   * JSON body with HMAC-SHA256 (`X-Hub-Signature-256: sha256=<hex>`), the
+   * same payload-only scheme `verifyHmacSignature` already implements for
+   * the chain webhook — reused rather than duplicated.
+   */
+  async handleWhatsApp(signature: string | undefined, rawBody: Buffer | undefined) {
+    const appSecret = getConfig().notifications.whatsappAppSecret;
+    if (!appSecret || !signature || !rawBody || !verifyHmacSignature(appSecret, rawBody.toString("utf8"), signature)) {
+      throw new UnauthorizedException("Invalid WhatsApp webhook signature");
+    }
+    let body: Payload;
     try {
-      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          authorization: `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString("base64")}`,
-        },
-        body: new URLSearchParams({ To: to, From: twilioFromNumber, Body: text }).toString(),
-      });
+      body = JSON.parse(rawBody.toString("utf8")) as Payload;
+    } catch {
+      throw new UnauthorizedException("WhatsApp webhook body is not valid JSON");
+    }
+    const signal = whatsappMessageToSignal(body);
+    if (!signal) return { received: true }; // Not a text message (status update, image, ...) — nothing to intake yet.
+    await this.intakeAndAck(signal, "whatsapp", signal.raw?.["from"] as string);
+    return { received: true };
+  }
+
+  /**
+   * Shared by all four inbound channels: submit the mapped signal through
+   * the same risk-gated pipeline everything else goes through
+   * (`SignalsService.submit` already rejects instruction-like content), then
+   * acknowledge or apologize in the same channel/identity the message came
+   * from. A dispatch failure (channel misconfigured, provider error) is
+   * logged, not thrown — the inbound webhook still acknowledges receipt so
+   * the provider doesn't retry a signal we already captured.
+   */
+  private async intakeAndAck(signal: SignalSubmitBody, channelId: string, identity: string): Promise<void> {
+    try {
+      await this.signals.submit(signal);
+      await this.channels
+        .send(channelId, identity, "Got it — logged as a listing on Soko. We'll follow up here.")
+        .catch((err) => this.logger.warn(`${channelId} ack reply failed: ${String(err)}`));
     } catch (err) {
-      this.logger.warn(`twilio sms reply failed: ${String(err)}`);
+      if (err instanceof BadRequestException) {
+        await this.channels.send(channelId, identity, "Sorry, couldn't process that message.").catch(() => undefined);
+      } else {
+        this.logger.warn(`${channelId} message intake failed: ${String(err)}`);
+      }
     }
   }
 
