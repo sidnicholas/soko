@@ -20,6 +20,23 @@ async function bootstrap(): Promise<void> {
   });
   app.setGlobalPrefix("v1");
 
+  // Twilio posts inbound SMS webhooks as application/x-www-form-urlencoded,
+  // which Fastify has no parser for by default (only JSON). Twilio's
+  // signature is computed over the decoded param values, not raw bytes, so
+  // parsing straight to an object here (rather than capturing a raw buffer
+  // like Stripe's JSON parser above) is sufficient for verifyTwilioSignature.
+  app.getHttpAdapter().getInstance().addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_req, body, done) => {
+      try {
+        done(null, Object.fromEntries(new URLSearchParams(body as string)));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Opportunity OS API")
     .setDescription("V1 REST surface (§16). Dev auth via x-user-id / x-user-role headers (§22).")

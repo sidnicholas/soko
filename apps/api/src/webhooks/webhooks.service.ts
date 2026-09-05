@@ -18,6 +18,7 @@ import {
   payloadIdempotencyKey,
   timingSafeStringEqual,
   verifyHmacSignature,
+  verifyTwilioSignature,
 } from "../common/webhook-signature";
 import { SignalsService } from "../signals/signals.service";
 import { SignalSubmitSchema, type SignalSubmitBody } from "../signals/signal.dto";
@@ -46,6 +47,26 @@ export function telegramMessageToSignal(message: Payload): SignalSubmitBody | un
     description: text,
     source_reliability: 0.4, // Unauthenticated stranger, no track record yet — same caution as other unattested channels.
     raw: { chatId, fromId: from?.["id"] ?? null, messageId: message["message_id"] ?? null },
+  });
+}
+
+/**
+ * §11 messaging backlog — same shape as `telegramMessageToSignal`, for an
+ * inbound Twilio SMS webhook body (already parsed from
+ * application/x-www-form-urlencoded into a flat string map by `main.ts`'s
+ * content-type parser).
+ */
+export function twilioSmsToSignal(body: Record<string, string>): SignalSubmitBody | undefined {
+  const text = (body["Body"] ?? "").trim();
+  const from = body["From"];
+  if (text.length === 0 || !from) return undefined;
+  return SignalSubmitSchema.parse({
+    channel: "sms",
+    kind: "supply",
+    source_id: `sms:${from}`,
+    description: text,
+    source_reliability: 0.4, // Same caution as the Telegram prototype — unauthenticated, no track record.
+    raw: { from, to: body["To"] ?? null, messageSid: body["MessageSid"] ?? null },
   });
 }
 
@@ -367,6 +388,63 @@ export class WebhooksService {
       });
     } catch (err) {
       this.logger.warn(`telegram reply failed: ${String(err)}`);
+    }
+  }
+
+  /**
+   * §11 messaging backlog — second channel, same pattern as
+   * `handleTelegram`: verify the provider's signature (Twilio signs the
+   * exact webhook URL + sorted POST params, not the payload — see
+   * `verifyTwilioSignature`), map to a `SignalSubmitBody`, submit through the
+   * same risk-gated `SignalsService.submit`, reply in the same SMS thread.
+   * `path` is the request path Nest saw (`req.url`, e.g.
+   * "/v1/webhooks/twilio-sms"); prefixed with `PUBLIC_API_BASE_URL` to
+   * reconstruct the absolute URL Twilio actually signed — this breaks if a
+   * reverse proxy rewrites scheme/host/path before this app sees the request
+   * (known fragility, see project memory §11).
+   */
+  async handleTwilioSms(signature: string | undefined, body: Record<string, string>, path: string) {
+    const { twilioAccountSid, twilioAuthToken, publicApiBaseUrl } = getConfig().notifications;
+    if (!twilioAccountSid || !twilioAuthToken || !publicApiBaseUrl || !signature) {
+      throw new UnauthorizedException("Invalid Twilio webhook signature");
+    }
+    const url = `${publicApiBaseUrl.replace(/\/$/, "")}${path}`;
+    if (!verifyTwilioSignature(url, body, signature, twilioAuthToken)) {
+      throw new UnauthorizedException("Invalid Twilio webhook signature");
+    }
+
+    const signal = twilioSmsToSignal(body);
+    if (!signal) return { received: true }; // No Body/From — nothing to intake.
+    const from = signal.raw?.["from"];
+    try {
+      await this.signals.submit(signal);
+      await this.replyTwilioSms(from, "Got it — logged as a listing on Soko. We'll follow up here.");
+    } catch (err) {
+      if (err instanceof BadRequestException) {
+        await this.replyTwilioSms(from, "Sorry, couldn't process that message.");
+      } else {
+        this.logger.warn(`twilio sms intake failed: ${String(err)}`);
+      }
+    }
+    return { received: true };
+  }
+
+  /** Outbound reply to the original sender's number — mirrors `replyTelegram`. */
+  private async replyTwilioSms(to: unknown, text: string): Promise<void> {
+    if (typeof to !== "string") return;
+    const { twilioAccountSid, twilioAuthToken, twilioFromNumber } = getConfig().notifications;
+    if (!twilioAccountSid || !twilioAuthToken || !twilioFromNumber) return;
+    try {
+      await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: `Basic ${Buffer.from(`${twilioAccountSid}:${twilioAuthToken}`).toString("base64")}`,
+        },
+        body: new URLSearchParams({ To: to, From: twilioFromNumber, Body: text }).toString(),
+      });
+    } catch (err) {
+      this.logger.warn(`twilio sms reply failed: ${String(err)}`);
     }
   }
 

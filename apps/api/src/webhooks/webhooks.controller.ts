@@ -36,6 +36,15 @@ export class WebhooksController {
     return this.webhooks.handleTelegram(secretToken, body ?? {});
   }
 
+  @Post("twilio-sms")
+  twilioSms(
+    @Headers("x-twilio-signature") signature: string | undefined,
+    @Body() body: Record<string, string>,
+    @Req() req: FastifyRequest,
+  ) {
+    return this.webhooks.handleTwilioSms(signature, body ?? {}, req.url);
+  }
+
   @Post("chain/:network")
   chain(
     @Param("network") network: string,

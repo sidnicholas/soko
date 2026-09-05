@@ -56,6 +56,18 @@ const EnvSchema = z.object({
   EMAIL_FROM: z.string().optional(),
   SMTP_URL: z.string().optional(),
 
+  // Twilio SMS inbound (§11 messaging backlog). All three required together
+  // for real send/verify; absent = the webhook rejects everything, same
+  // keyless-dev pattern as the other providers.
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
+  // Twilio signs the exact webhook URL it called (protocol+host+path), not
+  // just the payload — unlike Stripe/Circle's payload-only HMAC, this must
+  // match byte-for-byte what Twilio saw, which a reverse proxy can rewrite.
+  // No default: absent means Twilio signature verification cannot run.
+  PUBLIC_API_BASE_URL: z.string().optional(),
+
   APPROVAL_TOKEN_SECRET: z.string().default("change-me"),
   AUDIT_ANCHOR_ENABLED: z.coerce.boolean().default(false),
 
@@ -100,6 +112,10 @@ export interface AppConfig {
     telegramChatId?: string;
     emailFrom?: string;
     smtpUrl?: string;
+    twilioAccountSid?: string;
+    twilioAuthToken?: string;
+    twilioFromNumber?: string;
+    publicApiBaseUrl?: string;
   };
   connectors: {
     ebayClientId?: string;
@@ -157,6 +173,10 @@ function toConfig(env: Env): AppConfig {
       telegramChatId: env.TELEGRAM_CHAT_ID,
       emailFrom: env.EMAIL_FROM,
       smtpUrl: env.SMTP_URL,
+      twilioAccountSid: env.TWILIO_ACCOUNT_SID,
+      twilioAuthToken: env.TWILIO_AUTH_TOKEN,
+      twilioFromNumber: env.TWILIO_FROM_NUMBER,
+      publicApiBaseUrl: env.PUBLIC_API_BASE_URL,
     },
     connectors: {
       ebayClientId: env.EBAY_CLIENT_ID,

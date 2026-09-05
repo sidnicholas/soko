@@ -318,9 +318,33 @@ mechanism). No new tests needed for the DI-wired parts (matches the rest of
 `webhooks.service.ts`, which has none — verified via live scripts instead);
 the pure mapping function is unit-tested.
 
+**Shipped, 2026-09-04 — Twilio SMS inbound** (second channel): `POST
+/webhooks/twilio-sms`, same shape as the Telegram receiver but a materially
+different signature scheme — Twilio signs the *exact webhook URL* plus every
+sorted POST param (`verifyTwilioSignature`,
+`apps/api/src/common/webhook-signature.ts`, HMAC-SHA1/base64, unit-tested
+against a locally-computed signature), not just the payload the way
+Stripe/Circle/Telegram's schemes do. That URL-inclusive scheme means the app
+now needs to know its own public URL: new `PUBLIC_API_BASE_URL` config,
+prefixed onto the request path (`req.url`) to reconstruct what Twilio
+actually called — **fragile if a reverse proxy rewrites scheme/host/path
+before this app sees the request**; not exercised against a live Twilio
+account in this pass (same "unverified against live account" caveat
+`verifyCircleSignature` shipped with).
+Also required a real gap-fill: Fastify has no `application/x-www-form-urlencoded`
+parser registered by default (only JSON), and Twilio posts inbound SMS
+webhooks in that format — `main.ts` now registers one (parses straight to an
+object; Twilio's signature covers decoded param values, not raw bytes, so no
+raw-buffer capture like Stripe's JSON parser needed here). `twilioSmsToSignal`
+(pure, unit-tested) mirrors `telegramMessageToSignal`: `channel: "sms"` (new
+`SignalChannel` value), `kind: "supply"`, `source_id: "sms:<From>"`, same
+`source_reliability: 0.4`. Reply goes out via Twilio's Messages API
+(`TWILIO_ACCOUNT_SID`/`TWILIO_AUTH_TOKEN`/`TWILIO_FROM_NUMBER`), same
+success/rejection-message pattern as the Telegram reply.
+
 Open ideas, unordered:
-- **Identity resolution**: the prototype above carries identity as
-  `source_id`/`raw.chatId`, not a resolved `Counterparty`
+- **Identity resolution**: both channels above carry identity as
+  `source_id`/`raw.{chatId,from}`, not a resolved `Counterparty`
   (`contracts/entities.ts`) — there's still no counterparty lookup-or-create
   by channel identity anywhere in `packages/db`. Needed before a real
   negotiation/transaction (as opposed to a logged signal) can happen through
@@ -329,15 +353,18 @@ Open ideas, unordered:
   description — today "I want $150 for my monitor" becomes signal free text,
   not a structured price/category/item like `packages/demand` would extract
   from the same text via `/missions`.
-- **Supply vs. demand classification**: the prototype hardcodes
+- **Supply vs. demand classification**: both prototypes hardcode
   `kind: "supply"` per the original ask ("send things they want to sell") —
   a real version should decide from content, or ask.
-- **Other channels**: Twilio SMS inbound, an email-inbound provider
-  (SendGrid Inbound Parse / Mailgun Routes / Postmark), WhatsApp Business
-  API webhook — same shape as the Telegram receiver (verify the provider's
-  signature, map to a `SignalSubmitBody`, reply in-channel), each needs its
-  own signature-verification function (`verifyCircleSignature` is the
-  template) and its own `SignalChannel` value.
+- **`PUBLIC_API_BASE_URL` correctness in a real deployment**: needs
+  verifying against whatever's actually in front of the API (load balancer,
+  Railway's own proxy, etc.) — the Twilio signature check silently rejects
+  everything if this doesn't match byte-for-byte.
+- **Other channels**: an email-inbound provider (SendGrid Inbound Parse /
+  Mailgun Routes / Postmark), WhatsApp Business API webhook — same shape as
+  the two receivers above (verify the provider's signature, map to a
+  `SignalSubmitBody`, reply in-channel), each needs its own
+  signature-verification function and `SignalChannel` value.
 - **Outbound negotiation dispatch keyed by channel + counterparty
   identity** — the prototype's reply is a fixed acknowledgment string, not a
   negotiation draft. Sending an actual `packages/negotiation` draft back
@@ -354,8 +381,8 @@ Open ideas, unordered:
 - Abuse/spam surface: an inbound channel open to anyone is a new
   unauthenticated attack surface. `detectInjection` covers prompt injection
   (same as connector content), but there's no rate-limiting or spam
-  detection on inbound messages yet — a single Telegram chat could submit
-  unlimited signals today.
+  detection on inbound messages yet — a single Telegram chat or phone number
+  could submit unlimited signals today.
 
 ## 12. Immediate next options
 
