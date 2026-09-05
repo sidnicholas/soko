@@ -1,5 +1,5 @@
 import { createPublicKey, verify as verifyEcdsa } from "node:crypto";
-import { Injectable, Logger, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from "@nestjs/common";
 import Stripe from "stripe";
 import { initiateDeveloperControlledWalletsClient, type CircleDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 import {
@@ -19,8 +19,35 @@ import {
   timingSafeStringEqual,
   verifyHmacSignature,
 } from "../common/webhook-signature";
+import { SignalsService } from "../signals/signals.service";
+import { SignalSubmitSchema, type SignalSubmitBody } from "../signals/signal.dto";
 
 type Payload = Record<string, unknown>;
+
+/**
+ * §11 messaging backlog, prototype slice — map a Telegram `message` update
+ * into a `/signals`-shaped supply signal. Pure so it's unit-testable without
+ * the NestJS DI graph; identity is carried as `source_id`/`raw` rather than a
+ * resolved `Counterparty` (no counterparty-by-channel-identity lookup exists
+ * yet — see project memory §11). Always `kind: "supply"`: the prototype's
+ * explicit scope ("send things they want to sell") — routing to demand vs.
+ * supply by content is a real follow-up, not this pass.
+ */
+export function telegramMessageToSignal(message: Payload): SignalSubmitBody | undefined {
+  const text = typeof message["text"] === "string" ? message["text"].trim() : "";
+  const chat = message["chat"] as Payload | undefined;
+  const chatId = chat?.["id"];
+  const from = message["from"] as Payload | undefined;
+  if (text.length === 0 || (typeof chatId !== "number" && typeof chatId !== "string")) return undefined;
+  return SignalSubmitSchema.parse({
+    channel: "telegram",
+    kind: "supply",
+    source_id: `telegram:${chatId}`,
+    description: text,
+    source_reliability: 0.4, // Unauthenticated stranger, no track record yet — same caution as other unattested channels.
+    raw: { chatId, fromId: from?.["id"] ?? null, messageId: message["message_id"] ?? null },
+  });
+}
 
 let circleClient: CircleDeveloperControlledWalletsClient | undefined;
 
@@ -92,6 +119,8 @@ function paymentIntentRef(event: Stripe.Event): string | null {
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger("WebhooksService");
+
+  constructor(@Inject(SignalsService) private readonly signals: SignalsService) {}
 
   /**
    * §ST-13 async provider-status reconciliation. Verifies Stripe's real HMAC
@@ -297,9 +326,48 @@ export class WebhooksService {
         approvalId,
         decision: action,
       });
+      return { received: true };
     }
-    // Non-decision updates are acknowledged and ignored (idempotent no-op).
+
+    // §11 messaging backlog, prototype slice — a plain text message is a
+    // "here's what I want to sell" intake, not an approval decision. Feeds
+    // the same risk-gated `/signals` pipeline everything else goes through
+    // (SignalsService.submit already rejects instruction-like content —
+    // exactly the untrusted-inbound-text case an open channel adds).
+    const message = body["message"] as Payload | undefined;
+    if (message) {
+      const signal = telegramMessageToSignal(message);
+      if (!signal) return { received: true }; // No text (a sticker, a photo, ...) — nothing to intake yet.
+      const chatId = signal.raw?.["chatId"];
+      try {
+        await this.signals.submit(signal);
+        await this.replyTelegram(chatId, "Got it — logged as a listing on Soko. We'll follow up here.");
+      } catch (err) {
+        if (err instanceof BadRequestException) {
+          await this.replyTelegram(chatId, "Sorry, couldn't process that message.");
+        } else {
+          this.logger.warn(`telegram message intake failed: ${String(err)}`);
+        }
+      }
+    }
+    // Everything else is acknowledged and ignored (idempotent no-op).
     return { received: true };
+  }
+
+  /** Outbound reply to whoever's on the other end of the inbound message — not the fixed single operator chat `deliverApproval` notifies. */
+  private async replyTelegram(chatId: unknown, text: string): Promise<void> {
+    if (typeof chatId !== "number" && typeof chatId !== "string") return;
+    const token = getConfig().notifications.telegramBotToken;
+    if (!token) return;
+    try {
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+      });
+    } catch (err) {
+      this.logger.warn(`telegram reply failed: ${String(err)}`);
+    }
   }
 
   async handleChain(network: string, signature: string | undefined, body: Payload) {

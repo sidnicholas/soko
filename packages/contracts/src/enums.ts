@@ -142,6 +142,7 @@ export const SignalChannel = z.enum([
   "merchant_feed",
   "request_mining",
   "internal",
+  "telegram",
 ]);
 export type SignalChannel = z.infer<typeof SignalChannel>;
 

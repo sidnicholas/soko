@@ -282,63 +282,80 @@ What exists today that this builds on:
 - Outbound-only, operator-facing: `deliverApproval`
   (`apps/worker-notifications/src/deliver.ts`) sends a fixed operator's
   Telegram chat / email a one-way approval-link notification. Single
-  hardcoded destination (`TELEGRAM_CHAT_ID`/`EMAIL_FROM`), not per-counterparty,
-  and never expects a reply.
-- `POST /signals` (`apps/api/src/signals/`) — multi-channel intake, but
-  requires an authenticated `Principal` (`signal:submit` permission) and a
-  known `source_id`. No path for an anonymous inbound webhook (a stranger
-  texting a number has no platform session).
-  `SignalChannel` (`contracts/enums.ts`) has no SMS/email/Telegram/WhatsApp
-  values yet (`public_web, official_api, browser_extension, user_submitted,
-  merchant_feed, request_mining, internal`).
-- NL demand parser (`packages/demand`, ADR-018) already turns free text into
-  a `DemandSpecification` — the natural target for "here's what I want to
-  sell" arriving as an SMS/email body, once it can reach the parser at all.
+  hardcoded destination (`TELEGRAM_CHAT_ID`/`EMAIL_FROM`), not per-counterparty.
+- `POST /signals` (`apps/api/src/signals/`) — multi-channel intake behind an
+  authenticated `Principal` (`signal:submit`). `SignalsService.submit` is the
+  reusable piece (risk-gates via `detectInjection`, persists, projects into
+  supply/demand) — the Telegram prototype below calls it directly, bypassing
+  only the HTTP-level auth, the same way `/webhooks/stripe`/`/webhooks/circle`
+  bypass it for provider callbacks.
+- NL demand parser (`packages/demand`, ADR-018) turns free text into a
+  `DemandSpecification` — not yet used by the messaging intake below, which
+  currently records inbound text as a raw signal description rather than a
+  structured spec (see open ideas).
 - `packages/negotiation` (ADR-020) drafts negotiation text but never sends
   it (Phase 2 invariant, §14) — sending a draft *out* through a real channel
   to a real counterparty is new work, not a relaxation of that invariant
   (the human-approval gate on `negotiation:send` still applies).
 
+**Shipped, 2026-09-04 — Telegram inbound prototype** (first channel, per the
+"smallest lift" pick above): `POST /webhooks/telegram`
+(`apps/api/src/webhooks/webhooks.controller.ts`) already existed for
+operator approval-decision callback buttons; extended to also handle plain
+`message` updates. `telegramMessageToSignal` (pure, unit-tested,
+`webhooks.service.ts`) maps a Telegram text message into a `SignalSubmitBody`
+— `channel: "telegram"` (new `SignalChannel` value), `kind: "supply"`
+(hardcoded — see open ideas), `source_id: "telegram:<chatId>"`,
+`source_reliability: 0.4` (unauthenticated stranger, no track record).
+`WebhooksService` now injects `SignalsService` (exported from
+`SignalsModule`, imported by `WebhooksModule`) and calls `.submit()`
+directly — same untrusted-input handling (`detectInjection`) every other
+signal gets, no new bypass. On success or on a rejected (injection-flagged)
+message, replies in the *same* Telegram chat via `sendMessage` — the first
+per-sender (not single-fixed-operator) outbound dispatch in the codebase.
+Same webhook-secret auth as the existing approval-decision path (no new auth
+mechanism). No new tests needed for the DI-wired parts (matches the rest of
+`webhooks.service.ts`, which has none — verified via live scripts instead);
+the pure mapping function is unit-tested.
+
 Open ideas, unordered:
-- **Inbound webhook receivers**, one per channel, same auth pattern as
-  `/webhooks/stripe`/`/webhooks/circle` (verify the provider's signature,
-  not a platform session) — Telegram bot webhook (smallest lift: bot token
-  already configured for outbound), Twilio SMS inbound, an email-inbound
-  provider (SendGrid Inbound Parse / Mailgun Routes / Postmark), WhatsApp
-  Business API webhook. Each needs its own signature-verification function,
-  same shape as `verifyCircleSignature`.
-- **Identity resolution**: an inbound message arrives from a phone
-  number/email/chat-id, not a `Principal`. Need counterparty lookup-or-create
-  by channel identity against `Counterparty` (contracts/entities.ts) — a
-  person messaging Soko is not necessarily a registered `User`.
-- **Channel → signal mapping**: extend `SignalChannel` with `sms`/`email`/
-  `telegram`/`whatsapp`/`group_chat` (or similar) and route inbound message
-  bodies through the existing NL demand parser rather than a new parser per
-  channel.
-- **Outbound negotiation dispatch keyed by channel + counterparty identity**,
-  not the single fixed operator destination `deliverApproval` uses today —
-  a reply has to land back in the same SMS thread / email thread / Telegram
-  chat it came from, addressed to whichever counterparty is on the other end
-  this time, still behind the existing `negotiation:send` approval gate.
+- **Identity resolution**: the prototype above carries identity as
+  `source_id`/`raw.chatId`, not a resolved `Counterparty`
+  (`contracts/entities.ts`) — there's still no counterparty lookup-or-create
+  by channel identity anywhere in `packages/db`. Needed before a real
+  negotiation/transaction (as opposed to a logged signal) can happen through
+  a channel.
+- **Route through the NL demand parser** instead of a raw signal
+  description — today "I want $150 for my monitor" becomes signal free text,
+  not a structured price/category/item like `packages/demand` would extract
+  from the same text via `/missions`.
+- **Supply vs. demand classification**: the prototype hardcodes
+  `kind: "supply"` per the original ask ("send things they want to sell") —
+  a real version should decide from content, or ask.
+- **Other channels**: Twilio SMS inbound, an email-inbound provider
+  (SendGrid Inbound Parse / Mailgun Routes / Postmark), WhatsApp Business
+  API webhook — same shape as the Telegram receiver (verify the provider's
+  signature, map to a `SignalSubmitBody`, reply in-channel), each needs its
+  own signature-verification function (`verifyCircleSignature` is the
+  template) and its own `SignalChannel` value.
+- **Outbound negotiation dispatch keyed by channel + counterparty
+  identity** — the prototype's reply is a fixed acknowledgment string, not a
+  negotiation draft. Sending an actual `packages/negotiation` draft back
+  through the channel, still behind `negotiation:send`'s approval gate, is
+  separate work.
 - **In-channel transaction actions**: "reply YES to accept" / a one-tap
   approval link sent over SMS — extends `deliverApproval`'s existing
-  `actionUrl` pattern (already a link-based approve/reject flow) rather than
-  inventing a new one, but needs a signed, expiring, channel-deliverable
-  token an unauthenticated reply can carry back.
+  `actionUrl` pattern rather than inventing a new one, but needs a signed,
+  expiring, channel-deliverable token an unauthenticated reply can carry
+  back.
 - **Group messaging** is a different shape from 1:1 (multiple participants,
-  @mentions/threading, ambiguous "who is negotiating") — treat as its own
-  design pass once 1:1 works for at least one channel, not bundled in from
-  the start.
-- Abuse/spam surface: an inbound channel open to anyone is a new unauthenticated
-  attack surface (prompt injection into the demand parser, spam signal
-  flooding) — §13.2/13.3's "untrusted data is never instructions" invariant
-  applies here at least as much as it does to connector content today.
-
-Suggested first prototype (not yet built, pending user pick): **Telegram**,
-since outbound already exists (bot token, `deliverApproval`) — closing the
-loop to inbound webhook + reply is the smallest lift of the channels listed,
-and a good place to shape the identity-resolution + dispatch pattern before
-replicating it to SMS/email/WhatsApp.
+  @mentions/threading, ambiguous "who is negotiating") — its own design
+  pass, not bundled into the 1:1 pattern above.
+- Abuse/spam surface: an inbound channel open to anyone is a new
+  unauthenticated attack surface. `detectInjection` covers prompt injection
+  (same as connector content), but there's no rate-limiting or spam
+  detection on inbound messages yet — a single Telegram chat could submit
+  unlimited signals today.
 
 ## 12. Immediate next options
 
