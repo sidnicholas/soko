@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 
 /**
@@ -5,6 +8,34 @@ import { z } from "zod";
  * through this package so cross-cutting constraints (approval timeout, refresh
  * interval, default stablecoin network) live in one validated place.
  */
+
+/** Walks up from `startDir` looking for the pnpm workspace root. */
+function findWorkspaceRoot(startDir: string): string | undefined {
+  let dir = startDir;
+  for (;;) {
+    if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+let dotenvLoaded = false;
+
+/**
+ * Loads the workspace-root `.env` into `process.env` once per process. Every
+ * `dev`/`start` script here runs via tsx/turbo with cwd inside a package
+ * directory (not the repo root), and nothing else in the stack loads `.env` —
+ * so without this, scripts silently fall back to the schema defaults below
+ * instead of failing loudly. `dotenv` never overwrites a var already set, so
+ * real deployments (env vars injected by the platform) are unaffected.
+ */
+function loadEnvOnce(): void {
+  if (dotenvLoaded) return;
+  dotenvLoaded = true;
+  const root = findWorkspaceRoot(process.cwd());
+  if (root) loadDotenv({ path: join(root, ".env") });
+}
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
@@ -233,7 +264,10 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
 
 /** Process-wide singleton. */
 export function getConfig(): AppConfig {
-  if (!cached) cached = loadConfig();
+  if (!cached) {
+    loadEnvOnce();
+    cached = loadConfig();
+  }
   return cached;
 }
 

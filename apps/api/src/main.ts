@@ -20,12 +20,22 @@ async function bootstrap(): Promise<void> {
   });
   app.setGlobalPrefix("v1");
 
-  // Twilio posts inbound SMS webhooks as application/x-www-form-urlencoded,
-  // which Fastify has no parser for by default (only JSON). Twilio's
-  // signature is computed over the decoded param values, not raw bytes, so
-  // parsing straight to an object here (rather than capturing a raw buffer
-  // like Stripe's JSON parser above) is sufficient for verifyTwilioSignature.
-  app.getHttpAdapter().getInstance().addContentTypeParser(
+  // Nest's FastifyAdapter registers its own JSON + urlencoded content-type
+  // parsers during app.init() (invoked lazily by listen()). We need to
+  // override the urlencoded one below, so force init now — registering our
+  // parser before this point collides with Nest's later registration
+  // (`FST_ERR_CTP_ALREADY_PRESENT`); registering without removing first
+  // collides with Nest's own registration too.
+  await app.init();
+
+  // Twilio posts inbound SMS webhooks as application/x-www-form-urlencoded.
+  // Twilio's signature is computed over the decoded param values, not raw
+  // bytes, so parsing straight to an object here (rather than capturing a
+  // raw buffer like Stripe's JSON parser above) is sufficient for
+  // verifyTwilioSignature. This replaces Nest's default urlencoded parser.
+  const fastify = app.getHttpAdapter().getInstance();
+  fastify.removeContentTypeParser("application/x-www-form-urlencoded");
+  fastify.addContentTypeParser(
     "application/x-www-form-urlencoded",
     { parseAs: "string" },
     (_req, body, done) => {

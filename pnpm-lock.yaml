@@ -198,6 +198,9 @@ importers:
       stripe:
         specifier: ^17.3.1
         version: 17.7.0
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.13
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -410,6 +413,9 @@ importers:
 
   packages/config:
     dependencies:
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.4.5
       zod:
         specifier: ^3.23.8
         version: 3.25.76

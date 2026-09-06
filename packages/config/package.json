@@ -15,6 +15,7 @@
     "lint": "echo lint-skip"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "zod": "^3.23.8"
   }
 }
