@@ -71,6 +71,23 @@ export function hashNegotiationSendTerms(terms: { negotiationId: string; channel
   );
 }
 
+/**
+ * Canonical hash of an asset-transfer execution command's terms (§14/§22,
+ * §19 crypto-asset expansion). Mirrors `hashReleaseTerms` for the same
+ * no-self-authorized-money invariant, applied to moving an asset instead of
+ * currency: binds the approval to this exact plan going to this exact
+ * destination address.
+ */
+export function hashAssetTransferTerms(terms: { assetTransferPlanId: string; toAddress: string }): string {
+  return sha256Hex(
+    canonicalJson({
+      action: "execute_asset_transfer",
+      assetTransferPlanId: terms.assetTransferPlanId,
+      toAddress: terms.toAddress,
+    }),
+  );
+}
+
 /** An audit event before the chain assigns its linking hashes. */
 export type AuditEventDraft = Omit<AuditEvent, "event_hash" | "previous_event_hash">;
 

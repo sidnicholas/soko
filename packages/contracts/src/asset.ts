@@ -22,7 +22,11 @@ export const AssetTransferPlan = z.object({
   transaction_id: zId,
   provider: z.string(),
   asset: AssetDescriptor,
+  to_address: z.string(),
+  reference: z.string().nullable().default(null),
+  external_ref: z.string().nullable().default(null),
   status: AssetTransferStatus,
   created_at: zIso,
+  executed_at: zIso.nullable().default(null),
 });
 export type AssetTransferPlan = z.infer<typeof AssetTransferPlan>;

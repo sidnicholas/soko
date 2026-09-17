@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { AuditEvent } from "@opportunity-os/contracts";
-import { AuditChain, verifyChain, GENESIS_HASH, canonicalJson, computeBatchRoot } from "./index";
+import { AuditChain, verifyChain, GENESIS_HASH, canonicalJson, computeBatchRoot, hashAssetTransferTerms, hashReleaseTerms } from "./index";
 import type { AuditEventDraft } from "./index";
 
 function draft(n: number): AuditEventDraft {
@@ -60,5 +60,12 @@ describe("audit hash chain", () => {
     const hashes = ["a".repeat(64), "b".repeat(64)];
     expect(computeBatchRoot(hashes)).toBe(computeBatchRoot(hashes));
     expect(GENESIS_HASH).toHaveLength(64);
+  });
+
+  it("hashAssetTransferTerms is deterministic and distinct per plan/destination and from other action hashes", () => {
+    const terms = { assetTransferPlanId: "plan-1", toAddress: "0xbuyer" };
+    expect(hashAssetTransferTerms(terms)).toBe(hashAssetTransferTerms({ ...terms }));
+    expect(hashAssetTransferTerms(terms)).not.toBe(hashAssetTransferTerms({ ...terms, toAddress: "0xother" }));
+    expect(hashAssetTransferTerms(terms)).not.toBe(hashReleaseTerms({ milestoneId: "plan-1", amountMinor: 0, currency: "0xbuyer" }));
   });
 });

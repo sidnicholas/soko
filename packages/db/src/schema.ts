@@ -228,6 +228,20 @@ export interface SettlementMilestonesTable {
   provider_ref: string | null;
 }
 
+export interface AssetTransferPlansTable {
+  id: Generated<string>;
+  transaction_id: string;
+  provider: string;
+  asset_kind: string;
+  asset_json: Json;
+  to_address: string;
+  reference: string | null;
+  external_ref: string | null;
+  status: string;
+  created_at: Timestamp;
+  executed_at: Timestamp | null;
+}
+
 export interface EvidenceTable {
   id: Generated<string>;
   entity_type: string;
@@ -369,6 +383,7 @@ export interface Database {
   transactions: TransactionsTable;
   settlement_plans: SettlementPlansTable;
   settlement_milestones: SettlementMilestonesTable;
+  asset_transfer_plans: AssetTransferPlansTable;
   evidence: EvidenceTable;
   audit_events: AuditEventsTable;
   outbox: OutboxTable;

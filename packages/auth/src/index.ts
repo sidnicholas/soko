@@ -27,6 +27,8 @@ export type Permission =
   | "settlement:execute"
   | "settlement:release"
   | "settlement:dispute"
+  | "asset_transfer:plan"
+  | "asset_transfer:execute"
   | "notification:deliver"
   | "signal:submit"
   | "outcome:record"
@@ -47,6 +49,8 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "settlement:plan",
     "settlement:release",
     "settlement:dispute",
+    "asset_transfer:plan",
+    "asset_transfer:execute",
     "audit:read",
     "signal:submit",
     "outcome:record",
@@ -70,12 +74,14 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "settlement:execute",
     "settlement:release",
     "settlement:dispute",
+    "asset_transfer:plan",
+    "asset_transfer:execute",
     "notification:deliver",
     "audit:read",
     "signal:submit",
     "outcome:record",
   ],
-  service: ["settlement:execute", "settlement:release", "settlement:dispute", "audit:read"],
+  service: ["settlement:execute", "settlement:release", "settlement:dispute", "asset_transfer:execute", "audit:read"],
   // Agents may propose but never approve, send, or move money (§8, §13.5).
   agent: ["opportunity:read", "opportunity:reverify", "approval:create", "negotiation:prepare", "signal:submit"],
 };
