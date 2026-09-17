@@ -1,8 +1,8 @@
 # Opportunity OS — Project Memory (Implementation State)
 
 **Status:** V1 in active build — Phases 0–3 complete (Phase 3's fiat rail is real, live-verified Stripe test-mode, and the stablecoin rail is real, live-verified Circle Developer-Controlled Wallets on Base Sepolia; the on-chain/`chain` family remains a local reference), Phases 4–5 partial.
-**Last updated:** 2026-09-03
-**HEAD:** `aa81561` (real Circle stablecoin provider + async release fix + recipients UI, committed) + uncommitted this session: live-verified the Circle wiring against the real sandbox API + Base Sepolia (a genuine on-chain USDC transfer, confirmed), fixing a real bug the live run caught — Circle's `idempotencyKey` must be UUID-shaped, not an arbitrary unique string
+**Last updated:** 2026-09-17
+**HEAD:** `f7c8b50` (CircleNftRail wired into AssetTransferService + API, committed) + this session: verified the reference-tier `ProgrammableAssetTransferAdapter` rail carries `defi_position`/`data_feed_subscription`/`synthetic_position` end to end through the same `AssetTransferService`/`asset_transfer_plans` path, no kind-specific code anywhere in it (`tests/e2e/asset-transfer.test.ts`, migration 0017 applied)
 **Purpose:** Living memory of *what actually exists in the codebase* and *what is next*. This supersedes the original concept-capture memory (`AI_Opportunity_Operating_System_Project_Memory.md`) for engineering purposes. Requirements live in `Opportunity_OS_TECHNICAL_REQUIREMENTS.md`; rationale lives in `docs/adr/`.
 
 ---
@@ -237,18 +237,37 @@ started before Circle):
   `verifyOwnership`, honestly scoped to the platform's own custodial wallet
   only (Circle can't attest an arbitrary external address's holdings).
   Simulated with no Circle config, same duality as `StablecoinRail`. **Not**
-  live-verified against a real Circle account yet, **not** wired into any
-  service/route (see backlog item below) — importable and tested, otherwise
-  inert.
+  live-verified against a real Circle account yet.
+
+**Shipped, 2026-09-17 — `CircleNftRail` wired into `AssetTransferService` + API**
+(closes the "not wired into any service/route" gap above): new
+`asset_transfer_plans` table (migration 0017, one row per transfer — not
+milestone-based like settlement, since a transfer moves a single
+object/position, not a phased amount), `packages/db` repository
+(`createAssetTransferPlan`/`setAssetTransferReference`/`recordAssetTransferResult`),
+and `apps/api/src/asset-transfers` (module/controller/service/dto/rails.ts,
+registered in `AppModule`): `POST /asset-transfers` (create + prepare),
+`GET /asset-transfers/:id`, `POST /asset-transfers/:id/execute` (approval-token
+gated — new `hashAssetTransferTerms` in `packages/audit`, mirrors
+`hashReleaseTerms`'s no-self-authorized-money invariant applied to an asset
+instead of currency; new `asset_transfer:plan`/`asset_transfer:execute`
+permissions), `POST /asset-transfers/:id/refresh-status` (manual rail poll —
+no webhook reconciliation yet). Rails composed generically by `asset.kind`,
+not `nft`-specific anywhere in the app layer — confirmed same session:
+**verified the SAME path already carries `defi_position`/
+`data_feed_subscription`/`synthetic_position`** through the reference-tier
+`ProgrammableAssetTransferAdapter` (already registered alongside
+`CircleNftRail`, already advertised all four kinds) — `tests/e2e/asset-transfer.test.ts`
+runs create→prepare→execute→persist for all three and asserts
+`AssetTransferService.byAssetKind` routes each to the programmable rail, not
+`CircleNftRail` (which only advertises `"nft"`). Reference-tier only, no new
+code needed for those three kinds — the generic abstraction already covered
+them; still no real DeFi/data-feed/synthetic provider (see below).
+Dispute/freeze/reclaim persistence deliberately still out of scope:
+`CircleNftRail.capabilities().supportsReclaim === false`, so nothing to wire
+for the one real rail yet.
 
 Open ideas, unordered, add to freely:
-- **Wire `CircleNftRail` into an `AssetTransferService`** + a NestJS provider
-  + an API route or Temporal activity + a `packages/db` table for
-  `AssetTransferPlan` (none of these exist yet — today the rail is
-  unreachable from the running app). Deliberately held back rather than done
-  alongside the prototype: wiring it in means a real transaction could hit
-  it before custody model and valuation (below) have answers, and unwiring
-  a live path is a bigger deal than not wiring one yet.
 - A real DeFi-position rail (e.g. an Aave/Uniswap LP position) — highest
   exposure of the four (`securities`/Howey-test adjacent); needs its own
   legal read before a live rail, not just a code integration.
