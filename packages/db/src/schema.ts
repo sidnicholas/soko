@@ -10,8 +10,8 @@ export interface UsersTable {
   email: string;
   display_name: string;
   role: string;
-  trust_tier: string;
-  status: string;
+  trust_tier: Generated<string>;
+  status: Generated<string>;
   created_at: Timestamp;
   updated_at: Timestamp;
 }

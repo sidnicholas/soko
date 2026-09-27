@@ -44,7 +44,7 @@ describe("channels are honest no-ops when unconfigured", () => {
 
 describe("configured channels call the provider API and return its message id", () => {
   it("TelegramChannel sends to api.telegram.org and returns the message id", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 42 } })));
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ ok: true, result: { message_id: 42 } })));
     vi.stubGlobal("fetch", fetchMock);
     const ref = await new TelegramChannel("tok").send("12345", "hi there");
     expect(ref).toBe("42");
@@ -54,7 +54,7 @@ describe("configured channels call the provider API and return its message id", 
   });
 
   it("TwilioSmsChannel sends via Basic auth and returns the message sid", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ sid: "SM999" })));
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ sid: "SM999" })));
     vi.stubGlobal("fetch", fetchMock);
     const ref = await new TwilioSmsChannel("AC1", "secret", "+15550000000").send("+15551234567", "hi");
     expect(ref).toBe("SM999");
@@ -64,7 +64,7 @@ describe("configured channels call the provider API and return its message id", 
   });
 
   it("WhatsAppChannel sends via graph.facebook.com and returns the message id", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ messages: [{ id: "wamid.123" }] })));
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ messages: [{ id: "wamid.123" }] })));
     vi.stubGlobal("fetch", fetchMock);
     const ref = await new WhatsAppChannel("token", "phone-id").send("15551234567", "hi");
     expect(ref).toBe("wamid.123");

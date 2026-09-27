@@ -196,6 +196,7 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 - jsonb writes: `JSON.stringify` arrays/objects (node-pg treats bare JS arrays as Postgres array literals).
 - State transitions: always via `assertTransition` + an audit event in the same DB transaction.
 - Tests: vitest; `packages/**`, `apps/**`, `tests/**` included. Live-DB e2e gated by `DATABASE_URL` (`describe.skipIf(!HAS_DB)`); pgvector e2e is CI-only (skips on plain Postgres). Verify against a throwaway Postgres, batch typecheck + full suite at the end.
+- Live-DB e2e gotcha: `HAS_DB` is evaluated at test-file top level, before `packages/config`'s lazy dotenv loader runs, so a bare `pnpm vitest run <file>` silently skips every live-DB test. Export the env first: `set -a && source .env && set +a && pnpm -w exec vitest run <file>`.
 - Current health: **suite 86 pass / 1 skip (30 files); typecheck 46/46.**
 
 ## 8. Configuration surface (env)
