@@ -5,16 +5,25 @@ import { CurrentUser, requirePermission, type Principal } from "../common/curren
 import { ZodBody } from "../common/zod-validation.pipe";
 import {
   MissionCreateSchema,
+  MissionParseSchema,
   MissionShareSchema,
   MissionSteerSchema,
   MissionUpdateSchema,
   type MissionCreateBody,
+  type MissionParseBody,
   type MissionShareBody,
   type MissionSteerBody,
   type MissionUpdateBody,
 } from "./mission.dto";
 import { MissionService } from "./mission.service";
 import { requireMissionAccess } from "./mission-access";
+import { parseDemand } from "@opportunity-os/demand";
+
+/** First sentence (or first 60 chars) of the request — an editable default, not a summary. */
+function suggestTitle(text: string): string {
+  const first = text.trim().split(/(?<=[.!?])\s/)[0] ?? text.trim();
+  return first.length <= 60 ? first.replace(/[.!?]$/, "") : `${first.slice(0, 57).trimEnd()}…`;
+}
 
 /**
  * Every per-mission route checks the role permission AND the caller's access
@@ -32,6 +41,14 @@ export class MissionsController {
   async create(@CurrentUser() user: Principal, @ZodBody(MissionCreateSchema) body: MissionCreateBody) {
     requirePermission(user, "mission:create");
     return { ...(await this.missions.create(user.userId, body)), access: "owner" as const };
+  }
+
+  @Post("parse")
+  @ApiOperation({ summary: "Parse a plain-language request into a demand specification for review (creates nothing)" })
+  async parse(@CurrentUser() user: Principal, @ZodBody(MissionParseSchema) body: MissionParseBody) {
+    requirePermission(user, "mission:create");
+    const { spec, source } = await parseDemand({ text: body.text });
+    return { demand_spec: spec, source, suggested_title: suggestTitle(body.text) };
   }
 
   @Get()

@@ -61,6 +61,19 @@ export interface SteerMissionResult {
   steering: { versionNumber: number; addedTerms: string[]; rejectedOpportunityIds: string[] };
 }
 
+/** POST /missions/parse — a plain-language request structured for review (Phase 4 Ask). */
+export interface ParsedMission {
+  demand_spec: DemandSpecification;
+  source: "llm" | "heuristic";
+  suggested_title: string;
+}
+
+/** GET /search — missions and live opportunities the caller can see. */
+export interface SearchResults {
+  missions: { id: string; title: string; raw_intent: string; status: string; updated_at: string }[];
+  opportunities: { id: string; status: string; overall_score: number; supply_title: string; mission_id: string; mission_title: string }[];
+}
+
 export interface MissionShare {
   id: string;
   mission_id: string;
@@ -174,6 +187,8 @@ const jsonBody = (value: unknown): RequestInit => ({ method: "POST", body: JSON.
 export const api = {
   // Missions (§16)
   createMission: (input: CreateMissionInput) => request<Mission>("/missions", jsonBody(input)),
+  parseMission: (text: string) => request<ParsedMission>("/missions/parse", jsonBody({ text })),
+  search: (q: string) => request<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   listMissions: () => request<MissionListItem[]>("/missions"),
   getMission: (id: string) => request<MissionDetail>(`/missions/${id}`),
   updateMission: (id: string, body: UpdateMissionInput) => request<MissionDetail>(`/missions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

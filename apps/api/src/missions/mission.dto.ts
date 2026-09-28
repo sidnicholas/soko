@@ -48,3 +48,7 @@ export type MissionSteerBody = z.infer<typeof MissionSteerSchema>;
 /** Setting an opportunity aside always carries the reason — it's what the agent (and collaborators) learn from. */
 export const OpportunityRejectSchema = z.object({ reason: z.string().trim().min(1).max(500) });
 export type OpportunityRejectBody = z.infer<typeof OpportunityRejectSchema>;
+
+/** Phase 4 Ask: structure a plain-language request for review before a mission is created. */
+export const MissionParseSchema = z.object({ text: z.string().trim().min(1).max(4000) });
+export type MissionParseBody = z.infer<typeof MissionParseSchema>;

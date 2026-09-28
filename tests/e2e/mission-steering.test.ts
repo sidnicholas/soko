@@ -166,5 +166,5 @@ describe.skipIf(!HAS_DB)("mission steering (live postgres)", () => {
     const timeline = (await missionTimeline(missionId))!;
     expect(timeline.some((e) => e.action === "mission.steered" && e.summary?.includes("1 opportunity set aside"))).toBe(true);
     expect(timeline.find((e) => e.action === "opportunity.rejected" && e.entity_id === dell.opportunityId)?.summary).toBe("Seller has bad reviews");
-  });
+  }, 30_000); // many sequential round trips to a remote Postgres
 });

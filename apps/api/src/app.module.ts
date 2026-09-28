@@ -11,6 +11,7 @@ import { EntitiesModule } from "./entities/entities.module";
 import { SettlementModule } from "./settlement/settlement.module";
 import { NegotiationsModule } from "./negotiations/negotiations.module";
 import { AssetTransferModule } from "./asset-transfers/asset-transfer.module";
+import { SearchModule } from "./search/search.module";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AssetTransferModule } from "./asset-transfers/asset-transfer.module";
     SettlementModule,
     NegotiationsModule,
     AssetTransferModule,
+    SearchModule,
   ],
 })
 export class AppModule {}

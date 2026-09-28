@@ -88,5 +88,5 @@ describe.skipIf(!HAS_DB)("mission sharing (live postgres)", () => {
     const actions = (await missionTimeline(missionId))!.map((e) => e.action);
     expect(actions.filter((a) => a === "mission.shared")).toHaveLength(2);
     expect(actions).toContain("mission.unshared");
-  });
+  }, 30_000); // many sequential round trips to a remote Postgres
 });

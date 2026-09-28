@@ -20,3 +20,4 @@ export * from "./repositories/asset-transfer";
 export * from "./repositories/timeline";
 export * from "./repositories/sharing";
 export * from "./repositories/steering";
+export * from "./repositories/search";

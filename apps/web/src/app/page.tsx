@@ -18,7 +18,8 @@ import {
   formatDateTime,
   tokens,
 } from "@opportunity-os/ui";
-import { api } from "../lib/api";
+import { api, type ParsedMission } from "../lib/api";
+import { GlobalSearch } from "../components/GlobalSearch";
 import { useAsync } from "../lib/useAsync";
 import { AsyncView } from "../components/AsyncView";
 
@@ -53,9 +54,43 @@ export default function SearchHomePage() {
   const [policy, setPolicy] = useState<AutonomyPolicy>("discover_only");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 4 Ask: the parser's reading of the request, applied to the fields below for review.
+  const [parsed, setParsed] = useState<ParsedMission | null>(null);
+  const [parsing, setParsing] = useState(false);
 
   const toggleMethod = (m: PaymentMethodFamily) =>
     setMethods((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+
+  function centsToDollars(money: Money | undefined): string {
+    return money ? (money.amount / 100).toFixed(2) : "";
+  }
+
+  async function readRequest() {
+    if (rawIntent.trim().length === 0) {
+      setError("Describe what you need first.");
+      return;
+    }
+    setParsing(true);
+    setError(null);
+    try {
+      const result = await api.parseMission(rawIntent.trim());
+      const spec = result.demand_spec;
+      setParsed(result);
+      if (!title.trim()) setTitle(result.suggested_title);
+      setTarget(centsToDollars(spec.budget.target));
+      setMaximum(centsToDollars(spec.budget.maximum));
+      setFlexible(spec.budget.flexible);
+      setUrgency(spec.timing.urgency);
+      setFulfillment(spec.fulfillment.type);
+      const known = spec.payment.acceptableMethods.filter((m) => PAYMENT_METHODS.includes(m));
+      if (known.length > 0) setMethods(known);
+      setSubstitutes(spec.flexibility.substitutesAllowed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read the request.");
+    } finally {
+      setParsing(false);
+    }
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -64,15 +99,19 @@ export default function SearchHomePage() {
       setError("Describe what you need before creating a mission.");
       return;
     }
+    // Keep what the parser found that the form has no field for (constraints,
+    // needed-by date, location...); the visible fields always win.
+    const base = parsed?.demand_spec;
     const demand_spec: DemandSpecification = {
-      what: { description: rawIntent.trim() },
+      ...base,
+      what: { ...base?.what, description: rawIntent.trim() },
       budget: {
         target: dollarsToMoney(target),
         maximum: dollarsToMoney(maximum),
         flexible,
       },
-      quality: { naturalLanguage: rawIntent.trim(), constraints: [] },
-      timing: { urgency },
+      quality: { naturalLanguage: rawIntent.trim(), constraints: base?.quality.constraints ?? [] },
+      timing: { ...base?.timing, urgency },
       payment: { acceptableMethods: methods.length > 0 ? methods : ["card"] },
       fulfillment: { type: fulfillment },
       flexibility: { substitutesAllowed: substitutes, negotiableFields: [], nonNegotiables: [] },
@@ -101,17 +140,38 @@ export default function SearchHomePage() {
         subtitle="Describe an outcome in plain language. Opportunity OS turns it into a persistent mission, then continuously discovers, scores, and surfaces real opportunities for your review."
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.4fr) minmax(0, 1fr)", gap: tokens.space.lg, alignItems: "start" }}>
+      <GlobalSearch />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))", gap: tokens.space.lg, alignItems: "start" }}>
         <Card title="New mission" subtitle="Everything below becomes a structured demand specification.">
           <form onSubmit={onSubmit} className="oos-stack" style={{ gap: tokens.space.lg }}>
-            <Field label="What do you need?" htmlFor="raw_intent" required hint="Plain language — the parser extracts constraints, budget signals, and timing.">
+            <Field label="What do you need?" htmlFor="raw_intent" required hint="Plain language. “Read my request” fills in budget, timing and constraints below for you to check.">
               <Textarea
                 id="raw_intent"
                 value={rawIntent}
-                onChange={(e) => setRawIntent(e.target.value)}
+                onChange={(e) => {
+                  setRawIntent(e.target.value);
+                  setParsed(null); // a reading of different text no longer applies
+                }}
                 placeholder="e.g. Source 200 refurbished 27-inch monitors, delivered to Detroit within two weeks, under $120 each."
               />
             </Field>
+
+            <div style={{ display: "flex", alignItems: "center", gap: tokens.space.md, flexWrap: "wrap" }}>
+              <Button type="button" variant="secondary" loading={parsing} disabled={!rawIntent.trim()} onClick={readRequest}>
+                Read my request
+              </Button>
+              {parsed && (
+                <span role="status" style={{ display: "flex", flexWrap: "wrap", gap: tokens.space.xs, alignItems: "center", fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>
+                  Filled in below{parsed.source === "heuristic" ? " (keyword reading — no AI model configured)" : ""}. Check the fields.
+                  {parsed.demand_spec.quality.constraints.map((c, i) => (
+                    <Badge key={i} tone="accent" dot={false}>
+                      {c.field} {c.operator} {String(c.value)}
+                    </Badge>
+                  ))}
+                </span>
+              )}
+            </div>
 
             <Field label="Mission title" htmlFor="title" hint="Optional — defaults to a summary of your request.">
               <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Bulk monitor sourcing" />
@@ -231,7 +291,10 @@ export default function SearchHomePage() {
                           <Link href={`/missions/${m.id}`} className="oos-link">
                             {m.title}
                           </Link>
-                          <span style={{ color: tokens.color.inkSubtle, fontSize: tokens.fontSize.xs }}>{formatDateTime(m.created_at)}</span>
+                          <span style={{ color: tokens.color.inkSubtle, fontSize: tokens.fontSize.xs }}>
+                            {formatDateTime(m.created_at)}
+                            {m.access !== "owner" ? ` · shared with you (${m.access})` : ""}
+                          </span>
                         </div>
                       ),
                     },
