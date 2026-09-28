@@ -70,3 +70,22 @@ export const DemandSpecification = z.object({
   }),
 });
 export type DemandSpecification = z.infer<typeof DemandSpecification>;
+
+/**
+ * Phase 4 user→agent steering: an exclusion is a hard `keyword neq <term>`
+ * constraint. Discovery skips supply whose title/description contains one.
+ */
+export const EXCLUDE_TERM_FIELD = "keyword";
+
+/** Excluded terms carried by a demand spec's constraints. */
+export function excludedTerms(spec: { quality: { constraints: Constraint[] } }): string[] {
+  return spec.quality.constraints
+    .filter((c) => c.field === EXCLUDE_TERM_FIELD && c.operator === "neq" && typeof c.value === "string")
+    .map((c) => c.value as string);
+}
+
+/** The first excluded term found in `text` (case-insensitive), if any. */
+export function matchesExcludedTerm(text: string, terms: readonly string[]): string | undefined {
+  const lower = text.toLowerCase();
+  return terms.find((t) => lower.includes(t.toLowerCase()));
+}

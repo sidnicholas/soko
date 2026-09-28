@@ -1,5 +1,9 @@
 import { Inject } from "@nestjs/common";
-import { Controller, Get, Param, Post } from "@nestjs/common";
+import { ConflictException, Controller, Get, NotFoundException, Param, Post } from "@nestjs/common";
+import { getOpportunityMissionId, rejectOpportunity } from "@opportunity-os/db";
+import { InvalidTransitionError } from "@opportunity-os/domain";
+import { requireMissionAccess } from "../missions/mission-access";
+import { OpportunityRejectSchema, type OpportunityRejectBody } from "../missions/mission.dto";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
 import { ZodBody } from "../common/zod-validation.pipe";
@@ -27,6 +31,27 @@ export class OpportunitiesController {
   @ApiOperation({ summary: "Opportunity detail with economics and scores" })
   get(@CurrentUser() user: Principal, @Param("id") id: string) {
     requirePermission(user, "opportunity:read");
+    return this.opportunities.get(id);
+  }
+
+  @Post(":id/reject")
+  @ApiOperation({ summary: "Set an opportunity aside with a reason (mission owner/editor; operators for graph deals). Discovery won't resurrect it." })
+  async reject(@CurrentUser() user: Principal, @Param("id") id: string, @ZodBody(OpportunityRejectSchema) body: OpportunityRejectBody) {
+    const missionId = await getOpportunityMissionId(id);
+    if (missionId === undefined) throw new NotFoundException(`Opportunity ${id} not found`);
+    if (missionId) {
+      requirePermission(user, "mission:update");
+      await requireMissionAccess(user, missionId, "edit");
+    } else {
+      // Graph-derived deals belong to no mission — an operator decision.
+      requirePermission(user, "opportunity:reverify");
+    }
+    try {
+      await rejectOpportunity({ opportunityId: id, reason: body.reason, actorId: user.userId });
+    } catch (err) {
+      if (err instanceof InvalidTransitionError) throw new ConflictException(err.message);
+      throw err;
+    }
     return this.opportunities.get(id);
   }
 

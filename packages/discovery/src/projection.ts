@@ -1,4 +1,4 @@
-import type { DemandSpecification } from "@opportunity-os/contracts";
+import { excludedTerms, type DemandSpecification } from "@opportunity-os/contracts";
 import type { DiscoveryDemand } from "./pipeline";
 
 /** Buyer-urgency enum -> 0..1 time pressure used by scoring (§12). */
@@ -30,5 +30,6 @@ export function projectMissionDemand(spec: DemandSpecification): DiscoveryDemand
     maxBudgetMinor: maximum?.amount ?? null,
     currency: maximum?.currency ?? target?.currency ?? "USD",
     urgencyScore: URGENCY_SCORE[spec.timing.urgency] ?? 0.5,
+    excludeTerms: excludedTerms(spec),
   };
 }

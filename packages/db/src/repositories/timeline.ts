@@ -38,6 +38,13 @@ async function auditEntries(entityIds: string[]): Promise<TimelineEntry[]> {
     .orderBy("created_at", "desc")
     .limit(MAX_ENTRIES)
     .execute();
+  // The audit row carries no free text; a rejection's "why" lives on the opportunity.
+  const rejectedIds = [...new Set(rows.filter((r) => r.action === "opportunity.rejected").map((r) => r.entity_id))];
+  const reasons = new Map(
+    rejectedIds.length > 0
+      ? (await getDb().selectFrom("opportunities").select(["id", "rejection_reason"]).where("id", "in", rejectedIds).execute()).map((o) => [o.id, o.rejection_reason])
+      : [],
+  );
   return rows.map((r) => ({
     id: `audit:${r.id}`,
     at: iso(r.created_at),
@@ -46,7 +53,7 @@ async function auditEntries(entityIds: string[]): Promise<TimelineEntry[]> {
     entity_type: r.entity_type,
     entity_id: r.entity_id,
     actor: r.actor_id ? `${r.actor_type}:${r.actor_id}` : r.actor_type,
-    summary: null,
+    summary: reasons.get(r.entity_id) ?? null,
     hash: r.event_hash,
   }));
 }

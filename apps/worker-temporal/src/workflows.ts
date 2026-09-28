@@ -39,12 +39,17 @@ export async function missionDiscoveryWorkflow(input: MissionDiscoveryInput): Pr
   setHandler(archiveSignal, () => {
     stop = true;
   });
+  // Constraint edits and steering re-project the demand; later cycles use it.
+  let demand = input.demand;
+  setHandler(demandSignal, (next) => {
+    demand = next;
+  });
 
   let total = 0;
   const maxCycles = input.maxCycles ?? Number.MAX_SAFE_INTEGER;
   for (let cycle = 0; cycle < maxCycles && !stop; cycle++) {
     if (!paused) {
-      const result = await runDiscoveryCycle(input);
+      const result = await runDiscoveryCycle({ ...input, demand });
       total += result.opportunitiesPersisted;
     }
     if (cycle + 1 >= maxCycles) break;
@@ -59,6 +64,7 @@ export async function missionDiscoveryWorkflow(input: MissionDiscoveryInput): Pr
 export const pauseSignal = defineSignal("pause");
 export const resumeSignal = defineSignal("resume");
 export const archiveSignal = defineSignal("archive");
+export const demandSignal = defineSignal<[DiscoveryInput["demand"]]>("demand");
 
 /** §14/§11.2 — the human approval decision delivered to a waiting execution workflow. */
 export interface ApprovalDecisionSignal {

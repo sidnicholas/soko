@@ -25,6 +25,18 @@ export interface UpsertOpportunityInput {
   nextAction: string | null;
 }
 
+/**
+ * Status on re-discovery of an existing opportunity. Only rows that no one has
+ * acted on yet (candidate/qualified) or that lapsed (expired — re-discovery is
+ * how they come back) take the freshly scored status; anything a human or
+ * workflow moved forward (awaiting_approval/approved/executing/closed) or set
+ * aside (rejected) keeps its status. Re-scoring every sweep used to reset all
+ * of them to candidate/qualified.
+ */
+function rediscoveredStatus(fresh: string) {
+  return sql<string>`case when opportunities.status in ('candidate', 'qualified', 'expired') then ${fresh} else opportunities.status end`;
+}
+
 export interface UpsertOpportunityResult {
   opportunityId: string;
   created: boolean;
@@ -69,7 +81,7 @@ export async function upsertOpportunity(input: UpsertOpportunityInput): Promise<
         })
         .onConflict((oc) =>
           oc.column("match_id").doUpdateSet({
-            status: input.status,
+            status: rediscoveredStatus(input.status),
             transaction_role: input.transactionRole,
             expected_revenue: money(input.expectedRevenueMinor),
             expected_direct_cost: money(input.expectedDirectCostMinor),
@@ -191,7 +203,7 @@ export async function upsertGraphOpportunity(input: UpsertGraphOpportunityInput)
         })
         .onConflict((oc) =>
           oc.column("dedupe_key").doUpdateSet({
-            status: "qualified",
+            status: rediscoveredStatus("qualified"),
             expected_revenue: money(input.expectedRevenueMinor),
             expected_direct_cost: money(input.expectedDirectCostMinor),
             expected_net_profit: money(input.expectedNetProfitMinor),

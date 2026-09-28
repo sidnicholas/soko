@@ -22,10 +22,12 @@ import {
   statusLabel,
   tokens,
 } from "@opportunity-os/ui";
-import { api, type MissionDetail } from "../../../lib/api";
+import { api, type MissionDetail, type RejectedOpportunity } from "../../../lib/api";
 import { useAsync } from "../../../lib/useAsync";
 import { AsyncView } from "../../../components/AsyncView";
 import { EntityTimeline } from "../../../components/EntityTimeline";
+import { MissionSharing } from "../../../components/MissionSharing";
+import { RejectedAlternativesCard, SetAsideForm, SteerAgentCard } from "../../../components/MissionSteering";
 import { scoreTone } from "../../../lib/opportunity";
 
 const URGENCIES: Urgency[] = ["immediate", "today", "days", "scheduled", "flexible"];
@@ -57,6 +59,15 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
   const mission = useAsync<MissionDetail>(() => api.getMission(params.id), [params.id]);
   const opportunities = useAsync<Opportunity[]>(() => api.listMissionOpportunities(params.id), [params.id]);
   const timeline = useAsync<TimelineEntry[]>(() => api.getMissionTimeline(params.id), [params.id]);
+  const rejected = useAsync<RejectedOpportunity[]>(() => api.listRejectedOpportunities(params.id), [params.id]);
+  const [settingAside, setSettingAside] = useState<{ id: string; label: string } | null>(null);
+
+  function refreshAll() {
+    mission.reload();
+    opportunities.reload();
+    rejected.reload();
+    timeline.reload();
+  }
   const [busy, setBusy] = useState<null | string>(null);
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -82,6 +93,7 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
       <AsyncView state={mission} loadingLabel="Loading mission">
         {(m) => {
           const spec = m.demand_spec;
+          const canEdit = m.access === "owner" || m.access === "editor";
           return (
             <>
               <PageHeader
@@ -90,17 +102,17 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                 subtitle={m.raw_intent}
                 actions={
                   <>
-                    {m.status === "active" && (
+                    {canEdit && m.status === "active" && (
                       <Button variant="secondary" loading={busy === "pause"} onClick={() => control("pause")}>
                         Pause
                       </Button>
                     )}
-                    {m.status === "paused" && (
+                    {canEdit && m.status === "paused" && (
                       <Button variant="secondary" loading={busy === "resume"} onClick={() => control("resume")}>
                         Resume
                       </Button>
                     )}
-                    {m.status !== "archived" && (
+                    {m.access === "owner" && m.status !== "archived" && (
                       <Button variant="danger" loading={busy === "archive"} onClick={() => control("archive")}>
                         Archive
                       </Button>
@@ -113,6 +125,7 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                 <Badge status={m.status} />
                 <Badge tone="accent">{POLICY_LABEL[m.agent_autonomy_policy]}</Badge>
                 {m.current_version_number !== null && <Badge tone="neutral">Constraints v{m.current_version_number}</Badge>}
+                {m.access !== "owner" && <Badge tone="info">Shared with you · {m.access}</Badge>}
               </div>
 
               {notice && (
@@ -144,7 +157,7 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                     title="Current request"
                     subtitle="The active demand specification."
                     actions={
-                      m.status !== "archived" ? (
+                      canEdit && m.status !== "archived" ? (
                         <Button size="sm" variant="secondary" onClick={() => setEditing(true)}>
                           Edit constraints
                         </Button>
@@ -175,23 +188,25 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                   </Card>
                 )}
 
-                <Card title="Sharing" subtitle="Future-ready collaboration (§15.4).">
-                  <p style={{ margin: 0, color: tokens.color.inkMuted, fontSize: tokens.fontSize.sm }}>
-                    Missions are owner-scoped in V1. The data model and API already support shared missions, collaborators, and comments — the
-                    sharing surface will light up here without a schema change.
-                  </p>
-                  <div style={{ marginTop: tokens.space.md }}>
-                    <Button size="sm" variant="secondary" disabled title="Sharing arrives in a later release">
-                      Share mission
-                    </Button>
-                  </div>
-                </Card>
+                <MissionSharing missionId={m.id} access={m.access} onChanged={() => timeline.reload()} />
               </div>
 
               <Card title="Opportunities found" subtitle="Matches scored for this mission, highest first." flush>
+                {settingAside && (
+                  <SetAsideForm
+                    opportunityId={settingAside.id}
+                    label={settingAside.label}
+                    onCancel={() => setSettingAside(null)}
+                    onDone={() => {
+                      setSettingAside(null);
+                      refreshAll();
+                    }}
+                  />
+                )}
                 <AsyncView state={opportunities} loadingLabel="Loading opportunities">
-                  {(rows) =>
-                    rows.length === 0 ? (
+                  {(all) => {
+                    const rows = all.filter((o) => o.status !== "rejected");
+                    return rows.length === 0 ? (
                       <EmptyState
                         compact
                         title="No opportunities yet"
@@ -215,29 +230,43 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                           { key: "status", header: "Status", render: (o) => <Badge status={o.status} />, width: 150 },
                           { key: "score", header: "Score", align: "right", render: (o) => <Badge tone={scoreTone(o.overall_score)}>{formatScore(o.overall_score)}</Badge> },
                           { key: "profit", header: "Net profit", align: "right", render: (o) => <span style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(o.expected_net_profit)}</span> },
+                          ...(canEdit
+                            ? [
+                                {
+                                  key: "aside",
+                                  header: "",
+                                  align: "right" as const,
+                                  render: (o: Opportunity) =>
+                                    o.status === "candidate" || o.status === "qualified" ? (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={(e) => {
+                                          e.stopPropagation(); // the row itself navigates to the opportunity
+                                          setSettingAside({ id: o.id, label: o.next_action ?? `Opportunity ${o.id.slice(0, 8)}` });
+                                        }}
+                                      >
+                                        Set aside
+                                      </Button>
+                                    ) : null,
+                                },
+                              ]
+                            : []),
                         ]}
                       />
-                    )
-                  }
+                    );
+                  }}
                 </AsyncView>
               </Card>
 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: tokens.space.lg, alignItems: "start" }}>
-                <Card title="Rejected alternatives" subtitle="Why candidates were set aside.">
-                  <EmptyState
-                    compact
-                    title="No rejected alternatives"
-                    description="Discarded matches with their concise rejection reason will appear here once the scoring engine records them for this mission."
-                  />
-                </Card>
-
-                <Card title="Agent questions" subtitle="Where the agent needs your input.">
-                  <EmptyState
-                    compact
-                    title="No open questions"
-                    description="When an agent needs a decision to proceed, it will ask here instead of guessing."
-                  />
-                </Card>
+                <SteerAgentCard
+                  missionId={m.id}
+                  spec={spec}
+                  canEdit={canEdit && m.status !== "archived"}
+                  onSteered={refreshAll}
+                />
+                <RejectedAlternativesCard state={rejected} />
               </div>
 
               <Card title="Activity" subtitle="Lifecycle, constraint versions, discoveries, approvals and deals — newest first.">

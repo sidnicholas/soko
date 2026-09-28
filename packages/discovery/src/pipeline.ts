@@ -6,6 +6,7 @@ import {
   type NormalizedSupply,
 } from "@opportunity-os/connectors-sdk";
 import { isTransactableInV1 } from "@opportunity-os/risk";
+import { matchesExcludedTerm } from "@opportunity-os/contracts";
 import { upsertMissionDemand, upsertSupply } from "@opportunity-os/db";
 import { createLogger } from "@opportunity-os/observability";
 import { scoreAndPersistOpportunity } from "./score";
@@ -24,6 +25,8 @@ export interface DiscoveryDemand {
   maxBudgetMinor: number | null;
   currency: string;
   urgencyScore: number;
+  /** Phase 4 steering: supply whose title/description contains one of these is never scored for this mission. */
+  excludeTerms?: string[];
 }
 
 export interface DiscoveryInput {
@@ -93,6 +96,14 @@ export async function runDiscoveryCycle(input: DiscoveryInput): Promise<Discover
       sourceReliability: s.source_reliability,
     });
     supplyPersisted++;
+
+    // Steering exclusion: the supply is still real market data (persisted
+    // above for other missions), it just can't become this mission's match.
+    const excludedBy = matchesExcludedTerm(`${s.title} ${s.description}`, input.demand.excludeTerms ?? []);
+    if (excludedBy) {
+      log.debug({ ref: s.external_ref, term: excludedBy }, "supply.skipped.steering_exclusion");
+      continue;
+    }
 
     const result = await scoreAndPersistOpportunity(
       demandId,

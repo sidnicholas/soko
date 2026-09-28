@@ -59,3 +59,17 @@ export async function signalMissionWorkflow(missionWorkflowId: string, action: "
     logger.warn(`could not signal ${action} to mission workflow ${missionWorkflowId}: ${String(err)}`);
   }
 }
+
+/**
+ * Best-effort push of a mission's re-projected demand (after a constraints
+ * edit or steering) to its running workflow — the workflow was started with a
+ * fixed demand and would otherwise keep discovering against the old one.
+ */
+export async function signalMissionDemand(missionWorkflowId: string, demand: DiscoveryDemand): Promise<void> {
+  try {
+    const c = await temporalClient();
+    await c.workflow.getHandle(missionWorkflowId).signal("demand", demand);
+  } catch (err) {
+    logger.warn(`could not signal new demand to mission workflow ${missionWorkflowId}: ${String(err)}`);
+  }
+}

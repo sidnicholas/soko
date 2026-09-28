@@ -28,3 +28,23 @@ export type MissionUpdateBody = z.infer<typeof MissionUpdateSchema>;
 
 /** Lifecycle action -> target mission status (§6.2 mission state guard). */
 export type MissionAction = "pause" | "resume" | "archive";
+
+/** Phase 4 sharing — grant a user access to a mission by their account email. */
+export const MissionShareSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(["viewer", "editor"]),
+});
+export type MissionShareBody = z.infer<typeof MissionShareSchema>;
+
+/** Phase 4 user→agent steering: terms the agent must stop matching, plus an optional note for the record. */
+export const MissionSteerSchema = z
+  .object({
+    exclude_terms: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
+    note: z.string().trim().max(500).optional(),
+  })
+  .refine((b) => b.exclude_terms.length > 0 || (b.note ?? "").length > 0, { message: "Provide exclude_terms or a note" });
+export type MissionSteerBody = z.infer<typeof MissionSteerSchema>;
+
+/** Setting an opportunity aside always carries the reason — it's what the agent (and collaborators) learn from. */
+export const OpportunityRejectSchema = z.object({ reason: z.string().trim().min(1).max(500) });
+export type OpportunityRejectBody = z.infer<typeof OpportunityRejectSchema>;

@@ -30,6 +30,15 @@ export interface MissionsTable {
   temporal_workflow_id: string | null;
 }
 
+export interface MissionSharesTable {
+  id: Generated<string>;
+  mission_id: string;
+  user_id: string;
+  role: string;
+  granted_by: string;
+  created_at: Generated<Timestamp>;
+}
+
 export interface MissionVersionsTable {
   id: Generated<string>;
   mission_id: string;
@@ -128,6 +137,9 @@ export interface OpportunitiesTable {
   last_verified_at: Timestamp | null;
   expires_at: Timestamp | null;
   created_at: Timestamp;
+  rejection_reason: Generated<string | null>;
+  rejected_by: Generated<string | null>;
+  rejected_at: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 export interface CounterpartiesTable {
@@ -373,6 +385,7 @@ export interface Database {
   users: UsersTable;
   missions: MissionsTable;
   mission_versions: MissionVersionsTable;
+  mission_shares: MissionSharesTable;
   demands: DemandsTable;
   supply: SupplyTable;
   matches: MatchesTable;

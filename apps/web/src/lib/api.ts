@@ -25,10 +25,52 @@ export const DEV_USER_ID = process.env.NEXT_PUBLIC_DEV_USER_ID ?? "00000000-0000
 export const DEV_USER_ROLE = process.env.NEXT_PUBLIC_DEV_USER_ROLE ?? "operator";
 
 /** GET /missions/:id returns the mission flattened with its current demand spec. */
+/** The caller's access to a mission (Phase 4 sharing): owner > editor > viewer. */
+export type MissionAccess = "owner" | "editor" | "viewer";
+
 export type MissionDetail = Mission & {
   demand_spec: DemandSpecification | null;
   current_version_number: number | null;
+  access: MissionAccess;
 };
+
+/** GET /missions rows: missions the caller owns or was shared, with activity for the archive view. */
+export type MissionListItem = Mission & {
+  access: MissionAccess;
+  opportunity_count: number;
+  last_activity_at: string;
+};
+
+/** GET /missions/:id/rejected rows: opportunities set aside, with who/why (Phase 4 steering). */
+export interface RejectedOpportunity {
+  id: string;
+  overall_score: number;
+  rejection_reason: string | null;
+  rejected_by: string | null;
+  rejected_at: string | null;
+  supply_title: string;
+}
+
+export interface SteerMissionInput {
+  exclude_terms: string[];
+  note?: string;
+}
+
+export interface SteerMissionResult {
+  mission: MissionDetail;
+  steering: { versionNumber: number; addedTerms: string[]; rejectedOpportunityIds: string[] };
+}
+
+export interface MissionShare {
+  id: string;
+  mission_id: string;
+  user_id: string;
+  role: "viewer" | "editor";
+  granted_by: string;
+  created_at: string;
+  email: string;
+  display_name: string;
+}
 
 /** GET /transactions/:id aggregates the settlement plan + milestones (§20). */
 export type TransactionDetail = Transaction & {
@@ -132,12 +174,18 @@ const jsonBody = (value: unknown): RequestInit => ({ method: "POST", body: JSON.
 export const api = {
   // Missions (§16)
   createMission: (input: CreateMissionInput) => request<Mission>("/missions", jsonBody(input)),
-  listMissions: () => request<Mission[]>("/missions"),
+  listMissions: () => request<MissionListItem[]>("/missions"),
   getMission: (id: string) => request<MissionDetail>(`/missions/${id}`),
   updateMission: (id: string, body: UpdateMissionInput) => request<MissionDetail>(`/missions/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   pauseMission: (id: string) => request<Mission>(`/missions/${id}/pause`, jsonBody({})),
   resumeMission: (id: string) => request<Mission>(`/missions/${id}/resume`, jsonBody({})),
   archiveMission: (id: string) => request<Mission>(`/missions/${id}/archive`, jsonBody({})),
+  steerMission: (id: string, body: SteerMissionInput) => request<SteerMissionResult>(`/missions/${id}/steer`, jsonBody(body)),
+  listRejectedOpportunities: (id: string) => request<RejectedOpportunity[]>(`/missions/${id}/rejected`),
+  rejectOpportunity: (id: string, reason: string) => request<Opportunity>(`/opportunities/${id}/reject`, jsonBody({ reason })),
+  listMissionShares: (id: string) => request<MissionShare[]>(`/missions/${id}/shares`),
+  shareMission: (id: string, email: string, role: MissionShare["role"]) => request<MissionShare[]>(`/missions/${id}/shares`, jsonBody({ email, role })),
+  unshareMission: (id: string, userId: string) => request<MissionShare[]>(`/missions/${id}/shares/${userId}`, { method: "DELETE" }),
   listMissionOpportunities: (id: string) => request<Opportunity[]>(`/missions/${id}/opportunities`),
   getMissionTimeline: (id: string) => request<TimelineEntry[]>(`/missions/${id}/timeline`),
 

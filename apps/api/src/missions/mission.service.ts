@@ -1,10 +1,16 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   createMission,
   enqueueEvent,
   getDb,
   getMission,
-  listMissions,
+  listAccessibleMissions,
+  listRejectedOpportunities,
+  steerMission,
+  listMissionShares,
+  MissionShareError,
+  shareMission,
+  unshareMission,
   listOpportunitiesByMission,
   missionTimeline,
   setMissionStatus,
@@ -14,9 +20,9 @@ import { canTransition, type TransitionMap } from "@opportunity-os/domain";
 import { projectMissionDemand } from "@opportunity-os/discovery";
 import { getConfig } from "@opportunity-os/config";
 import type { DemandSpecification, EventName } from "@opportunity-os/contracts";
-import type { MissionAction, MissionCreateBody, MissionUpdateBody } from "./mission.dto";
+import type { MissionAction, MissionCreateBody, MissionSteerBody, MissionUpdateBody } from "./mission.dto";
 import { parseDemand } from "@opportunity-os/demand";
-import { startMissionDiscovery, signalMissionWorkflow } from "./temporal";
+import { startMissionDiscovery, signalMissionDemand, signalMissionWorkflow } from "./temporal";
 
 /** §6.2 mission lifecycle guard. Draft auto-activates on create (see repo). */
 const MISSION_TRANSITIONS: TransitionMap<string> = {
@@ -56,8 +62,9 @@ export class MissionService {
     return this.detail(missionId);
   }
 
-  list(ownerUserId: string) {
-    return listMissions(ownerUserId);
+  /** Missions the caller owns or was shared, with their access level (Phase 4 sharing). */
+  list(userId: string) {
+    return listAccessibleMissions(userId);
   }
 
   /** Mission plus its current version's demand_spec (§16 mission detail). */
@@ -81,12 +88,10 @@ export class MissionService {
     return { ...mission, demand_spec, current_version_number };
   }
 
-  async update(id: string, ownerUserId: string, body: MissionUpdateBody) {
+  async update(id: string, editorUserId: string, body: MissionUpdateBody) {
+    // Owner-or-editor is enforced by the controller (requireMissionAccess).
     const mission = await getMission(id);
     if (!mission) throw new NotFoundException(`Mission ${id} not found`);
-    if (mission.owner_user_id !== ownerUserId) {
-      throw new ConflictException("Only the mission owner may edit it");
-    }
     await getDb().transaction().execute(async (tx) => {
       await tx
         .updateTable("missions")
@@ -116,7 +121,7 @@ export class MissionService {
             mission_id: id,
             version_number: nextNumber,
             demand_spec_json: body.demand_spec,
-            changed_by: ownerUserId,
+            changed_by: editorUserId,
             change_reason: "edit",
           })
           .returning(["id"])
@@ -136,7 +141,35 @@ export class MissionService {
         payload: { missionId: id, fields: Object.keys(body) },
       });
     });
+    if (body.demand_spec !== undefined && mission.temporal_workflow_id) {
+      await signalMissionDemand(mission.temporal_workflow_id, projectMissionDemand(body.demand_spec));
+    }
     return this.detail(id);
+  }
+
+  /**
+   * Phase 4 user→agent steering: exclusions become a new constraints version
+   * that every future discovery cycle honors (including a running durable
+   * workflow, which is re-signaled), and matching open opportunities are set
+   * aside now with the reason.
+   */
+  async steer(id: string, actorId: string, body: MissionSteerBody) {
+    let result;
+    try {
+      result = await steerMission({ missionId: id, excludeTerms: body.exclude_terms, note: body.note ?? null, actorId });
+    } catch (err) {
+      if (err instanceof Error && /no demand specification/.test(err.message)) throw new ConflictException(err.message);
+      throw err;
+    }
+    const detail = await this.detail(id);
+    if (detail.temporal_workflow_id && detail.demand_spec) {
+      await signalMissionDemand(detail.temporal_workflow_id, projectMissionDemand(detail.demand_spec));
+    }
+    return { mission: detail, steering: result };
+  }
+
+  rejected(missionId: string) {
+    return listRejectedOpportunities(missionId);
   }
 
   async transition(id: string, action: MissionAction) {
@@ -186,6 +219,27 @@ export class MissionService {
 
   opportunities(missionId: string) {
     return listOpportunitiesByMission(missionId);
+  }
+
+  shares(missionId: string) {
+    return listMissionShares(missionId);
+  }
+
+  async share(missionId: string, grantedBy: string, email: string, role: "viewer" | "editor") {
+    try {
+      await shareMission({ missionId, email, role, grantedBy });
+    } catch (err) {
+      if (err instanceof MissionShareError) throw new BadRequestException(err.message);
+      throw err;
+    }
+    return listMissionShares(missionId);
+  }
+
+  async unshare(missionId: string, userId: string, revokedBy: string) {
+    if (!(await unshareMission(missionId, userId, revokedBy))) {
+      throw new NotFoundException(`Mission ${missionId} is not shared with user ${userId}`);
+    }
+    return listMissionShares(missionId);
   }
 
   /** Merged mission history: lifecycle, constraint versions, discoveries, approvals, and downstream transactions (Phase 4). */
