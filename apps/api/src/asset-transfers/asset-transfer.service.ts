@@ -72,7 +72,7 @@ export class AssetTransferService {
     return recordAssetTransferResult({ id, status: result.status, externalRef: result.externalRef, actorId: principal.userId });
   }
 
-  /** Poll the rail for a still-pending transfer's current status (no webhook reconciliation yet, see backlog). */
+  /** Poll the rail for a still-pending transfer's current status — fallback for `POST /webhooks/circle`, which normally finalizes it. */
   async refreshStatus(id: string, principal: Principal) {
     const plan = await this.get(id);
     if (plan.status !== "pending" || !plan.external_ref) return plan;

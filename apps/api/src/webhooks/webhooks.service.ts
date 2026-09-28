@@ -6,14 +6,18 @@ import {
   disputeMilestone,
   enqueueEvent,
   getDb,
+  getAssetTransferPlanByExternalRef,
   getMilestoneByExternalTransactionRef,
   getMilestoneByProviderRef,
+  getMilestoneByRecipientRef,
   getSettlementPlan,
+  recordAssetTransferResult,
   refundMilestone,
   releaseMilestone,
+  setRecipientPayoutStatus,
 } from "@opportunity-os/db";
 import { getConfig } from "@opportunity-os/config";
-import type { EventName, Money } from "@opportunity-os/contracts";
+import type { EventName, MilestoneRecipient, Money, RecipientPayoutStatus } from "@opportunity-os/contracts";
 import {
   payloadIdempotencyKey,
   timingSafeStringEqual,
@@ -167,6 +171,28 @@ function milestoneAmountMinor(total: Money, amount: { kind: "amount" | "percenta
   return amount.kind === "amount" ? Math.round(amount.value) : Math.round((total.amount * amount.value) / 100);
 }
 
+/** Circle's terminal failure states — the same set `StablecoinRail.status()`/`CircleNftRail.status()` map to "failed". */
+const CIRCLE_FAILED_STATES = new Set(["FAILED", "DENIED", "CANCELLED", "STUCK"]);
+
+/**
+ * A split (ST-12) release is only final once every recipient's own transfer
+ * is confirmed — releasing on the first one to land would mark money paid
+ * that may still fail. A non-split milestone has no recipients to wait on.
+ */
+export function allRecipientPayoutsConfirmed(recipients: MilestoneRecipient[]): boolean {
+  return recipients.every((r) => r.payoutStatus === "confirmed");
+}
+
+/** Payout state a Stripe Connect Transfer event implies for its recipient, if it's one we reconcile. */
+export function stripeTransferPayoutStatus(
+  eventType: string,
+  transfer: { reversed?: boolean; amount_reversed?: number },
+): RecipientPayoutStatus | undefined {
+  if (eventType === "transfer.created") return "confirmed";
+  if (eventType === "transfer.reversed") return transfer.reversed ? "reversed" : "partially_reversed";
+  return undefined;
+}
+
 /** Which PaymentIntent id (our `settlement_milestones.provider_ref`) a Stripe event is about, if any. */
 function paymentIntentRef(event: Stripe.Event): string | null {
   const object = event.data.object as { id?: string; payment_intent?: string | { id: string } | null };
@@ -241,7 +267,11 @@ export class WebhooksService {
     return { received: true };
   }
 
-  private async reconcileStripeEvent(event: Stripe.Event): Promise<void> {
+  async reconcileStripeEvent(event: Stripe.Event): Promise<void> {
+    if (event.type === "transfer.created" || event.type === "transfer.reversed") {
+      await this.reconcileStripeTransfer(event);
+      return;
+    }
     const ref = paymentIntentRef(event);
     if (!ref) return;
     const milestone = await getMilestoneByProviderRef(ref);
@@ -260,6 +290,17 @@ export class WebhooksService {
         // only does work if that write never landed (e.g. the process died
         // right after Stripe confirmed the capture).
         if (milestone.status === "verified") {
+          // A split's Transfers are only created by execute() when the capture
+          // confirmed synchronously. If it came back pending instead, none were
+          // made — releasing here would mark recipients paid who never were.
+          // Leave it verified for an operator (ST-13 recipient-level gap).
+          const unpaid = (milestone.recipients_json as MilestoneRecipient[]).filter((r) => !r.externalRef);
+          if (unpaid.length > 0) {
+            this.logger.warn(
+              `PaymentIntent ${ref} succeeded but milestone ${milestone.id} has ${unpaid.length} split recipient(s) with no Transfer — not auto-releasing`,
+            );
+            return;
+          }
           await releaseMilestone({
             milestoneId: milestone.id,
             amountMinor,
@@ -294,6 +335,36 @@ export class WebhooksService {
   }
 
   /**
+   * ST-13 recipient-level reconciliation for Stripe Connect Transfers (one per
+   * ST-12 split recipient, created at execute() after capture). Transfers
+   * succeed synchronously, so `transfer.created` only backfills "confirmed" if
+   * that write never landed. `transfer.reversed` means money already paid out
+   * was pulled back — by then the milestone is released and its plan may be
+   * SETTLED (no legal DISPUTED edge), so this records it on the recipient +
+   * audit chain and flags it for an operator rather than guessing a state move.
+   */
+  private async reconcileStripeTransfer(event: Stripe.Event): Promise<void> {
+    const transfer = event.data.object as Stripe.Transfer;
+    const payoutStatus = stripeTransferPayoutStatus(event.type, transfer);
+    if (!payoutStatus || typeof transfer.id !== "string") return;
+    const milestone = await getMilestoneByRecipientRef(transfer.id);
+    if (!milestone) return; // Not ours.
+
+    const { changed } = await setRecipientPayoutStatus({
+      milestoneId: milestone.id,
+      externalRef: transfer.id,
+      payoutStatus,
+      actorId: "stripe-webhook",
+      reason: `Stripe reported ${event.type} on ${transfer.id}`,
+    });
+    if (changed && payoutStatus !== "confirmed") {
+      this.logger.warn(
+        `Stripe Transfer ${transfer.id} on milestone ${milestone.id} (${milestone.status}) is ${payoutStatus} (${transfer.amount_reversed} reversed) — needs operator review`,
+      );
+    }
+  }
+
+  /**
    * §ST-13 async provider-status reconciliation for the stablecoin rail
    * (Circle Developer-Controlled Wallets). Circle transfers are asynchronous
    * by nature — `execute()` always returns "pending" and records the
@@ -305,10 +376,11 @@ export class WebhooksService {
    * unlike Stripe/Telegram's shared-secret HMAC): fetch + cache the signing
    * public key by the `X-Circle-Key-Id` header, verify over the raw body.
    *
-   * Known gap: a multi-recipient (ST-12) release submits one Circle
-   * transaction per recipient but only the first's id is tracked on the
-   * milestone, so only that one reconciles here — same documented limitation
-   * as Stripe's un-reconciled Transfer events.
+   * A multi-recipient (ST-12) release submits one Circle transaction per
+   * recipient; each notification updates its own recipient, and the milestone
+   * releases only once all of them are COMPLETE. The same Circle wallet also
+   * sends CircleNftRail transfers, so an id that matches no milestone is tried
+   * against asset transfer plans.
    */
   async handleCircle(signature: string | undefined, keyId: string | undefined, rawBody: Buffer | undefined) {
     if (!getConfig().settlement.circleApiKey || !signature || !keyId || !rawBody) {
@@ -355,35 +427,62 @@ export class WebhooksService {
     return { received: true };
   }
 
-  private async reconcileCircleTransaction(transactionId: string, state: string): Promise<void> {
-    const milestone = await getMilestoneByExternalTransactionRef(transactionId);
-    if (!milestone) return; // Not ours, or a recipient-level transfer we don't track (see doc comment above).
+  async reconcileCircleTransaction(transactionId: string, state: string): Promise<void> {
+    const failed = CIRCLE_FAILED_STATES.has(state);
+    if (state !== "COMPLETE" && !failed) return; // Still in flight.
+
+    const milestone =
+      (await getMilestoneByRecipientRef(transactionId)) ?? (await getMilestoneByExternalTransactionRef(transactionId));
+    if (!milestone) {
+      await this.reconcileCircleAssetTransfer(transactionId, failed);
+      return;
+    }
     if (milestone.status === "released" || milestone.status === "refunded") return; // Already settled; idempotent no-op.
+
+    let recipients = milestone.recipients_json as MilestoneRecipient[];
+    if (recipients.some((r) => r.externalRef === transactionId)) {
+      ({ recipients } = await setRecipientPayoutStatus({
+        milestoneId: milestone.id,
+        externalRef: transactionId,
+        payoutStatus: failed ? "failed" : "confirmed",
+        actorId: "circle-webhook",
+        reason: `Circle reported ${state} on ${transactionId}`,
+      }));
+    }
+
+    if (failed) {
+      if (milestone.status !== "disputed") {
+        await disputeMilestone({ milestoneId: milestone.id, actorId: "circle-webhook", reason: `Circle reported ${state} on ${transactionId}` });
+      }
+      return;
+    }
+    if (milestone.status !== "verified" || !allRecipientPayoutsConfirmed(recipients)) return; // Siblings still in flight.
 
     const plan = await getSettlementPlan(milestone.settlement_plan_id);
     if (!plan) return;
     const total = plan.total_amount as Money;
     const amount = milestone.amount_or_percentage as { kind: "amount" | "percentage"; value: number };
-    const amountMinor = milestoneAmountMinor(total, amount);
+    await releaseMilestone({
+      milestoneId: milestone.id,
+      amountMinor: milestoneAmountMinor(total, amount),
+      currency: total.currency,
+      actorId: "circle-webhook",
+      externalTransactionRef: milestone.external_transaction_ref ?? transactionId,
+      reason: "circle_webhook_reconciliation",
+      executedRecipients: recipients,
+    });
+  }
 
-    if (state === "COMPLETE") {
-      if (milestone.status === "verified") {
-        await releaseMilestone({
-          milestoneId: milestone.id,
-          amountMinor,
-          currency: total.currency,
-          actorId: "circle-webhook",
-          externalTransactionRef: transactionId,
-          reason: "circle_webhook_reconciliation",
-        });
-      }
-      return;
-    }
-    if (state === "FAILED" || state === "DENIED" || state === "CANCELLED" || state === "STUCK") {
-      if (milestone.status !== "disputed") {
-        await disputeMilestone({ milestoneId: milestone.id, actorId: "circle-webhook", reason: `Circle reported ${state} on ${transactionId}` });
-      }
-    }
+  /** CircleNftRail transfers: replaces polling `POST /asset-transfers/:id/refresh-status` as the primary path. */
+  private async reconcileCircleAssetTransfer(transactionId: string, failed: boolean): Promise<void> {
+    const plan = await getAssetTransferPlanByExternalRef(transactionId);
+    if (!plan || plan.status !== "pending") return; // Not ours, or already terminal.
+    await recordAssetTransferResult({
+      id: plan.id,
+      status: failed ? "failed" : "confirmed",
+      externalRef: transactionId,
+      actorId: "circle-webhook",
+    });
   }
 
   async handleTelegram(secretToken: string | undefined, body: Payload) {

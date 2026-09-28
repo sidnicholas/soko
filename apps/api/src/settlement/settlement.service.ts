@@ -312,7 +312,15 @@ export class SettlementService {
 
     const executedRecipients: MilestoneRecipient[] | undefined = execution.recipients?.map((r) => {
       const authored = rawRecipients.find((raw) => raw.address === r.address);
-      return { address: r.address, amount: authored?.amount ?? { kind: "amount", value: r.amount.amount }, counterpartyId: authored?.counterpartyId ?? null, externalRef: r.externalRef };
+      return {
+        address: r.address,
+        amount: authored?.amount ?? { kind: "amount", value: r.amount.amount },
+        counterpartyId: authored?.counterpartyId ?? null,
+        externalRef: r.externalRef,
+        // Rails report one status per execution, not per recipient; webhooks
+        // refine each recipient from here (ST-13 recipient-level reconciliation).
+        payoutStatus: execution.status === "confirmed" ? "confirmed" : "pending",
+      };
     });
 
     if (execution.status === "pending") {

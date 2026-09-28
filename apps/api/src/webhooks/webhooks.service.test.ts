@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { mailgunInboundToSignal, telegramMessageToSignal, twilioSmsToSignal, whatsappMessageToSignal } from "./webhooks.service";
+import {
+  allRecipientPayoutsConfirmed,
+  mailgunInboundToSignal,
+  stripeTransferPayoutStatus,
+  telegramMessageToSignal,
+  twilioSmsToSignal,
+  whatsappMessageToSignal,
+} from "./webhooks.service";
 
 describe("telegramMessageToSignal", () => {
   it("maps a text message into a supply signal keyed by chat id", () => {
@@ -99,5 +106,44 @@ describe("whatsappMessageToSignal", () => {
   it("returns undefined for a malformed/empty webhook body", () => {
     expect(whatsappMessageToSignal({})).toBeUndefined();
     expect(whatsappMessageToSignal({ entry: [] })).toBeUndefined();
+  });
+});
+
+describe("allRecipientPayoutsConfirmed", () => {
+  const r = (payoutStatus: "pending" | "confirmed" | "failed" | null) => ({
+    address: "0xabc",
+    amount: { kind: "percentage" as const, value: 50 },
+    counterpartyId: null,
+    externalRef: "tx",
+    payoutStatus,
+  });
+
+  it("is true only when every recipient is confirmed", () => {
+    expect(allRecipientPayoutsConfirmed([r("confirmed"), r("confirmed")])).toBe(true);
+    expect(allRecipientPayoutsConfirmed([r("confirmed"), r("pending")])).toBe(false);
+    expect(allRecipientPayoutsConfirmed([r("confirmed"), r("failed")])).toBe(false);
+  });
+
+  it("treats an unknown (pre-existing, null) status as not confirmed", () => {
+    expect(allRecipientPayoutsConfirmed([r("confirmed"), r(null)])).toBe(false);
+  });
+
+  it("is true for a non-split milestone (nothing to wait on)", () => {
+    expect(allRecipientPayoutsConfirmed([])).toBe(true);
+  });
+});
+
+describe("stripeTransferPayoutStatus", () => {
+  it("maps transfer.created to confirmed", () => {
+    expect(stripeTransferPayoutStatus("transfer.created", { reversed: false, amount_reversed: 0 })).toBe("confirmed");
+  });
+
+  it("distinguishes a full reversal from a partial one", () => {
+    expect(stripeTransferPayoutStatus("transfer.reversed", { reversed: true, amount_reversed: 1000 })).toBe("reversed");
+    expect(stripeTransferPayoutStatus("transfer.reversed", { reversed: false, amount_reversed: 250 })).toBe("partially_reversed");
+  });
+
+  it("ignores transfer events it doesn't reconcile", () => {
+    expect(stripeTransferPayoutStatus("transfer.updated", {})).toBeUndefined();
   });
 });

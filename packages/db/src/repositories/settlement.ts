@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import { sha256Hex, canonicalJson } from "@opportunity-os/audit";
 import { assertTransition, InvalidTransitionError, SETTLEMENT_TRANSITIONS, TRANSACTION_TRANSITIONS } from "@opportunity-os/domain";
-import type { EscrowCondition, EvidenceClaim, MilestoneRecipient, SettlementStatus, TransactionStatus } from "@opportunity-os/contracts";
+import type { EscrowCondition, EvidenceClaim, MilestoneRecipient, RecipientPayoutStatus, SettlementStatus, TransactionStatus } from "@opportunity-os/contracts";
 import { getDb } from "../pool";
 import { enqueueEvent } from "../outbox";
 import { appendAuditEvent } from "./audit";
@@ -52,6 +52,72 @@ export async function getMilestoneByExternalTransactionRef(ref: string) {
   return getDb().selectFrom("settlement_milestones").selectAll().where("external_transaction_ref", "=", ref).executeTakeFirst();
 }
 
+/**
+ * Same correlation, by one recipient's own transfer id (ST-12 splits) — those
+ * live inside `recipients_json`, not a column, so neither lookup above reaches
+ * them (§ST-13 recipient-level reconciliation).
+ */
+export async function getMilestoneByRecipientRef(ref: string) {
+  return getDb()
+    .selectFrom("settlement_milestones")
+    .selectAll()
+    .where(sql<boolean>`recipients_json @> ${JSON.stringify([{ externalRef: ref }])}::jsonb`)
+    .executeTakeFirst();
+}
+
+export interface SetRecipientPayoutStatusInput {
+  milestoneId: string;
+  externalRef: string;
+  payoutStatus: RecipientPayoutStatus;
+  actorId: string;
+  reason: string;
+}
+
+/**
+ * Record one split recipient's payout state as the rail reported it. Locks the
+ * milestone row so concurrent webhooks for sibling recipients serialize — the
+ * caller decides "every recipient confirmed?" from the returned list, which
+ * is only race-free if each update sees the previous one. A report that would
+ * move a recipient back to "pending" is ignored (webhooks arrive out of order).
+ */
+export async function setRecipientPayoutStatus(
+  input: SetRecipientPayoutStatusInput,
+): Promise<{ recipients: MilestoneRecipient[]; changed: boolean }> {
+  return getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const milestone = await tx
+        .selectFrom("settlement_milestones")
+        .selectAll()
+        .where("id", "=", input.milestoneId)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const recipients = milestone.recipients_json as MilestoneRecipient[];
+      const current = recipients.find((r) => r.externalRef === input.externalRef);
+      if (!current) throw new Error(`Milestone ${input.milestoneId} has no recipient with externalRef ${input.externalRef}`);
+      const currentStatus = current.payoutStatus ?? null;
+      if (currentStatus === input.payoutStatus || (input.payoutStatus === "pending" && currentStatus !== null)) {
+        return { recipients, changed: false };
+      }
+
+      const next = recipients.map((r) => (r.externalRef === input.externalRef ? { ...r, payoutStatus: input.payoutStatus } : r));
+      await tx
+        .updateTable("settlement_milestones")
+        .set({ recipients_json: JSON.stringify(next) })
+        .where("id", "=", input.milestoneId)
+        .execute();
+      await appendAuditEvent(tx, {
+        actorType: "service",
+        actorId: input.actorId,
+        action: `settlement.recipient_payout.${input.payoutStatus}`,
+        entityType: "settlement_milestone",
+        entityId: input.milestoneId,
+        inputHash: sha256Hex(canonicalJson({ externalRef: input.externalRef, payoutStatus: input.payoutStatus, reason: input.reason })),
+      });
+      return { recipients: next, changed: true };
+    });
+}
+
 export async function listMilestones(planId: string) {
   return getDb()
     .selectFrom("settlement_milestones")
@@ -77,7 +143,7 @@ export interface AddMilestoneInput {
   optimisticAfterAt?: string | null;
   deadmanAt?: string | null;
   /** ST-12 multi-party split; empty/omitted means the plan's single implicit recipient. */
-  recipients?: Omit<MilestoneRecipient, "externalRef">[];
+  recipients?: Omit<MilestoneRecipient, "externalRef" | "payoutStatus">[];
 }
 
 export async function addMilestone(input: AddMilestoneInput): Promise<{ id: string }> {

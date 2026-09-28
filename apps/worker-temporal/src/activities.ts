@@ -284,7 +284,13 @@ export async function checkMilestoneTimerActivity(milestoneId: string): Promise<
 
   const executedRecipients = execution.recipients?.map((r) => {
     const authored = rawRecipients.find((raw) => raw.address === r.address);
-    return { address: r.address, amount: authored?.amount ?? { kind: "amount" as const, value: r.amount.amount }, counterpartyId: authored?.counterpartyId ?? null, externalRef: r.externalRef };
+    return {
+      address: r.address,
+      amount: authored?.amount ?? { kind: "amount" as const, value: r.amount.amount },
+      counterpartyId: authored?.counterpartyId ?? null,
+      externalRef: r.externalRef,
+      payoutStatus: execution.status === "confirmed" ? ("confirmed" as const) : ("pending" as const),
+    };
   });
 
   if (execution.status === "pending") {

@@ -167,8 +167,14 @@ Built:
     - The Circle API faucet needing an account-level upgrade (see above) is a real, external constraint, not a code gap — funding stayed a one-time manual step (Circle's web faucet) even though transfers themselves are fully automated.
   - **UI gap this surfaced, since closed**: the Payments page's create-milestone form (UI-4, built before this pass) had no recipients field. Fixed same session: an editor (address + a shared split-by-percentage/amount kind, add/remove rows) now lets a milestone get a real payout address through the console, not just the API — required for a stablecoin release to be driven from the UI at all. Smoke-tested in a real browser (Playwright, mocked API response) — renders and adds/removes rows with no console errors.
 
+- **Recipient-level webhook reconciliation** (2026-09-27): `MilestoneRecipient` gained `payoutStatus` (`pending`/`confirmed`/`failed`/`reversed`/`partially_reversed`, null on older rows), stamped at execute time in both `settlement.service.ts` and the worker's timer activity, then refined per recipient by webhooks via `getMilestoneByRecipientRef` (jsonb containment on `recipients_json`) + `setRecipientPayoutStatus` (row-locked so sibling webhooks serialize; audit-chained; never downgrades to `pending`).
+  - **Circle** (`reconcileCircleTransaction`): each notification updates its own recipient; the milestone releases only once **every** recipient is `confirmed` (`allRecipientPayoutsConfirmed`). **Real bug fixed**: previously `external_transaction_ref` held only the first recipient's tx id, so that one transfer's `COMPLETE` released the whole split while the others could still fail. Any recipient failing disputes the milestone; a later sibling `COMPLETE` is recorded but can't release it.
+  - **Stripe** (`reconcileStripeTransfer`): `transfer.created` backfills `confirmed`; `transfer.reversed` records `reversed`/`partially_reversed` on the recipient + audit chain and logs for operator review — **no state move**, since by then the milestone is released and a SETTLED plan has no legal DISPUTED edge. The Stripe dashboard webhook endpoint must subscribe to `transfer.created`/`transfer.reversed` for this to fire.
+  - **Guard added**: `payment_intent.succeeded` no longer auto-releases a split milestone whose recipients have no Transfer id. Transfers are only created by `execute()` when capture confirms synchronously; an async capture made none, and releasing would mark unpaid recipients as paid. **Open gap**: that milestone now stays `verified` with nothing that creates the Transfers — re-calling release replays the cached capture response (same idempotency key), so it needs an explicit "pay out split after late capture" path. Rare (cards capture synchronously), but not handled.
+  - Tests: `tests/e2e/webhook-reconciliation.test.ts` (5, live Postgres) + pure-helper unit tests in `webhooks.service.test.ts`.
+
 Remaining (Phase 3):
-1. Recipient-level webhook reconciliation for both providers (Stripe Transfers, Circle per-recipient transactions on a split).
+1. Split payout after an *asynchronous* Stripe capture (see the guard note directly above).
 2. Durable milestone-*evidence* waits, as opposed to the release-window waits ST-13 already covers (WF-3 remainder).
 3. `executeRefund`'s parallel "pending refund" gap (documented, currently unreachable — no rail refunds asynchronously today).
 4. A real rail is not the same as a *production* one (§C-6): going live needs a licensed money-transmitter partnership + an audit for both Stripe and Circle — a business/compliance decision, not a code change. The on-chain/`chain` family remains a local/simulated reference pending its own real provider.
@@ -253,7 +259,10 @@ gated — new `hashAssetTransferTerms` in `packages/audit`, mirrors
 `hashReleaseTerms`'s no-self-authorized-money invariant applied to an asset
 instead of currency; new `asset_transfer:plan`/`asset_transfer:execute`
 permissions), `POST /asset-transfers/:id/refresh-status` (manual rail poll —
-no webhook reconciliation yet). Rails composed generically by `asset.kind`,
+now a fallback: `POST /webhooks/circle` finalizes CircleNftRail transfers by
+`external_ref` when the tx id matches no settlement milestone, 2026-09-27;
+same pass fixed `recordAssetTransferResult` auditing a real rail's `pending`
+submit as `asset_transfer.failed` — now `asset_transfer.submitted`). Rails composed generically by `asset.kind`,
 not `nft`-specific anywhere in the app layer — confirmed same session:
 **verified the SAME path already carries `defi_position`/
 `data_feed_subscription`/`synthetic_position`** through the reference-tier
@@ -437,7 +446,7 @@ Open ideas, unordered:
 
 Ordered by leverage on the Transaction-OS thesis. Both money rails (fiat/Stripe, stablecoin/Circle) are now real, live-verified, and the create-milestone UI can drive both — the honest next step is production readiness, not more wiring:
 1. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds on either rail; a business/compliance decision, code changes alone can't cross it.
-2. **Recipient-level webhook reconciliation** — the remaining gap for both Stripe (Transfers) and Circle (per-recipient transactions on a split).
+2. ~~Recipient-level webhook reconciliation~~ — done 2026-09-27 (§5 Phase 3). Leftover: split payout after an async Stripe capture.
 3. **Phase 4 polish** — sharing permissions + user↔agent steering + richer mission/transaction timelines.
 4. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.
 5. **A full AND/OR escrow-condition builder in the UI** — the create-milestone form only offers a single predicate; the API already supports arbitrary trees.

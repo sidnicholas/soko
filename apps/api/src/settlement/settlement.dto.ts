@@ -16,7 +16,7 @@ export const CreateMilestoneSchema = z.object({
   optimisticAfterAt: z.string().datetime().optional(),
   deadmanAt: z.string().datetime().optional(),
   /** ST-12 multi-party split; omit for the plan's single implicit recipient. */
-  recipients: z.array(MilestoneRecipient.omit({ externalRef: true })).default([]),
+  recipients: z.array(MilestoneRecipient.omit({ externalRef: true, payoutStatus: true })).default([]),
 });
 export type CreateMilestoneBody = z.infer<typeof CreateMilestoneSchema>;
 

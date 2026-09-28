@@ -247,6 +247,9 @@ export type SettlementPlan = z.infer<typeof SettlementPlan>;
  * connected-account id, a wallet address, ...); percentages are relative to
  * the milestone's own resolved amount, not the plan total.
  */
+export const RecipientPayoutStatus = z.enum(["pending", "confirmed", "failed", "reversed", "partially_reversed"]);
+export type RecipientPayoutStatus = z.infer<typeof RecipientPayoutStatus>;
+
 export const MilestoneRecipient = z.object({
   address: z.string().min(1),
   amount: z.object({
@@ -256,6 +259,12 @@ export const MilestoneRecipient = z.object({
   counterpartyId: zId.nullable().default(null),
   /** Set once the rail executes this recipient's payout (§19/§29). */
   externalRef: z.string().nullable().default(null),
+  /**
+   * Per-recipient payout state as the rail reports it (ST-13 recipient-level
+   * reconciliation). A split release is only final once every recipient is
+   * "confirmed" — null for rows written before this existed, or not yet executed.
+   */
+  payoutStatus: RecipientPayoutStatus.nullable().default(null),
 });
 export type MilestoneRecipient = z.infer<typeof MilestoneRecipient>;
 

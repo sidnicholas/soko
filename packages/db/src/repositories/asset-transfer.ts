@@ -53,6 +53,11 @@ export async function listAssetTransferPlansForTransaction(transactionId: string
 }
 
 /** Record the rail's prepare() reference (contract/wallet-scoped locator), once, at first prepare. */
+/** Webhook correlation — an inbound provider event names the rail's execution id, not our plan id (§ST-13). */
+export async function getAssetTransferPlanByExternalRef(externalRef: string) {
+  return getDb().selectFrom("asset_transfer_plans").selectAll().where("external_ref", "=", externalRef).executeTakeFirst();
+}
+
 export async function setAssetTransferReference(id: string, reference: string): Promise<void> {
   await getDb()
     .updateTable("asset_transfer_plans")
@@ -72,6 +77,7 @@ export interface RecordAssetTransferResultInput {
 function auditActionFor(status: RecordAssetTransferResultInput["status"]): string {
   if (status === "confirmed") return "asset_transfer.executed";
   if (status === "reclaimed") return "asset_transfer.reclaimed";
+  if (status === "pending") return "asset_transfer.submitted"; // Accepted by the rail, not yet final (e.g. a real Circle transfer).
   return "asset_transfer.failed";
 }
 
