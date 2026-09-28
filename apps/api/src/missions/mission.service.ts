@@ -6,6 +6,7 @@ import {
   getMission,
   listMissions,
   listOpportunitiesByMission,
+  missionTimeline,
   setMissionStatus,
   setMissionTemporalWorkflowId,
 } from "@opportunity-os/db";
@@ -185,5 +186,12 @@ export class MissionService {
 
   opportunities(missionId: string) {
     return listOpportunitiesByMission(missionId);
+  }
+
+  /** Merged mission history: lifecycle, constraint versions, discoveries, approvals, and downstream transactions (Phase 4). */
+  async timeline(missionId: string) {
+    const entries = await missionTimeline(missionId);
+    if (!entries) throw new NotFoundException(`Mission ${missionId} not found`);
+    return entries;
   }
 }

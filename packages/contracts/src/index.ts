@@ -10,3 +10,4 @@ export * from "./commands";
 export * from "./connector-data";
 export * from "./escrow";
 export * from "./asset";
+export * from "./timeline";

@@ -11,6 +11,7 @@ import type {
   Negotiation,
   DemandSpecification,
   AutonomyPolicy,
+  TimelineEntry,
 } from "@opportunity-os/contracts";
 
 /**
@@ -138,6 +139,7 @@ export const api = {
   resumeMission: (id: string) => request<Mission>(`/missions/${id}/resume`, jsonBody({})),
   archiveMission: (id: string) => request<Mission>(`/missions/${id}/archive`, jsonBody({})),
   listMissionOpportunities: (id: string) => request<Opportunity[]>(`/missions/${id}/opportunities`),
+  getMissionTimeline: (id: string) => request<TimelineEntry[]>(`/missions/${id}/timeline`),
 
   // Opportunities (§16)
   listOpportunities: () => request<Opportunity[]>("/opportunities"),
@@ -153,7 +155,7 @@ export const api = {
 
   // Transactions + settlement (§16, §20)
   getTransaction: (id: string) => request<TransactionDetail>(`/transactions/${id}`),
-  getTransactionTimeline: (id: string) => request<AuditEvent[]>(`/transactions/${id}/timeline`),
+  getTransactionTimeline: (id: string) => request<TimelineEntry[]>(`/transactions/${id}/timeline`),
   createSettlementPlan: (id: string, body?: Record<string, unknown>) =>
     request<SettlementPlan>(`/transactions/${id}/settlement-plan`, jsonBody(body ?? {})),
 
@@ -178,4 +180,4 @@ export const api = {
     request<void>(`/settlement/plans/${planId}/unfreeze`, jsonBody(body)),
 };
 
-export type { Mission, MissionVersion, Opportunity, Approval, Transaction, SettlementPlan, SettlementMilestone, AuditEvent, Evidence };
+export type { Mission, MissionVersion, Opportunity, Approval, Transaction, SettlementPlan, SettlementMilestone, AuditEvent, Evidence, TimelineEntry };

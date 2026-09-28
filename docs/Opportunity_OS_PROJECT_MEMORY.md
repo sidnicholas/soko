@@ -180,7 +180,9 @@ Remaining (Phase 3):
 4. A real rail is not the same as a *production* one (§C-6): going live needs a licensed money-transmitter partnership + an audit for both Stripe and Circle — a business/compliance decision, not a code change. The on-chain/`chain` family remains a local/simulated reference pending its own real provider.
 
 ### Phase 4 — Public Demand Marketplace 🟡 (scaffolded)
-All 9 required screens exist as Next.js pages (home/search, missions/[id], opportunities, opportunities/[id], approvals, transactions/[id], payments, archive, settings) with a typed API client; payments is no longer read-only (UI-4, above). Remaining: polish Search/Ask, mission history/archive depth, richer transaction timeline, sharing permissions, user↔agent steering.
+All 9 required screens exist as Next.js pages (home/search, missions/[id], opportunities, opportunities/[id], approvals, transactions/[id], payments, archive, settings) with a typed API client; payments is no longer read-only (UI-4, above). Remaining: polish Search/Ask, archive depth, sharing permissions, user↔agent steering.
+
+**Timelines (2026-09-27)**: `GET /transactions/:id/timeline` (was: audit rows whose `entity_id` is the transaction itself — missed everything hanging off it) and new `GET /missions/:id/timeline` (was: 3–4 items synthesized client-side from the mission row) both return `TimelineEntry[]` (`packages/contracts/src/timeline.ts`) from `packages/db/src/repositories/timeline.ts`. Merges, by one source per fact so nothing duplicates: the audit chain (transactions, settlement plans/milestones incl. per-recipient payouts, asset transfers, negotiations, opportunities); the **outbox** for aggregates that write no audit rows (missions — create/edit/pause/resume/archive live *only* there — and approvals, which also have no `created_at` column); the milestone evidence ledger; `mission_versions`; and discovered opportunities. Capped at 500 entries. Shared `apps/web/src/components/EntityTimeline.tsx` renders it newest first with category filter chips + deep links to opportunity/transaction pages. Tests: `tests/e2e/timeline.test.ts` (2, live Postgres); both pages smoke-tested in real Chromium against a mocked API with no console errors. WSL gotcha: `next dev` on `/mnt/c` misses file changes — run it with `WATCHPACK_POLLING=true`.
 
 ### Phase 5 — Learning & Scale ⬜
 Outcomes are captured (the learning fuel). Remaining: performance feedback loop, score calibration from outcomes, source-yield optimization, search index (FTS/Typesense), graph analytics (Neo4j/pgvector at scale), increased automation under policy, AWS migration where justified.
@@ -447,6 +449,6 @@ Open ideas, unordered:
 Ordered by leverage on the Transaction-OS thesis. Both money rails (fiat/Stripe, stablecoin/Circle) are now real, live-verified, and the create-milestone UI can drive both — the honest next step is production readiness, not more wiring:
 1. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds on either rail; a business/compliance decision, code changes alone can't cross it.
 2. ~~Recipient-level webhook reconciliation~~ — done 2026-09-27 (§5 Phase 3). Leftover: split payout after an async Stripe capture.
-3. **Phase 4 polish** — sharing permissions + user↔agent steering + richer mission/transaction timelines.
+3. **Phase 4 polish** — sharing permissions + user↔agent steering (timelines done 2026-09-27).
 4. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.
 5. **A full AND/OR escrow-condition builder in the UI** — the create-milestone form only offers a single predicate; the API already supports arbitrary trees.

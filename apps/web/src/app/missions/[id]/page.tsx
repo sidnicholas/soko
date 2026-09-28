@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { AutonomyPolicy, DemandSpecification, Money, Urgency } from "@opportunity-os/contracts";
-import type { Opportunity } from "@opportunity-os/contracts";
+import type { Opportunity, TimelineEntry } from "@opportunity-os/contracts";
 import {
   Badge,
   Button,
@@ -16,17 +16,16 @@ import {
   PageHeader,
   Select,
   Textarea,
-  Timeline,
   formatDateTime,
   formatMoney,
   formatScore,
   statusLabel,
   tokens,
-  type TimelineItem,
 } from "@opportunity-os/ui";
 import { api, type MissionDetail } from "../../../lib/api";
 import { useAsync } from "../../../lib/useAsync";
 import { AsyncView } from "../../../components/AsyncView";
+import { EntityTimeline } from "../../../components/EntityTimeline";
 import { scoreTone } from "../../../lib/opportunity";
 
 const URGENCIES: Urgency[] = ["immediate", "today", "days", "scheduled", "flexible"];
@@ -53,29 +52,11 @@ function dollarsToMoney(value: string): Money | undefined {
   return { amount: Math.round(n * 100), currency: "USD" };
 }
 
-function buildTimeline(m: MissionDetail): TimelineItem[] {
-  const items: TimelineItem[] = [
-    { id: "created", title: "Mission created", at: formatDateTime(m.created_at), tone: "info", description: m.raw_intent },
-  ];
-  if (m.current_version_number !== null) {
-    items.push({
-      id: "version",
-      title: `Constraints snapshot v${m.current_version_number}`,
-      at: formatDateTime(m.updated_at),
-      tone: "progress",
-      description: "Immutable demand specification recorded for this version.",
-    });
-  }
-  if (m.status === "active") items.push({ id: "active", title: "Discovery active", at: formatDateTime(m.updated_at), tone: "success" });
-  if (m.status === "paused") items.push({ id: "paused", title: "Discovery paused", at: formatDateTime(m.updated_at), tone: "warning" });
-  if (m.archived_at) items.push({ id: "archived", title: "Mission archived", at: formatDateTime(m.archived_at), tone: "neutral" });
-  return items;
-}
-
 export default function MissionDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const mission = useAsync<MissionDetail>(() => api.getMission(params.id), [params.id]);
   const opportunities = useAsync<Opportunity[]>(() => api.listMissionOpportunities(params.id), [params.id]);
+  const timeline = useAsync<TimelineEntry[]>(() => api.getMissionTimeline(params.id), [params.id]);
   const [busy, setBusy] = useState<null | string>(null);
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -88,6 +69,7 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
       else if (action === "resume") await api.resumeMission(params.id);
       else await api.archiveMission(params.id);
       mission.reload();
+      timeline.reload();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : `Could not ${action} mission.`);
     } finally {
@@ -154,6 +136,7 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                     onSaved={() => {
                       setEditing(false);
                       mission.reload();
+                      timeline.reload();
                     }}
                   />
                 ) : (
@@ -257,8 +240,10 @@ export default function MissionDetailPage({ params }: { params: { id: string } }
                 </Card>
               </div>
 
-              <Card title="Activity">
-                <Timeline items={buildTimeline(m)} />
+              <Card title="Activity" subtitle="Lifecycle, constraint versions, discoveries, approvals and deals — newest first.">
+                <AsyncView state={timeline} loadingLabel="Loading activity">
+                  {(entries) => <EntityTimeline entries={entries} emptyDescription="Mission activity will appear here as the agent works." />}
+                </AsyncView>
               </Card>
             </>
           );

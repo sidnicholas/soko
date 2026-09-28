@@ -1,48 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import type { AuditEvent } from "@opportunity-os/contracts";
+import type { TimelineEntry } from "@opportunity-os/contracts";
 import {
   Badge,
   Card,
-  EmptyState,
   PageHeader,
   StatCard,
-  Timeline,
   formatDateTime,
   formatMoney,
   statusLabel,
   tokens,
-  type TimelineItem,
-  type Tone,
 } from "@opportunity-os/ui";
 import { api, type TransactionDetail } from "../../../lib/api";
 import { useAsync } from "../../../lib/useAsync";
 import { AsyncView } from "../../../components/AsyncView";
-
-function auditTone(action: string): Tone {
-  const a = action.toLowerCase();
-  if (a.includes("reject") || a.includes("dispute") || a.includes("freeze") || a.includes("cancel")) return "danger";
-  if (a.includes("approv") || a.includes("settl") || a.includes("release")) return "success";
-  if (a.includes("fund") || a.includes("pending")) return "warning";
-  if (a.includes("create") || a.includes("propos")) return "info";
-  return "neutral";
-}
-
-function toTimeline(events: AuditEvent[]): TimelineItem[] {
-  return events.map((e) => ({
-    id: e.id,
-    title: statusLabel(e.action),
-    at: formatDateTime(e.created_at),
-    tone: auditTone(e.action),
-    description: `${e.entity_type} · ${e.actor_type}${e.actor_id ? ` (${e.actor_id})` : ""}`,
-    meta: `event ${e.event_hash.slice(0, 16)}…`,
-  }));
-}
+import { EntityTimeline } from "../../../components/EntityTimeline";
 
 export default function TransactionDetailPage({ params }: { params: { id: string } }) {
   const tx = useAsync<TransactionDetail>(() => api.getTransaction(params.id), [params.id]);
-  const timeline = useAsync<AuditEvent[]>(() => api.getTransactionTimeline(params.id), [params.id]);
+  const timeline = useAsync<TimelineEntry[]>(() => api.getTransactionTimeline(params.id), [params.id]);
 
   return (
     <div className="oos-stack" style={{ gap: tokens.space.xl }}>
@@ -98,15 +75,14 @@ export default function TransactionDetailPage({ params }: { params: { id: string
                 )}
               </Card>
 
-              <Card title="Timeline" subtitle="Hash-chained audit trail (§21).">
+              <Card title="Timeline" subtitle="Settlement, payouts, evidence, approvals and negotiation — newest first (§21).">
                 <AsyncView state={timeline} loadingLabel="Loading timeline">
-                  {(events) =>
-                    events.length === 0 ? (
-                      <EmptyState compact title="No events yet" description="Lifecycle events for this transaction will appear here as it progresses." />
-                    ) : (
-                      <Timeline items={toTimeline(events)} />
-                    )
-                  }
+                  {(entries) => (
+                    <EntityTimeline
+                      entries={entries}
+                      emptyDescription="Lifecycle events for this transaction will appear here as it progresses."
+                    />
+                  )}
                 </AsyncView>
               </Card>
             </div>

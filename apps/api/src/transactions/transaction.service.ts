@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { enqueueEvent, getApprovalById, getDb, proposeTransaction } from "@opportunity-os/db";
+import { enqueueEvent, getApprovalById, getDb, proposeTransaction, transactionTimeline } from "@opportunity-os/db";
 import { verifyApprovalToken } from "@opportunity-os/auth";
 import { getConfig } from "@opportunity-os/config";
 import { hashProposalTerms } from "@opportunity-os/audit";
@@ -78,15 +78,15 @@ export class TransactionService {
     });
   }
 
-  /** Append-only, hash-chained history for the transaction (§21, §16 timeline). */
+  /**
+   * Merged history for the transaction and everything hanging off it —
+   * settlement plans/milestones, per-recipient payouts, evidence, asset
+   * transfers, negotiations, approvals (§21, §16 timeline, Phase 4).
+   */
   async timeline(id: string) {
-    await this.require(id);
-    return getDb()
-      .selectFrom("audit_events")
-      .selectAll()
-      .where("entity_id", "=", id)
-      .orderBy("created_at", "asc")
-      .execute();
+    const entries = await transactionTimeline(id);
+    if (!entries) throw new NotFoundException(`Transaction ${id} not found`);
+    return entries;
   }
 
   /**

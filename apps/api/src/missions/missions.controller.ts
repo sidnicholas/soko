@@ -77,4 +77,11 @@ export class MissionsController {
     requirePermission(user, "opportunity:read");
     return this.missions.opportunities(id);
   }
+
+  @Get(":id/timeline")
+  @ApiOperation({ summary: "Mission history: lifecycle, constraint versions, discoveries, approvals, downstream transactions" })
+  timeline(@CurrentUser() user: Principal, @Param("id") id: string) {
+    requirePermission(user, "mission:read");
+    return this.missions.timeline(id);
+  }
 }
