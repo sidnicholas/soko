@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@circle-fin/developer-controlled-wallets": "^10.8.0",
+    "@fastify/cors": "^9",
     "@fastify/static": "^7.0.4",
     "@nestjs/common": "^10.4.7",
     "@nestjs/config": "^3.3.0",
@@ -39,6 +40,7 @@
     "@opportunity-os/verifiers-sdk": "workspace:*",
     "@temporalio/client": "^1.11.5",
     "fastify": "^4.28.1",
+    "jose": "^5",
     "nodemailer": "^10.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

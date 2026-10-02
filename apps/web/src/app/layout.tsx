@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { AuthGate } from "../components/AuthGate";
 import { Sidebar } from "../components/Sidebar";
 import "./globals.css";
 
@@ -12,10 +13,12 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <div className="oos-shell">
-          <Sidebar />
-          <main className="oos-main">{children}</main>
-        </div>
+        <AuthGate>
+          <div className="oos-shell">
+            <Sidebar />
+            <main className="oos-main">{children}</main>
+          </div>
+        </AuthGate>
       </body>
     </html>
   );

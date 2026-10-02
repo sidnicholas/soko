@@ -44,6 +44,21 @@ const EnvSchema = z.object({
   SUPABASE_URL: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
+  // Legacy HS256 projects only. Projects on asymmetric signing keys are
+  // verified against SUPABASE_URL's published JWKS and need no secret here.
+  SUPABASE_JWT_SECRET: z.string().optional(),
+
+  // §22 authentication. The API verifies Supabase JWTs; with neither
+  // SUPABASE_URL nor SUPABASE_JWT_SECRET set, every authenticated route 401s.
+  // AUTH_DEV_HEADERS=true re-enables the unverified x-user-id / x-user-role
+  // shim for local development — refused outright when NODE_ENV=production.
+  // (Not z.coerce.boolean(): that parses the string "false" as true.)
+  AUTH_DEV_HEADERS: z.enum(["true", "false"]).default("false"),
+  // Comma-separated emails provisioned as `admin` on first sign-in. Everyone
+  // else starts as `user`; later role changes are made on the `users` row.
+  AUTH_ADMIN_EMAILS: z.string().optional(),
+  // Comma-separated browser origins allowed to call the API (CORS).
+  WEB_ORIGINS: z.string().optional(),
 
   REDIS_URL: z.string().default("redis://localhost:6379"),
 
@@ -128,7 +143,8 @@ export interface AppConfig {
   isProd: boolean;
   logLevel: Env["LOG_LEVEL"];
   db: { url: string };
-  supabase: { url?: string; anonKey?: string; serviceRoleKey?: string };
+  supabase: { url?: string; anonKey?: string; serviceRoleKey?: string; jwtSecret?: string };
+  auth: { devHeaders: boolean; adminEmails: string[]; webOrigins: string[] };
   redis: { url: string };
   temporal: { address: string; namespace: string; taskQueue: string };
   llm: {
@@ -180,6 +196,13 @@ export interface AppConfig {
   };
 }
 
+function csv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
 function toConfig(env: Env): AppConfig {
   return {
     env: env.NODE_ENV,
@@ -190,6 +213,12 @@ function toConfig(env: Env): AppConfig {
       url: env.SUPABASE_URL,
       anonKey: env.SUPABASE_ANON_KEY,
       serviceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY,
+      jwtSecret: env.SUPABASE_JWT_SECRET,
+    },
+    auth: {
+      devHeaders: env.AUTH_DEV_HEADERS === "true",
+      adminEmails: csv(env.AUTH_ADMIN_EMAILS).map((e) => e.toLowerCase()),
+      webOrigins: csv(env.WEB_ORIGINS),
     },
     redis: { url: env.REDIS_URL },
     temporal: {
@@ -258,6 +287,9 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     throw new Error(`Invalid environment configuration: ${issues}`);
+  }
+  if (parsed.data.NODE_ENV === "production" && parsed.data.AUTH_DEV_HEADERS === "true") {
+    throw new Error("Invalid environment configuration: AUTH_DEV_HEADERS=true is not allowed when NODE_ENV=production");
   }
   return toConfig(parsed.data);
 }

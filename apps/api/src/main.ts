@@ -9,7 +9,7 @@ import { AppModule } from "./app.module";
 async function bootstrap(): Promise<void> {
   const logger = createLogger("api");
   // Validate environment configuration up front; throws on invalid env (§32).
-  getConfig();
+  const cfg = getConfig();
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
     logger: ["error", "warn", "log"],
@@ -17,6 +17,14 @@ async function bootstrap(): Promise<void> {
     // re-serializing the parsed JSON body can differ byte-for-byte and always
     // fails verification. `req.rawBody` is populated on every request.
     rawBody: true,
+    // The web app calls this API cross-origin from the browser. Only the
+    // configured origins are allowed; outside production an unset list
+    // reflects any origin so local dev needs no setup.
+    cors: {
+      origin: cfg.auth.webOrigins.length > 0 ? cfg.auth.webOrigins : !cfg.isProd,
+      allowedHeaders: ["authorization", "content-type", "x-approval-token", "x-user-id", "x-user-role"],
+      methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    },
   });
   app.setGlobalPrefix("v1");
 
@@ -49,10 +57,9 @@ async function bootstrap(): Promise<void> {
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Opportunity OS API")
-    .setDescription("V1 REST surface (§16). Dev auth via x-user-id / x-user-role headers (§22).")
+    .setDescription("V1 REST surface (§16). Auth: Supabase access token as a Bearer token (§22).")
     .setVersion("1.0")
-    .addApiKey({ type: "apiKey", name: "x-user-id", in: "header" }, "x-user-id")
-    .addApiKey({ type: "apiKey", name: "x-user-role", in: "header" }, "x-user-role")
+    .addBearerAuth()
     .build();
   SwaggerModule.setup("docs", app, SwaggerModule.createDocument(app, swaggerConfig));
 

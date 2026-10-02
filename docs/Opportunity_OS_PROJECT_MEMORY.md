@@ -204,6 +204,17 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 - **Legality gates in `risk`** (§17): permitted automation only; category gate; no prohibited scraping.
 - **Platform never holds keys/funds directly** (§19): fiat via licensed partner, on-chain funds live in the contract.
 
+## 6a. Authentication (§22, 2026-10-02)
+
+The API used to trust `x-user-id` / `x-user-role` headers from anyone, including in production. Now:
+- `apps/api/src/common/auth.guard.ts` — global `AuthGuard` (`APP_GUARD`) resolves the caller once per request; `@CurrentUser()` throws 401 when there is none. The guard never rejects by itself, so webhooks/health/public intake (which authenticate another way) are unaffected.
+- `apps/api/src/common/auth.ts` — `createTokenVerifier`: Supabase access token via the project's JWKS (`SUPABASE_URL`), or HS256 with `SUPABASE_JWT_SECRET` for legacy projects. Issuer + `authenticated` audience checked; anon/service-role/anonymous tokens refused; algorithm family comes from config, not the token.
+- Role is application-owned: read from `users.role`, never from the token. First sign-in provisions the row with `id = sub` (`packages/db` `provisionUser`), role `admin` if the email is in `AUTH_ADMIN_EMAILS`, else `user`. An email already held by another id is refused, not linked. Non-`active` users are rejected.
+- `AUTH_DEV_HEADERS=true` re-enables the header shim for local dev; config refuses to load with it when `NODE_ENV=production`. With nothing configured every authenticated route returns 401.
+- CORS: `WEB_ORIGINS` (comma list). There was no CORS at all before, so the deployed web app could not call the API from a browser.
+- `GET /me` returns id/role/email. Web: `AuthGate` (email + password sign-in/sign-up via `@supabase/supabase-js`) wraps the shell when `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` are set (build-time); the API client sends the session token as a Bearer; Settings shows the real identity + sign out.
+- Tests: `apps/api/src/common/auth.test.ts` (6). Not yet exercised against a live Supabase sign-in.
+
 ## 7. Engineering conventions
 
 - Package resolution: `@opportunity-os/*` → `packages/*/src/index.ts` (tsconfig paths + vitest alias). New packages need `package.json` + `tsconfig.json` and a workspace install.
@@ -215,7 +226,7 @@ Outcomes are captured (the learning fuel). Remaining: performance feedback loop,
 
 ## 8. Configuration surface (env)
 
-`NODE_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `SUPABASE_*`, `REDIS_URL`, `TEMPORAL_*`, `LLM_DEFAULT_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`EMBEDDING_BACKEND`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `DEFAULT_STABLECOIN_NETWORK`, `CHAIN_RPC_URL`, `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID`, `TELEGRAM_*`/`EMAIL_FROM`/`SMTP_URL`, `APPROVAL_TOKEN_SECRET`, `AUDIT_ANCHOR_ENABLED`, `APPROVAL_TIMEOUT_MINUTES`, `MISSION_REFRESH_INTERVAL_MINUTES`, `SUPPLY_STALE_MINUTES`, `SETTLEMENT_AUTO_RELEASE_THRESHOLD_MINOR`. All validated in `config`; safe defaults let dev/CI run keyless.
+`NODE_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `SUPABASE_*` (incl. `SUPABASE_JWT_SECRET`), `AUTH_DEV_HEADERS`, `AUTH_ADMIN_EMAILS`, `WEB_ORIGINS`, `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` (web), `REDIS_URL`, `TEMPORAL_*`, `LLM_DEFAULT_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`EMBEDDING_BACKEND`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `DEFAULT_STABLECOIN_NETWORK`, `CHAIN_RPC_URL`, `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID`, `TELEGRAM_*`/`EMAIL_FROM`/`SMTP_URL`, `APPROVAL_TOKEN_SECRET`, `AUDIT_ANCHOR_ENABLED`, `APPROVAL_TIMEOUT_MINUTES`, `MISSION_REFRESH_INTERVAL_MINUTES`, `SUPPLY_STALE_MINUTES`, `SETTLEMENT_AUTO_RELEASE_THRESHOLD_MINOR`. All validated in `config`; safe defaults let dev/CI run keyless.
 
 ## 9. ADR index
 

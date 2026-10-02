@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
+import { AuthGuard } from "./common/auth.guard";
 import { HealthModule } from "./health/health.module";
 import { MissionsModule } from "./missions/missions.module";
 import { OpportunitiesModule } from "./opportunities/opportunities.module";
@@ -29,5 +31,6 @@ import { SearchModule } from "./search/search.module";
     AssetTransferModule,
     SearchModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
 export class AppModule {}

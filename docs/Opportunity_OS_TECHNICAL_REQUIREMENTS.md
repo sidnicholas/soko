@@ -129,7 +129,7 @@ Legend: **[DONE]** implemented + tested · **[PARTIAL]** implemented with named 
 
 ## 14. AuthN/Z (§22)
 
-- **AZ-1** Supabase Auth for authentication; domain authorization application-owned. **[PARTIAL]** (dev header shim; Supabase JWT verification swap-in documented, TODO for prod)
+- **AZ-1** Supabase Auth for authentication; domain authorization application-owned. **[DONE]** (global `AuthGuard` verifies the Supabase access token — JWKS, or HS256 with `SUPABASE_JWT_SECRET`; role comes from the `users` row, provisioned on first sign-in; header shim only with `AUTH_DEV_HEADERS=true`, refused in production. Not yet exercised against a live Supabase sign-in.)
 - **AZ-2** RBAC (user/operator/reviewer/admin/service/agent) + attribute gate requiring an approved token for high-impact actions. **[DONE]**
 - **AZ-3** Row-Level Security on user-facing tables; portable `auth.uid()` shim. **[DONE]**
 - **AZ-4** `settlement:release` is plain-gated; money control is the release engine + cryptographic token (auto below threshold, human above). **[DONE]**

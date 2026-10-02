@@ -108,6 +108,9 @@ importers:
       '@circle-fin/developer-controlled-wallets':
         specifier: ^10.8.0
         version: 10.8.0
+      '@fastify/cors':
+        specifier: ^9
+        version: 9.0.1
       '@fastify/static':
         specifier: ^7.0.4
         version: 7.0.4
@@ -186,6 +189,9 @@ importers:
       fastify:
         specifier: ^4.28.1
         version: 4.29.1
+      jose:
+        specifier: ^5
+        version: 5.10.0
       nodemailer:
         specifier: ^10.0.0
         version: 10.0.0
@@ -217,6 +223,9 @@ importers:
       '@opportunity-os/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@supabase/supabase-js':
+        specifier: ^2
+        version: 2.112.4
       next:
         specifier: ^14.2.18
         version: 14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -2180,6 +2189,9 @@ packages:
   jest-worker@27.5.1:
     resolution: {integrity: sha512-7vuh85V5cdDofPyxn58nrPjBktZo0u9x1g8WtjQol+jZDaE+fhN+cIvTj11GndBnMnyfrUOG1sZQxCdjKh+DKg==}
     engines: {node: '>= 10.13.0'}
+
+  jose@5.10.0:
+    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -4415,6 +4427,8 @@ snapshots:
       '@types/node': 22.20.1
       merge-stream: 2.0.0
       supports-color: 8.1.1
+
+  jose@5.10.0: {}
 
   js-tokens@4.0.0: {}
 

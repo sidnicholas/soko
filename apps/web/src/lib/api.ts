@@ -13,11 +13,13 @@ import type {
   AutonomyPolicy,
   TimelineEntry,
 } from "@opportunity-os/contracts";
+import { supabase } from "./supabase";
 
 /**
  * Typed client for the Opportunity OS API (§16). All responses are raw contract
- * entities (no envelope); lists are bare arrays. Auth in V1 is a dev shim over
- * `x-user-id` + `x-user-role` headers (§22). Only ever called from client
+ * entities (no envelope); lists are bare arrays. Auth is the signed-in user's
+ * Supabase access token (§22); with no Supabase config it falls back to the
+ * local dev `x-user-id` + `x-user-role` headers. Only ever called from client
  * components / event handlers, so a down API never breaks the build.
  */
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/v1";
@@ -143,22 +145,30 @@ export class ApiError extends Error {
   }
 }
 
+async function authHeaders(): Promise<Record<string, string>> {
+  if (!supabase) return { "x-user-id": DEV_USER_ID, "x-user-role": DEV_USER_ROLE };
+  const { data } = await supabase.auth.getSession();
+  return data.session ? { authorization: `Bearer ${data.session.access_token}` } : {};
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
+  const auth = await authHeaders();
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
       cache: "no-store",
       headers: {
         "content-type": "application/json",
-        "x-user-id": DEV_USER_ID,
-        "x-user-role": DEV_USER_ROLE,
+        ...auth,
         ...init?.headers,
       },
     });
   } catch {
     throw new ApiError(0, `Cannot reach the API at ${API_BASE}. Is it running?`);
   }
+  // A rejected session (expired, revoked, deactivated) returns to the sign-in screen.
+  if (res.status === 401 && supabase) void supabase.auth.signOut({ scope: "local" });
   if (!res.ok) {
     let detail = res.statusText;
     try {
@@ -184,7 +194,16 @@ async function requestWithToken<T>(path: string, body: unknown, approvalToken?: 
 
 const jsonBody = (value: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(value ?? {}) });
 
+/** GET /me — the caller as the API sees them: verified identity + application-owned role. */
+export interface Me {
+  id: string;
+  role: string;
+  email: string | null;
+}
+
 export const api = {
+  me: () => request<Me>("/me"),
+
   // Missions (§16)
   createMission: (input: CreateMissionInput) => request<Mission>("/missions", jsonBody(input)),
   parseMission: (text: string) => request<ParsedMission>("/missions/parse", jsonBody({ text })),

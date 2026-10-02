@@ -5,39 +5,33 @@ import {
   type ExecutionContext,
 } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { UserRole } from "@opportunity-os/contracts";
+import type { UserRole } from "@opportunity-os/contracts";
 import { authorize, type Permission } from "@opportunity-os/auth";
+import type { AuthenticatedRequest } from "./auth.guard";
 
 export interface Principal {
   userId: string;
   role: UserRole;
+  /** Present for a verified sign-in; absent under the local dev-header shim. */
+  email?: string;
   /** True when the request carries a valid approved-action token (§14). */
   hasApprovedActionToken: boolean;
 }
 
 /**
- * Dev auth shim: derives the principal from `x-user-id` / `x-user-role`
- * headers, plus an optional `x-approval-token` for high-impact actions.
- *
- * Production replaces this with Supabase JWT verification (§22): the verified
- * JWT `sub` becomes `userId` and the application-owned role claim becomes
- * `role`. Domain authorization stays application-owned regardless.
+ * The caller authenticated by the global `AuthGuard` (§22): identity from a
+ * verified Supabase JWT, role from the application-owned `users` row. Throws
+ * 401 when the request carries no valid credentials. An optional
+ * `x-approval-token` rides along for high-impact actions.
  */
 export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionContext): Principal => {
-  const req = ctx.switchToHttp().getRequest<FastifyRequest>();
-  const userIdHeader = req.headers["x-user-id"];
-  if (typeof userIdHeader !== "string" || userIdHeader.length === 0) {
-    throw new UnauthorizedException("Missing x-user-id header");
-  }
-  const roleHeader = req.headers["x-user-role"];
-  const parsedRole = UserRole.safeParse(typeof roleHeader === "string" ? roleHeader : "user");
-  if (!parsedRole.success) {
-    throw new UnauthorizedException("Invalid x-user-role header");
+  const req = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
+  if (!req.authUser) {
+    throw new UnauthorizedException(req.authError ?? "Authentication required");
   }
   const tokenHeader = req.headers["x-approval-token"];
   return {
-    userId: userIdHeader,
-    role: parsedRole.data,
+    ...req.authUser,
     hasApprovedActionToken: typeof tokenHeader === "string" && tokenHeader.length > 0,
   };
 });
