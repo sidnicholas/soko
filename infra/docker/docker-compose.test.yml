@@ -1,0 +1,17 @@
+# Throwaway Postgres for live-DB tests (`pnpm test:db`). Data lives in tmpfs,
+# so `pnpm db:test:down` (or a Docker restart) wipes it. pgvector image so the
+# pgvector suite can run here too. Port 54329 avoids clashing with a dev
+# Postgres on 5432.
+services:
+  postgres-test:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: opportunity_os_test
+    ports: ["54329:5432"]
+    tmpfs: ["/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d opportunity_os_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

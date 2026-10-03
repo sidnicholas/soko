@@ -11,6 +11,8 @@ export default defineConfig({
   test: {
     include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "tests/**/*.test.ts"],
     environment: "node",
+    // Points live-DB tests at TEST_DATABASE_URL (local only), never .env's DATABASE_URL.
+    setupFiles: ["tests/setup/test-database.ts"],
     // DB e2e tests share one Postgres; run files serially so global cross-source
     // synthesis in one file cannot race another file's assertions.
     fileParallelism: false,

@@ -85,7 +85,9 @@ describe.skipIf(!HAS_DB)("discovery loop (live postgres)", () => {
     expect(mine[0]!.transaction_role).toBe("broker");
     expect(Number(mine[0]!.overall_score)).toBeGreaterThan(0);
 
-    const feed = await listOpportunitiesForOperator();
+    // The feed is top-N by score and other suites sharing this database add
+    // higher-scoring deals, so read it whole.
+    const feed = await listOpportunitiesForOperator(100_000);
     expect(feed.some((o) => o.id === mine[0]!.id)).toBe(true);
   });
 

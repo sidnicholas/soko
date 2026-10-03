@@ -52,8 +52,9 @@ describe.skipIf(!HAS_DB)("graph deals (live postgres)", () => {
     expect(bundle.kind).toBe("bundle");
     expect(bundle.expected_net_profit).toMatchObject({ amount: 5000 });
 
-    // Both surface on the operator feed.
-    const feed = await listOpportunitiesForOperator();
+    // Both surface on the operator feed. The feed is top-N by score and other
+    // suites sharing this database add higher-scoring deals, so read it whole.
+    const feed = await listOpportunitiesForOperator(100_000);
     expect(feed.some((o) => o.id === arb.id)).toBe(true);
   });
 });
