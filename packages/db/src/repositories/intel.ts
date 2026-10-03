@@ -341,3 +341,71 @@ export async function listIntelSources() {
     .limit(100)
     .execute();
 }
+
+/** Runs already started this UTC day — the pacing input for the per-run budget share. */
+export async function intelRunsStartedToday(): Promise<number> {
+  const row = await getDb()
+    .selectFrom("intel_runs")
+    .select(sql<number>`count(*)::int`.as("n"))
+    .where("started_at", ">=", sql<string>`date_trunc('day', now() at time zone 'utc') at time zone 'utc'`)
+    .executeTakeFirst();
+  return row?.n ?? 0;
+}
+
+/**
+ * Leads detected in earlier runs but never assessed (status 'new'), most
+ * credible first, so a better lead found yesterday isn't lost behind today's.
+ */
+export async function listUnassessedIntelLeads(opts: { sinceDays: number; limit: number; excludeIds: string[] }) {
+  let q = getDb()
+    .selectFrom("intel_leads")
+    .select(["id", "kind", "title", "summary", "url", "hostname", "published_at", "urgency", "credibility", "contact", "facts", "opposite_queries", "discovered_at"])
+    .where("status", "=", "new")
+    .where("discovered_at", ">=", sql<string>`now() - make_interval(days => ${opts.sinceDays})`)
+    .orderBy("credibility", "desc")
+    .orderBy("discovered_at", "desc")
+    .limit(opts.limit);
+  if (opts.excludeIds.length > 0) q = q.where("id", "not in", opts.excludeIds);
+  return q.execute();
+}
+
+/**
+ * Yield per stage-1 query (AIOOS §3, §22, §32): how often it ran, what it
+ * returned, how many results were new, and how many leads / actionable
+ * candidates it produced — the evidence for pruning or expanding the pool.
+ */
+export async function listIntelQueryYield(limit = 100) {
+  const result = await sql<{
+    query: string;
+    searches: number;
+    results: number;
+    new_results: number;
+    leads: number;
+    assessed: number;
+    actionable: number;
+    last_run_at: string | null;
+  }>`
+    with runs as (
+      select q->>'q' as query, count(*)::int as searches,
+             coalesce(sum((q->>'results')::int), 0)::int as results,
+             coalesce(sum((q->>'new')::int), 0)::int as new_results,
+             max(r.started_at)::text as last_run_at
+      from intel_runs r, jsonb_array_elements(coalesce(r.notes->'queries', '[]'::jsonb)) as q
+      group by 1
+    ),
+    leads as (
+      select l.query, count(distinct l.id)::int as leads,
+             count(distinct l.id) filter (where l.status = 'assessed')::int as assessed,
+             count(distinct c.id) filter (where c.bucket in ('act_now', 'verify_next'))::int as actionable
+      from intel_leads l left join intel_candidates c on c.lead_id = l.id
+      group by 1
+    )
+    select runs.query, runs.searches, runs.results, runs.new_results,
+           coalesce(leads.leads, 0)::int as leads, coalesce(leads.assessed, 0)::int as assessed,
+           coalesce(leads.actionable, 0)::int as actionable, runs.last_run_at
+    from runs left join leads on leads.query = runs.query
+    order by actionable desc, leads desc, searches desc
+    limit ${limit}
+  `.execute(getDb());
+  return result.rows;
+}

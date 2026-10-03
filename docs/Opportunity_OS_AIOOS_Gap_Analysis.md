@@ -117,3 +117,8 @@ Decisions (user): build the slice as proposed; Claude for reasoning; Brave for s
 Rules worth knowing: "verified" needs a dated, fresh source **and** a contact path read from the source, not just the model's say-so; no named payer + mechanism + value-add means EV $0 and at best WATCH ("Potential match — monetization unresolved"); ACT NOW also requires freshness ≥ 0.5, no regulatory or fraud flags, and capital ≤ $100 (Rapid Opportunity Mode).
 
 Not yet built (next, once the slice shows signal): learning weights from recorded outcomes, alerts, automated source discovery beyond host registration, page re-fetch verification (needs robots-respecting fetch), party-level entity resolution, SAM.gov as a demand sensor.
+
+### Follow-ups (2026-10-03)
+- **Carry-over assessment**: the assessment pool is this run's leads plus the best still-unassessed leads from the last 7 days (`listUnassessedIntelLeads`), ranked by credibility × urgency × freshness; leads decayed below freshness 0.1 are retired as `skipped` instead of paid for.
+- **Budget pacing**: run *k* of the UTC day may spend up to *k* × (daily cap ÷ `INTEL_RUNS_PER_DAY`) minus what today's earlier runs spent (`runAllowanceUsd`), so the first run can't starve the last and unused share rolls forward. `INTEL_RUNS_PER_DAY` (default 4) must match the cron.
+- **Query yield**: `GET /intel/queue` returns per-query runs / results / new / leads / assessed / actionable (`listIntelQueryYield`, from run notes + leads); shown as a table on the Action Queue page.

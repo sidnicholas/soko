@@ -115,6 +115,8 @@ const EnvSchema = z.object({
   BRAVE_SEARCH_API_KEY: z.string().optional(),
   INTEL_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(1),
   INTEL_QUERIES_PER_RUN: z.coerce.number().int().positive().default(8),
+  // Must match the worker-intel cron (every 6h = 4). Paces the daily cap across runs.
+  INTEL_RUNS_PER_DAY: z.coerce.number().int().positive().default(4),
   INTEL_MAX_ASSESSMENTS: z.coerce.number().int().nonnegative().default(3),
   // Built-in fixture connectors (static fake listings). Default: on outside
   // production, off in production so fake supply never reaches real data.
@@ -217,7 +219,7 @@ export interface AppConfig {
     reverbApiToken?: string;
     fixtures: boolean;
   };
-  intel: { braveApiKey?: string; dailyBudgetUsd: number; queriesPerRun: number; maxAssessments: number };
+  intel: { braveApiKey?: string; dailyBudgetUsd: number; runsPerDay: number; queriesPerRun: number; maxAssessments: number };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
   policy: {
     approvalTimeoutMinutes: number;
@@ -306,6 +308,7 @@ function toConfig(env: Env): AppConfig {
     intel: {
       braveApiKey: env.BRAVE_SEARCH_API_KEY,
       dailyBudgetUsd: env.INTEL_DAILY_BUDGET_USD,
+      runsPerDay: env.INTEL_RUNS_PER_DAY,
       queriesPerRun: env.INTEL_QUERIES_PER_RUN,
       maxAssessments: env.INTEL_MAX_ASSESSMENTS,
     },

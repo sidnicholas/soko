@@ -1,7 +1,7 @@
 import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
-import { getIntelCandidate, intelStats, listIntelQueue, listIntelSources, updateIntelCandidateStatus } from "@opportunity-os/db";
+import { getIntelCandidate, intelStats, listIntelQueryYield, listIntelQueue, listIntelSources, updateIntelCandidateStatus } from "@opportunity-os/db";
 import { RAPID_MODE } from "@opportunity-os/intel";
 import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
 import { ZodBody } from "../common/zod-validation.pipe";
@@ -50,7 +50,7 @@ export class IntelController {
   @ApiOperation({ summary: "AIOOS action queue: ACT NOW / VERIFY NEXT / WATCH / REJECTED, with spend and yield stats" })
   async queue(@CurrentUser() user: Principal) {
     requirePermission(user, "opportunity:reverify");
-    const [{ open, rejected }, stats, sources] = await Promise.all([listIntelQueue(), intelStats(), listIntelSources()]);
+    const [{ open, rejected }, stats, sources, queries] = await Promise.all([listIntelQueue(), intelStats(), listIntelSources(), listIntelQueryYield()]);
     const actNowAll = open.filter((c) => c.bucket === "act_now");
     const actNow = actNowAll.slice(0, ACT_NOW_LIMIT);
     // Over-limit ACT NOW items wait at the top of VERIFY NEXT rather than disappearing.
@@ -64,7 +64,7 @@ export class IntelController {
       evHighUsd: actionable.reduce((s, c) => s + Number(c.ev_high_usd), 0),
       realizedUsd: stats.realizedUsd,
     };
-    return { act_now: actNow, verify_next: verifyNext, watch, rejected, stats, portfolio, sources: sources.slice(0, 20) };
+    return { act_now: actNow, verify_next: verifyNext, watch, rejected, stats, portfolio, sources: sources.slice(0, 20), queries };
   }
 
   @Get("candidates/:id")

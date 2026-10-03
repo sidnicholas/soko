@@ -12,6 +12,7 @@ import {
   type ScoreInput,
 } from "./rules";
 import { stageOnePool, stageOneQueries } from "./queries";
+import { runAllowanceUsd } from "./run";
 
 const NOW = new Date("2026-10-03T00:00:00Z");
 const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000).toISOString();
@@ -110,5 +111,20 @@ describe("stage-one queries", () => {
   });
   it("never asks for more queries than the pool holds", () => {
     expect(stageOneQueries(0, 999)).toHaveLength(stageOnePool().length);
+  });
+});
+
+describe("runAllowanceUsd", () => {
+  const day = { dailyBudgetUsd: 1, runsPerDay: 4 };
+  it("gives each run its share, rolling unused allowance forward", () => {
+    expect(runAllowanceUsd({ ...day, spentTodayUsd: 0, runsStartedToday: 0 })).toBe(0.25);
+    // Run 1 spent only $0.10: run 2 may spend 2 × 0.25 − 0.10.
+    expect(runAllowanceUsd({ ...day, spentTodayUsd: 0.1, runsStartedToday: 1 })).toBeCloseTo(0.4);
+    // Run 1 overspent its share: run 2 gets only what keeps the pace.
+    expect(runAllowanceUsd({ ...day, spentTodayUsd: 0.45, runsStartedToday: 1 })).toBeCloseTo(0.05);
+  });
+  it("never exceeds what is left of the daily cap, and never goes negative", () => {
+    expect(runAllowanceUsd({ ...day, spentTodayUsd: 0.9, runsStartedToday: 7 })).toBeCloseTo(0.1);
+    expect(runAllowanceUsd({ ...day, spentTodayUsd: 1.2, runsStartedToday: 2 })).toBe(0);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import type { SearchProvider, WebSearchResult } from "@opportunity-os/connectors-sdk";
-import { closeDb, getDb, listIntelQueue, intelStats } from "@opportunity-os/db";
+import { closeDb, getDb, listIntelQueue, listIntelQueryYield, intelStats } from "@opportunity-os/db";
 import { LlmGateway, type LlmProvider } from "@opportunity-os/llm-gateway";
 import { runIntelCycle } from "@opportunity-os/intel";
 
@@ -15,6 +15,7 @@ const RUN = Date.now();
 const PROBLEM_URL = `https://forum.example.com/t/ga4-broken-${RUN}`;
 const DEMAND_URL = `https://classifieds.example.com/wtb-forklift-${RUN}`;
 const SUPPLY_URL = `https://liquidation.example.com/forklifts-${RUN}`;
+const CARRY_URL = `https://forum.example.com/t/divi-broken-${RUN}`;
 const recent = new Date(Date.now() - 86_400_000).toISOString();
 
 function result(url: string, title: string, snippet: string): WebSearchResult {
@@ -72,7 +73,7 @@ class StubModel implements LlmProvider {
 
 describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
   afterAll(async () => {
-    await getDb().deleteFrom("intel_leads").where("url", "in", [PROBLEM_URL, DEMAND_URL]).execute();
+    await getDb().deleteFrom("intel_leads").where("url", "in", [PROBLEM_URL, DEMAND_URL, CARRY_URL]).execute();
     await closeDb();
   });
 
@@ -83,7 +84,7 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
         research_synthesis: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 },
       },
     });
-    const result = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 1000, queriesPerRun: 1, maxAssessments: 5 });
+    const result = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 1, maxAssessments: 5 });
 
     expect(result.status).toBe("completed");
     expect(result.leadsFound).toBe(2);
@@ -116,12 +117,57 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
 
   it("re-surfaced pages cost no model call, and an exhausted budget stops before spending", async () => {
     const llm = new LlmGateway([new StubModel()], { profiles: { extraction: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 } } });
-    const again = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 1000, queriesPerRun: 1, maxAssessments: 0 });
+    const again = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 1, maxAssessments: 0 });
     expect(again.llmCalls).toBe(0);
     expect(again.leadsFound).toBe(0);
 
-    const broke = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 0, queriesPerRun: 3, maxAssessments: 3 });
+    const broke = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 0, runsPerDay: 1, queriesPerRun: 3, maxAssessments: 3 });
     expect(broke.status).toBe("budget_exhausted");
     expect(broke.searchCalls).toBe(0);
+  });
+
+  it("assesses a lead left over from an earlier run, and reports per-query yield", async () => {
+    const carrySearch: SearchProvider = {
+      id: "stub",
+      costPerQueryUsd: 0.005,
+      async search() {
+        return [result(CARRY_URL, "Divi site broken after update", "Our Divi theme broke after updating, homepage blank. Owner, need help.")];
+      },
+    };
+    class CarryModel implements LlmProvider {
+      readonly name = "stub";
+      async complete(req: { system?: string; prompt: string }) {
+        const text = req.system?.includes("signal-detection")
+          ? JSON.stringify({ leads: [{ index: 0, kind: "problem", title: "Divi site blank after update", summary: "Owner's Divi homepage blank since update.", item: null, category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "high", credibility: 0.9, contact: { channel: "profile", value: null, label: "source_fact" }, facts: [], opposite_queries: [] }] })
+          : JSON.stringify({
+              counterparty_found: true, counter_index: null, service_key: "website_repair", title: "Repair Divi site after update", match_rationale: "Website repair service.", evidence: "strong",
+              economics: { gross_transaction_usd: null, costs_usd: null, user_compensation_usd: [200, 600], capital_required_usd: 0, time_hours: [2, 5], notes: "" },
+              monetization: { payer: "Site owner", mechanism: "fixed_service_fee", timing: "on completion", value_added: "Restore the site" },
+              probability: [0.2, 0.4], regulatory: [], fraud: [], contact: { channel: "profile", value: null, label: "source_fact" }, factors: [], invalidators: [], outreach: { primary: "Hi", secondary: null },
+            });
+        return { text, inputTokens: 100, outputTokens: 50, usd: 0.001, model: "stub-1" };
+      }
+    }
+    const llm = new LlmGateway([new CarryModel()], {
+      profiles: { extraction: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 }, research_synthesis: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 } },
+    });
+
+    // Run 1 detects the lead but has no assessment slots.
+    const first = await runIntelCycle({ search: carrySearch, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 1, maxAssessments: 0 });
+    expect(first.leadsFound).toBe(1);
+    expect(first.candidates).toBe(0);
+
+    // Run 2 finds nothing new (same page) but picks the leftover lead up.
+    const second = await runIntelCycle({ search: carrySearch, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 1, maxAssessments: 5 });
+    expect(second.leadsFound).toBe(0);
+    expect(second.candidates).toBeGreaterThanOrEqual(1);
+    expect((second.notes.assessmentPool as { carriedOverAssessed: number }).carriedOverAssessed).toBeGreaterThanOrEqual(1);
+    const { open } = await listIntelQueue();
+    expect(open.find((c) => c.lead_url === CARRY_URL)?.bucket).toBe("act_now");
+
+    const yieldRows = await listIntelQueryYield();
+    const productive = yieldRows.filter((r) => r.leads > 0);
+    expect(productive.length).toBeGreaterThan(0);
+    expect(productive[0]!.searches).toBeGreaterThan(0);
   });
 });

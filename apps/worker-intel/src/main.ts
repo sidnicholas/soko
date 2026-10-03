@@ -23,6 +23,7 @@ async function main(): Promise<number> {
     search: makeBraveSearch({ apiKey: cfg.intel.braveApiKey }),
     llm: LlmGateway.default(),
     dailyBudgetUsd: cfg.intel.dailyBudgetUsd,
+    runsPerDay: cfg.intel.runsPerDay,
     queriesPerRun: cfg.intel.queriesPerRun,
     maxAssessments: cfg.intel.maxAssessments,
   });

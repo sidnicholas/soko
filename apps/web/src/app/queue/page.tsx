@@ -361,6 +361,38 @@ export default function QueuePage() {
                 ))
               )}
             </Card>
+            <Card title="Query yield" subtitle="What each discovery search produced. Prune queries that never yield leads; add variety where they do.">
+              {q.queries.length === 0 ? (
+                <EmptyState compact title="No runs yet" description="Each scheduled run records results, new pages, leads and actionable candidates per query." />
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: tokens.fontSize.sm }}>
+                    <thead>
+                      <tr style={{ color: tokens.color.inkSubtle, textAlign: "right" }}>
+                        <th style={{ textAlign: "left", padding: `${tokens.space.xs}px 0`, fontWeight: 500 }}>Query</th>
+                        {["Runs", "Results", "New", "Leads", "Assessed", "Actionable"].map((h) => (
+                          <th key={h} style={{ padding: `${tokens.space.xs}px ${tokens.space.sm}px`, fontWeight: 500 }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {q.queries.map((r) => (
+                        <tr key={r.query} style={{ borderTop: `1px solid ${tokens.color.border}` }}>
+                          <td style={{ padding: `${tokens.space.xs}px 0`, color: r.leads === 0 ? tokens.color.inkSubtle : tokens.color.ink }}>{r.query}</td>
+                          {[r.searches, r.results, r.new_results, r.leads, r.assessed, r.actionable].map((n, i) => (
+                            <td key={i} style={{ padding: `${tokens.space.xs}px ${tokens.space.sm}px`, textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: i === 5 && n > 0 ? 600 : 400 }}>
+                              {n}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
             <Card title="Sources" subtitle="Every site a lead came from, by yield (actionable ÷ leads).">
               {q.sources.length === 0 ? (
                 <EmptyState compact title="No sources yet" description="Sites register automatically as leads are found." />

@@ -5,8 +5,10 @@ import {
   createIntelRun,
   finishIntelRun,
   insertIntelLead,
+  intelRunsStartedToday,
   intelSpentTodayUsd,
   knownIntelLeadHashes,
+  listUnassessedIntelLeads,
   setIntelLeadStatus,
   touchIntelSource,
   upsertIntelCandidate,
@@ -39,6 +41,7 @@ import {
   scoreCandidate,
   verificationStatus,
   type ContactPath,
+  type Urgency,
 } from "./rules";
 import { serviceByKey } from "./services";
 
@@ -48,6 +51,8 @@ export interface IntelRunOptions {
   search: SearchProvider;
   llm: LlmGateway;
   dailyBudgetUsd: number;
+  /** Scheduled runs per UTC day; each gets an equal share, unused share rolls forward. */
+  runsPerDay: number;
   queriesPerRun: number;
   maxAssessments: number;
   /** Conservative per-call estimates used to stop before overspending. */
@@ -60,8 +65,42 @@ export interface IntelRunResult extends IntelRunTotals {
 
 const DEFAULT_ESTIMATES = { detectionUsd: 0.02, assessmentUsd: 0.08 };
 const MIN_CREDIBILITY = 0.4;
+/** Unassessed leads older than this aren't worth a paid assessment. */
+const CARRY_OVER_DAYS = 7;
+const CARRY_OVER_LIMIT = 30;
+const STALE_FRESHNESS = 0.1;
 
-type DetectedLead = Detection["leads"][number] & { result: WebSearchResult; query: string; leadId: string };
+/** A lead ready for assessment — found this run, or carried over from an earlier one. */
+interface AssessableLead {
+  leadId: string;
+  kind: "demand" | "supply" | "problem";
+  title: string;
+  summary: string;
+  url: string;
+  hostname: string;
+  /** Search snippet when found this run; the stored summary for carried-over leads. */
+  snippet: string;
+  publishedAt: string | null;
+  urgency: Urgency;
+  credibility: number;
+  contact: unknown;
+  facts: unknown;
+  oppositeQueries: string[];
+  carriedOver: boolean;
+}
+
+/**
+ * Pacing: run k of the UTC day may spend up to k × (daily cap / runs per day)
+ * minus what today's earlier runs spent, so the first run can't starve the
+ * last, and a cheap run leaves its unused share to the next. Never more than
+ * what is left of the daily cap.
+ */
+export function runAllowanceUsd(input: { dailyBudgetUsd: number; runsPerDay: number; spentTodayUsd: number; runsStartedToday: number }): number {
+  const share = input.dailyBudgetUsd / Math.max(1, input.runsPerDay);
+  const k = input.runsStartedToday + 1;
+  const left = input.dailyBudgetUsd - input.spentTodayUsd;
+  return Math.max(0, Math.min(left, share * k - input.spentTodayUsd));
+}
 
 function urlHash(url: string): string {
   const u = url.replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
@@ -76,14 +115,14 @@ function urlHash(url: string): string {
  */
 export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResult> {
   const est = opts.estimates ?? DEFAULT_ESTIMATES;
-  const remaining = Math.max(0, opts.dailyBudgetUsd - (await intelSpentTodayUsd()));
-  const budget = new SpendBudget(remaining);
-  const runIndex = await countIntelRuns();
+  const [spentTodayUsd, runsStartedToday, runIndex] = await Promise.all([intelSpentTodayUsd(), intelRunsStartedToday(), countIntelRuns()]);
+  const allowance = runAllowanceUsd({ dailyBudgetUsd: opts.dailyBudgetUsd, runsPerDay: opts.runsPerDay, spentTodayUsd, runsStartedToday });
+  const budget = new SpendBudget(allowance);
   const runId = await createIntelRun();
-  const notes: Record<string, unknown> = { remainingAtStartUsd: remaining, queries: [] as unknown[], errors: [] as string[] };
+  const notes: Record<string, unknown> = { allowanceUsd: allowance, spentTodayAtStartUsd: spentTodayUsd, queries: [] as unknown[], errors: [] as string[] };
   const errors = notes.errors as string[];
   let exhausted = false;
-  const detected: DetectedLead[] = [];
+  const detected: AssessableLead[] = [];
 
   try {
     // ---- Stage 1-2: broad discovery + detection
@@ -147,18 +186,61 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         });
         if (!leadId) continue;
         await touchIntelSource(result.hostname, lead.kind, { leads: 1 });
-        detected.push({ ...lead, result, query: q.query, leadId });
+        detected.push({
+          leadId,
+          kind: lead.kind,
+          title: lead.title,
+          summary: lead.summary,
+          url: result.url,
+          hostname: result.hostname,
+          snippet: result.snippet,
+          publishedAt: result.publishedAt,
+          urgency: lead.urgency,
+          credibility: lead.credibility,
+          contact: lead.contact,
+          facts: lead.facts,
+          oppositeQueries: lead.opposite_queries,
+          carriedOver: false,
+        });
       }
     }
 
     // ---- Stage 3-6: opposite side, verification, economics, why-paid, contact → candidate
+    // Pool = this run's leads + the best still-unassessed leads from recent runs.
+    const carried = (await listUnassessedIntelLeads({ sinceDays: CARRY_OVER_DAYS, limit: CARRY_OVER_LIMIT, excludeIds: detected.map((d) => d.leadId) })).map(
+      (l): AssessableLead => ({
+        leadId: l.id,
+        kind: l.kind as AssessableLead["kind"],
+        title: l.title,
+        summary: l.summary,
+        url: l.url,
+        hostname: l.hostname,
+        snippet: l.summary,
+        publishedAt: l.published_at,
+        urgency: (l.urgency ?? "medium") as Urgency,
+        credibility: Number(l.credibility),
+        contact: l.contact,
+        facts: l.facts,
+        oppositeQueries: Array.isArray(l.opposite_queries) ? (l.opposite_queries as string[]) : [],
+        carriedOver: true,
+      }),
+    );
     const urgencyWeight = { high: 1, medium: 0.8, low: 0.6 } as const;
-    const ranked = [...detected].sort((a, b) => b.credibility * urgencyWeight[b.urgency] - a.credibility * urgencyWeight[a.urgency]);
+    const priority = (l: AssessableLead) => l.credibility * urgencyWeight[l.urgency] * freshnessScore(l.publishedAt, l.urgency);
+    const pool: AssessableLead[] = [];
+    for (const l of [...detected, ...carried]) {
+      // Decayed past usefulness: retire it rather than pay to assess it.
+      if (freshnessScore(l.publishedAt, l.urgency) < STALE_FRESHNESS) await setIntelLeadStatus(l.leadId, "skipped");
+      else pool.push(l);
+    }
+    const ranked = pool.sort((a, b) => priority(b) - priority(a));
+    notes.assessmentPool = { thisRun: detected.length, carriedOver: carried.length, eligible: ranked.length };
     let candidates = 0;
+    let carriedAssessed = 0;
     for (const lead of ranked.slice(0, opts.maxAssessments)) {
       const counter: WebSearchResult[] = [];
       if (lead.kind !== "problem") {
-        for (const oq of lead.opposite_queries.slice(0, 2)) {
+        for (const oq of lead.oppositeQueries.slice(0, 2)) {
           if (!budget.canSpend(opts.search.costPerQueryUsd + est.assessmentUsd)) break;
           try {
             const found = await opts.search.search({ query: oq, count: 5, freshness: "month" });
@@ -176,22 +258,25 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       let a: Assessment;
       try {
         const { prompt, untrusted } = assessmentPrompt(
-          { kind: lead.kind, title: lead.title, summary: lead.summary, url: lead.result.url, publishedAt: lead.result.publishedAt, facts: lead.facts, contact: lead.contact },
+          { kind: lead.kind, title: lead.title, summary: lead.summary, url: lead.url, publishedAt: lead.publishedAt, facts: lead.facts, contact: lead.contact },
           counter,
         );
         const res = await opts.llm.runStructured({ taskClass: "research_synthesis", system: ASSESSMENT_SYSTEM, prompt, untrustedContext: untrusted }, AssessmentSchema);
         budget.recordLlm(res.telemetry.usd);
         a = res.value;
       } catch (err) {
-        errors.push(`assess ${lead.result.url}: ${String(err).slice(0, 200)}`);
+        errors.push(`assess ${lead.url}: ${String(err).slice(0, 200)}`);
         continue;
       }
 
       const bucket = await persistCandidate(runId, lead, counter, a);
       await setIntelLeadStatus(lead.leadId, "assessed");
-      if (bucket === "act_now" || bucket === "verify_next") await touchIntelSource(lead.result.hostname, lead.kind, { actionable: 1 });
+      if (bucket === "act_now" || bucket === "verify_next") await touchIntelSource(lead.hostname, lead.kind, { actionable: 1 });
       candidates++;
+      if (lead.carriedOver) carriedAssessed++;
     }
+    (notes.assessmentPool as Record<string, number>).assessed = candidates;
+    (notes.assessmentPool as Record<string, number>).carriedOverAssessed = carriedAssessed;
 
     const totals: IntelRunTotals = {
       status: exhausted ? "budget_exhausted" : "completed",
@@ -223,19 +308,19 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
 }
 
 /** Applies the deterministic decision layer to one assessment and stores the candidate. */
-async function persistCandidate(runId: string, lead: DetectedLead, counter: WebSearchResult[], a: Assessment) {
+async function persistCandidate(runId: string, lead: AssessableLead, counter: WebSearchResult[], a: Assessment) {
   const service = lead.kind === "problem" ? serviceByKey(a.service_key) : undefined;
   const counterResult = a.counter_index !== null ? counter[a.counter_index] : undefined;
   const counterpartyFound = a.counterparty_found && (lead.kind === "problem" ? service !== undefined : counterResult !== undefined);
 
-  const freshness = freshnessScore(lead.result.publishedAt, lead.urgency);
+  const freshness = freshnessScore(lead.publishedAt, lead.urgency);
   const contact = (a.contact ?? lead.contact ?? null) as ContactPath | null;
-  const screenText = [lead.title, lead.summary, lead.result.snippet, counterResult?.snippet ?? ""].join(" ");
+  const screenText = [lead.title, lead.summary, lead.snippet, counterResult?.snippet ?? ""].join(" ");
   const regulatory = mergeFlags(a.regulatory, regulatoryFlags(screenText));
   const fraud = mergeFlags(a.fraud, fraudFlags(screenText));
   const monetization = { payer: a.monetization.payer, mechanism: a.monetization.mechanism, timing: a.monetization.timing, valueAdded: a.monetization.value_added };
   const resolved = monetizationResolved(monetization);
-  const verification = verificationStatus({ evidence: a.evidence, publishedAt: lead.result.publishedAt, freshness, contact, counterpartyFound });
+  const verification = verificationStatus({ evidence: a.evidence, publishedAt: lead.publishedAt, freshness, contact, counterpartyFound });
   const ev = expectedValue({ compensationUsd: a.economics.user_compensation_usd, probability: a.probability, freshness, resolved, fraud: fraud.length > 0 });
   const scoreInput = {
     ev,
