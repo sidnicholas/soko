@@ -109,6 +109,18 @@ describe("stage-one queries", () => {
     expect(run0.map((q) => q.query)).not.toEqual(run1.map((q) => q.query));
     expect(new Set(run0.map((q) => q.query)).size).toBe(6);
   });
+  it("cycles through every query in every lane, whatever the lane sizes", () => {
+    const pool = stageOnePool();
+    const seen = new Set<string>();
+    for (let run = 0; run < 12; run++) for (const q of stageOneQueries(run, 8)) seen.add(q.query);
+    expect(seen.size).toBe(pool.length);
+    // Consecutive runs don't repeat the same demand queries (regression: lane size == count).
+    const demand = (run: number) => stageOneQueries(run, 8).filter((q) => q.orientation === "demand").map((q) => q.query);
+    expect(demand(0)).not.toEqual(demand(1));
+  });
+  it("pins every query to a venue with a host-level site filter", () => {
+    for (const q of stageOnePool()) expect(q.query).toMatch(/^site:[a-z0-9.-]+\s/);
+  });
   it("never asks for more queries than the pool holds", () => {
     expect(stageOneQueries(0, 999)).toHaveLength(stageOnePool().length);
   });

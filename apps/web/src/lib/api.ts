@@ -281,7 +281,18 @@ export interface IntelQueue {
   portfolio: { targetUsd: number; evLowUsd: number; evHighUsd: number; realizedUsd: number };
   sources: { hostname: string; orientation: string | null; leads: number; actionable: number }[];
   /** Per stage-1 query yield, best first. */
-  queries: { query: string; searches: number; results: number; new_results: number; leads: number; assessed: number; actionable: number; last_run_at: string | null }[];
+  queries: {
+    query: string;
+    searches: number;
+    results: number;
+    new_results: number;
+    leads: number;
+    assessed: number;
+    actionable: number;
+    last_run_at: string | null;
+    /** Why results weren't leads, reason → count. */
+    reasons: Record<string, number>;
+  }[];
 }
 export interface IntelOutcomeInput {
   status: "open" | "contacted" | "responded" | "won" | "lost" | "dismissed";

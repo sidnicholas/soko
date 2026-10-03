@@ -42,6 +42,7 @@ class StubModel implements LlmProvider {
     let text: string;
     if (isDetection) {
       text = JSON.stringify({
+        skipped: [{ index: 2, reason: "article" }],
         leads: [
           { index: 0, kind: "problem", title: "Shopify store GA4 not recording purchases", summary: "Owner reports GA4 purchases at zero since Monday while ads run.", item: "GA4 purchase tracking", category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "high", credibility: 0.8, contact: { channel: "profile", value: null, label: "source_fact" }, facts: [{ field: "problem", value: "GA4 zero purchases", label: "source_fact" }], opposite_queries: [] },
           { index: 1, kind: "demand", title: "Warehouse wants a used 5k lb forklift", summary: "Dayton OH warehouse needs a used 5,000 lb forklift this week.", item: "forklift", category: "industrial equipment", quantity: "1", location: "Dayton, OH", deadline: "this week", price_usd: null, urgency: "high", credibility: 0.7, contact: { channel: "marketplace_message", value: null, label: "source_fact" }, facts: [], opposite_queries: ["forklift for sale near Dayton"] },
@@ -169,5 +170,7 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
     const productive = yieldRows.filter((r) => r.leads > 0);
     expect(productive.length).toBeGreaterThan(0);
     expect(productive[0]!.searches).toBeGreaterThan(0);
+    // The first test's detection reported one skipped result as an article.
+    expect(yieldRows.some((r) => (r.reasons.article ?? 0) >= 1)).toBe(true);
   });
 });

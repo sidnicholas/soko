@@ -142,7 +142,8 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       budget.recordSearch(opts.search.costPerQueryUsd);
       const known = await knownIntelLeadHashes(results.map((r) => urlHash(r.url)));
       const fresh = results.filter((r) => !known.has(urlHash(r.url)) && detectInjection(`${r.title} ${r.snippet}`).length === 0);
-      (notes.queries as unknown[]).push({ q: q.query, results: results.length, new: fresh.length });
+      const queryNote: Record<string, unknown> = { q: q.query, results: results.length, new: fresh.length, leads: 0, kept: 0, reasons: {} };
+      (notes.queries as unknown[]).push(queryNote);
       if (fresh.length === 0) continue;
 
       let detection: Detection;
@@ -158,9 +159,17 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         continue;
       }
 
+      const reasons: Record<string, number> = {};
+      for (const s of detection.skipped) reasons[s.reason] = (reasons[s.reason] ?? 0) + 1;
+      queryNote.reasons = reasons;
+      queryNote.leads = detection.leads.length;
       for (const lead of detection.leads) {
         const result = fresh[lead.index];
-        if (!result || lead.credibility < MIN_CREDIBILITY) continue;
+        if (!result) continue;
+        if (lead.credibility < MIN_CREDIBILITY) {
+          reasons.low_credibility = (reasons.low_credibility ?? 0) + 1;
+          continue;
+        }
         const leadId = await insertIntelLead({
           runId,
           kind: lead.kind,
@@ -187,6 +196,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
           oppositeQueries: lead.opposite_queries,
         });
         if (!leadId) continue;
+        queryNote.kept = (queryNote.kept as number) + 1;
         await touchIntelSource(result.hostname, lead.kind, { leads: 1 });
         detected.push({
           leadId,

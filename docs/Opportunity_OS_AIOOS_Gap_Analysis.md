@@ -122,3 +122,11 @@ Not yet built (next, once the slice shows signal): learning weights from recorde
 - **Carry-over assessment**: the assessment pool is this run's leads plus the best still-unassessed leads from the last 7 days (`listUnassessedIntelLeads`), ranked by credibility × urgency × freshness; leads decayed below freshness 0.1 are retired as `skipped` instead of paid for.
 - **Budget pacing**: run *k* of the UTC day may spend up to *k* × (daily cap ÷ `INTEL_RUNS_PER_DAY`) minus what today's earlier runs spent (`runAllowanceUsd`), so the first run can't starve the last and unused share rolls forward. `INTEL_RUNS_PER_DAY` (default 4) must match the cron.
 - **Query yield**: `GET /intel/queue` returns per-query runs / results / new / leads / assessed / actionable (`listIntelQueryYield`, from run notes + leads); shown as a table on the Action Queue page.
+
+### First live runs and query rework (2026-10-03)
+- 12:00 UTC run: 5 searches, 3 Haiku replies all unparseable (text after the JSON; a price as `"$6,500"`); failed calls were billed but missing from the ledger. Fixed in `5d5a331` (first-complete-JSON extraction, lenient numbers, one retry, every attempt billed via `StructuredOutputError`).
+- 13:15 UTC one-off run: parsing clean, $0.029 total (search $0.025, Haiku ~$0.002/call), but 0 leads: 3 of 5 queries returned nothing (stacked exact phrases + recency window) and the 19 open-web results were articles/product pages/directories.
+- Query pool rebuilt around venues where intent is written down — `site:` host filters on reddit.com, sam.gov, govdeals.com, liquidation.com, wordpress.org, community.shopify.com (host-level only; path filters aren't documented for Brave). At most one quoted phrase; month windows. Still snippets only — nothing is fetched or scraped.
+- Detection now returns a reason for every skipped result (`article`, `product_page`, `directory`, `ad`, `news`, `too_old`, `not_specific`, `not_relevant`, `other`; plus `low_credibility` recorded by the pipeline); the query-yield table shows the top reasons per query.
+- Rotation bug fixed: each lane advances by the number of picks it gets per run (a lane whose size equals the per-run count used to repeat every run).
+- `INTEL_QUERIES_PER_RUN` set to 8 on `worker-intel` (it was 5).

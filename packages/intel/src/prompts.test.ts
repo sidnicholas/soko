@@ -12,4 +12,10 @@ describe("DetectionSchema", () => {
     expect(parsed.leads[0]!.credibility).toBe(0.7);
     expect(parsed.leads[1]!.price_usd).toBeNull();
   });
+
+  it("records why results were skipped, mapping unknown labels to other", () => {
+    const parsed = DetectionSchema.parse({ skipped: [{ index: "0", reason: "article" }, { index: 1, reason: "listicle" }], leads: [] });
+    expect(parsed.skipped).toEqual([{ index: 0, reason: "article" }, { index: 1, reason: "other" }]);
+    expect(DetectionSchema.parse({ leads: [] }).skipped).toEqual([]);
+  });
 });

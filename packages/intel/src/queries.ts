@@ -10,50 +10,43 @@ export interface StageOneQuery extends WebSearchQuery {
   orientation: "demand" | "supply" | "problem";
 }
 
-const DEMAND_INTENT = ['"WTB"', '"looking for"', '"request for quote"', '"sources sought"', '"can\'t find"', '"need asap"', '"supplier needed"', '"ISO"'];
-const DEMAND_GOODS = [
-  "forklift",
-  "pallet racking",
-  "used restaurant equipment",
-  "industrial generator",
-  "CNC machine",
-  "shipping container",
-  "bulk packaging supplier",
-  "obsolete electronic components",
-  "commercial refrigeration",
-  "heavy equipment parts",
-  "office furniture bulk",
-  "printing services",
-];
+/**
+ * Where intent actually gets written down. The first live runs (2026-10-03)
+ * showed open-web results are mostly articles, product pages and directories,
+ * so each query is pinned to a community, procurement or surplus venue.
+ * Rules learned from those runs: at most one quoted phrase, month windows.
+ * Venues are reached only through the search provider's index (snippets) —
+ * no site is fetched or scraped.
+ */
+interface Venue {
+  site: string;
+  orientation: StageOneQuery["orientation"];
+  /** Topics searched within this venue. */
+  topics: string[];
+}
 
-const SUPPLY_INTENT = ['"liquidation"', '"warehouse closing"', '"surplus inventory"', '"overstock"', '"must sell"', '"excess inventory"'];
-const SUPPLY_GOODS = ["restaurant equipment", "industrial machinery", "electronics pallets", "office furniture", "retail fixtures", "building materials"];
-
-// One quoted phrase at most: stacking exact phrases under a recency window
-// returned nothing in the first live run (2026-10-03).
-const PROBLEM_QUERIES = [
-  'GA4 "not tracking" conversions help',
-  'Google Tag Manager tags not firing help',
-  'WordPress site hacked need help small business',
-  'Divi theme "broken after update"',
-  'WooCommerce "checkout not working"',
-  'WordPress contact form "not sending" emails',
-  'Facebook pixel "not tracking" purchases',
-  '"website down" losing customers',
-  '"leads dropped" website help',
-  'project stalled need project manager small business',
+// Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
+// documented for the search provider and could silently return nothing.
+const VENUES: Venue[] = [
+  // Demand: people and organizations asking for a supplier or item.
+  { site: "reddit.com", orientation: "demand", topics: ['small business "looking for a supplier"', '"need a vendor" for my business', '"looking for a manufacturer" product', 'restaurant "looking for" used equipment', '"[hiring]" sourcing research'] },
+  { site: "sam.gov", orientation: "demand", topics: ['"sources sought" equipment', '"request for quote" supplies', '"sources sought" services'] },
+  // Supply: surplus, liquidation and distressed inventory venues.
+  { site: "govdeals.com", orientation: "supply", topics: ["forklift", "restaurant equipment", "generator"] },
+  { site: "liquidation.com", orientation: "supply", topics: ["pallets electronics", "overstock"] },
+  { site: "reddit.com", orientation: "supply", topics: ['"closing my business" selling inventory', '"liquidating" equipment business'] },
+  // Problems: owners describing costly website / tracking / ops failures.
+  { site: "reddit.com", orientation: "problem", topics: ["GA4 conversions not tracking", "GA4 purchases missing shopify", "Google Tag Manager tags not firing", 'WordPress site hacked "my business"', 'WordPress "contact form" not sending', "WooCommerce checkout not working", "Shopify pixel not tracking purchases", "Google Ads conversions not recording"] },
+  { site: "wordpress.org", orientation: "problem", topics: ["site down urgent help", "contact form not sending emails", "broken after update"] },
+  { site: "community.shopify.com", orientation: "problem", topics: ["checkout broken", "tracking not working"] },
 ];
 
 /** The full pool, in a stable order. */
 export function stageOnePool(): StageOneQuery[] {
   const pool: StageOneQuery[] = [];
-  DEMAND_GOODS.forEach((goods, i) => {
-    pool.push({ query: `${DEMAND_INTENT[i % DEMAND_INTENT.length]} ${goods}`, orientation: "demand", freshness: "week" });
-  });
-  SUPPLY_GOODS.forEach((goods, i) => {
-    pool.push({ query: `${SUPPLY_INTENT[i % SUPPLY_INTENT.length]} ${goods}`, orientation: "supply", freshness: "month" });
-  });
-  for (const q of PROBLEM_QUERIES) pool.push({ query: q, orientation: "problem", freshness: "month" });
+  for (const v of VENUES) {
+    for (const topic of v.topics) pool.push({ query: `site:${v.site} ${topic}`, orientation: v.orientation, freshness: "month" });
+  }
   return pool;
 }
 
@@ -64,14 +57,23 @@ export function stageOnePool(): StageOneQuery[] {
  */
 export function stageOneQueries(runIndex: number, count: number): StageOneQuery[] {
   const pool = stageOnePool();
-  const byKind = (k: StageOneQuery["orientation"]) => pool.filter((q) => q.orientation === k);
-  const lanes = [byKind("demand"), byKind("problem"), byKind("supply")];
+  const total = Math.min(count, pool.length);
+  const lanes = (["demand", "problem", "supply"] as const).map((k) => pool.filter((q) => q.orientation === k));
+  // How many picks each lane gets per run (interleaved, skipping empty lanes)…
+  const picks = lanes.map(() => 0);
+  for (let i = 0, assigned = 0; assigned < total; i++) {
+    const li = i % lanes.length;
+    if (picks[li]! < lanes[li]!.length) {
+      picks[li]!++;
+      assigned++;
+    }
+  }
+  // …and each lane advances by exactly that many per run, so it cycles through
+  // all of its queries regardless of how its size relates to `count`.
+  const perLane = lanes.map((lane, li) => Array.from({ length: picks[li]! }, (_, j) => lane[(runIndex * picks[li]! + j) % lane.length]!));
   const out: StageOneQuery[] = [];
-  for (let i = 0; out.length < Math.min(count, pool.length); i++) {
-    const lane = lanes[i % lanes.length]!;
-    const pick = lane[(runIndex * count + Math.floor(i / lanes.length)) % lane.length]!;
-    if (!out.some((q) => q.query === pick.query)) out.push(pick);
-    if (i > count * 10) break;
+  for (let j = 0; out.length < total; j++) {
+    for (const laneQueries of perLane) if (j < laneQueries.length && out.length < total) out.push(laneQueries[j]!);
   }
   return out;
 }

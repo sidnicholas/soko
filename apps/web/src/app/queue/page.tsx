@@ -370,7 +370,7 @@ export default function QueuePage() {
                     <thead>
                       <tr style={{ color: tokens.color.inkSubtle, textAlign: "right" }}>
                         <th style={{ textAlign: "left", padding: `${tokens.space.xs}px 0`, fontWeight: 500 }}>Query</th>
-                        {["Runs", "Results", "New", "Leads", "Assessed", "Actionable"].map((h) => (
+                        {["Runs", "Results", "New", "Leads", "Assessed", "Actionable", "Why not leads"].map((h) => (
                           <th key={h} style={{ padding: `${tokens.space.xs}px ${tokens.space.sm}px`, fontWeight: 500 }}>
                             {h}
                           </th>
@@ -386,6 +386,13 @@ export default function QueuePage() {
                               {n}
                             </td>
                           ))}
+                          <td style={{ padding: `${tokens.space.xs}px ${tokens.space.sm}px`, textAlign: "right", color: tokens.color.inkMuted, fontSize: tokens.fontSize.xs }}>
+                            {Object.entries(r.reasons ?? {})
+                              .sort((a, b) => b[1] - a[1])
+                              .slice(0, 3)
+                              .map(([reason, n]) => `${words(reason)} ${n}`)
+                              .join(" · ") || "—"}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

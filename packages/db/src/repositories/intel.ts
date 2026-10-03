@@ -384,6 +384,8 @@ export async function listIntelQueryYield(limit = 100) {
     assessed: number;
     actionable: number;
     last_run_at: string | null;
+    /** Why results from this query weren't leads: reason → count, summed over runs. */
+    reasons: Record<string, number>;
   }>`
     with runs as (
       select q->>'q' as query, count(*)::int as searches,
@@ -400,10 +402,22 @@ export async function listIntelQueryYield(limit = 100) {
       from intel_leads l left join intel_candidates c on c.lead_id = l.id
       group by 1
     )
+    , reasons as (
+      select query, jsonb_object_agg(reason, n) as reasons
+      from (
+        select q->>'q' as query, r.key as reason, sum(r.value::int)::int as n
+        from intel_runs ir, jsonb_array_elements(coalesce(ir.notes->'queries', '[]'::jsonb)) as q,
+             jsonb_each_text(coalesce(q->'reasons', '{}'::jsonb)) as r
+        group by 1, 2
+      ) summed
+      group by 1
+    )
     select runs.query, runs.searches, runs.results, runs.new_results,
            coalesce(leads.leads, 0)::int as leads, coalesce(leads.assessed, 0)::int as assessed,
-           coalesce(leads.actionable, 0)::int as actionable, runs.last_run_at
+           coalesce(leads.actionable, 0)::int as actionable, runs.last_run_at,
+           coalesce(reasons.reasons, '{}'::jsonb) as reasons
     from runs left join leads on leads.query = runs.query
+              left join reasons on reasons.query = runs.query
     order by actionable desc, leads desc, searches desc
     limit ${limit}
   `.execute(getDb());
