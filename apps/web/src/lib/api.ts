@@ -201,8 +201,98 @@ export interface Me {
   email: string | null;
 }
 
+/** AIOOS action-queue candidate (GET /intel/queue rows). numeric columns arrive as strings. */
+export interface IntelFlag {
+  flag: string;
+  reason: string;
+}
+export interface IntelContact {
+  channel: string;
+  value: string | null;
+  label: string;
+}
+export interface IntelCandidate {
+  id: string;
+  match_kind: "demand_to_supply" | "supply_to_demand" | "problem_to_service";
+  title: string;
+  match_rationale: string;
+  verification_status: string;
+  freshness: string;
+  economics: {
+    gross_transaction_usd: [number, number] | null;
+    costs_usd: [number, number] | null;
+    user_compensation_usd: [number, number];
+    capital_required_usd: number;
+    time_hours: [number, number];
+    notes: string;
+  };
+  monetization: { payer: string | null; mechanism: string | null; timing: string | null; valueAdded: string | null; resolved: boolean; note: string | null };
+  regulatory_flags: IntelFlag[];
+  fraud_flags: IntelFlag[];
+  contact: IntelContact | null;
+  ev_low_usd: string;
+  ev_high_usd: string;
+  confidence: string;
+  score: string;
+  explanation: {
+    factors: { name: string; points: number; note: string }[];
+    modelFactors: { name: string; effect: "+" | "-"; note: string }[];
+    invalidators: string[];
+    probability: [number, number];
+  };
+  outreach: { primary: string | null; secondary: string | null };
+  bucket: "act_now" | "verify_next" | "watch" | "rejected";
+  reject_reason: string | null;
+  user_status: string;
+  outcome_reason: string | null;
+  counter_url: string | null;
+  counter_summary: string | null;
+  service_key: string | null;
+  created_at: string;
+  lead_kind: string;
+  lead_title: string;
+  lead_summary: string;
+  lead_url: string;
+  lead_hostname: string;
+  lead_query: string;
+  lead_published_at: string | null;
+  lead_age_text: string | null;
+  lead_discovered_at: string;
+}
+export interface IntelQueue {
+  act_now: IntelCandidate[];
+  verify_next: IntelCandidate[];
+  watch: IntelCandidate[];
+  rejected: IntelCandidate[];
+  stats: {
+    spentTodayUsd: number;
+    spentTotalUsd: number;
+    runs: number;
+    lastRunAt: string | null;
+    leads: number;
+    actionable: number;
+    contacted: number;
+    responded: number;
+    won: number;
+    realizedUsd: number;
+    costPerActionableUsd: number | null;
+    costPerRealizedDollar: number | null;
+  };
+  portfolio: { targetUsd: number; evLowUsd: number; evHighUsd: number; realizedUsd: number };
+  sources: { hostname: string; orientation: string | null; leads: number; actionable: number }[];
+}
+export interface IntelOutcomeInput {
+  status: "open" | "contacted" | "responded" | "won" | "lost" | "dismissed";
+  reason?: string | null;
+  realized_usd?: number | null;
+}
+
 export const api = {
   me: () => request<Me>("/me"),
+
+  // Opportunity intelligence (AIOOS action queue)
+  intelQueue: () => request<IntelQueue>("/intel/queue"),
+  setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
 
   // Missions (§16)
   createMission: (input: CreateMissionInput) => request<Mission>("/missions", jsonBody(input)),

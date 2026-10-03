@@ -1,0 +1,22 @@
+{
+  "name": "@opportunity-os/worker-intel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "echo lint-skip",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@opportunity-os/config": "workspace:*",
+    "@opportunity-os/connectors-sdk": "workspace:*",
+    "@opportunity-os/db": "workspace:*",
+    "@opportunity-os/intel": "workspace:*",
+    "@opportunity-os/llm-gateway": "workspace:*",
+    "@opportunity-os/observability": "workspace:*"
+  }
+}

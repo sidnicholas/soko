@@ -69,6 +69,10 @@ const EnvSchema = z.object({
   LLM_DEFAULT_PROVIDER: z.string().default("echo"),
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Claude models behind the gateway: cheap high-volume extraction vs reasoning.
+  // Blank (as copied from .env.example) means the default, not an empty model id.
+  ANTHROPIC_FAST_MODEL: z.string().optional().transform((v) => v?.trim() || "claude-haiku-4-5"),
+  ANTHROPIC_REASONING_MODEL: z.string().optional().transform((v) => v?.trim() || "claude-sonnet-5-5"),
   VOYAGE_API_KEY: z.string().optional(),
   EMBEDDING_PROVIDER: z.enum(["echo", "openai", "voyage"]).default("echo"),
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
@@ -104,6 +108,14 @@ const EnvSchema = z.object({
   // is public, so it runs keyless once enabled; the token only raises rate
   // limits. Opt-in so local dev and tests never call it by accident.
   REVERB_ENABLED: z.enum(["true", "false"]).default("false"),
+
+  // AIOOS opportunity intelligence (docs/Opportunity_OS_AIOOS_Master_Prompt.md).
+  // Runs only with both a search key and ANTHROPIC_API_KEY. The daily cap is a
+  // hard ceiling on search + LLM spend across all runs that UTC day.
+  BRAVE_SEARCH_API_KEY: z.string().optional(),
+  INTEL_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(1),
+  INTEL_QUERIES_PER_RUN: z.coerce.number().int().positive().default(8),
+  INTEL_MAX_ASSESSMENTS: z.coerce.number().int().nonnegative().default(3),
   // Built-in fixture connectors (static fake listings). Default: on outside
   // production, off in production so fake supply never reaches real data.
   FIXTURE_CONNECTORS: z.enum(["true", "false"]).optional(),
@@ -163,6 +175,8 @@ export interface AppConfig {
     defaultProvider: string;
     openaiKey?: string;
     anthropicKey?: string;
+    anthropicFastModel: string;
+    anthropicReasoningModel: string;
     voyageKey?: string;
     embeddingProvider: "echo" | "openai" | "voyage";
     embeddingModel: string;
@@ -203,6 +217,7 @@ export interface AppConfig {
     reverbApiToken?: string;
     fixtures: boolean;
   };
+  intel: { braveApiKey?: string; dailyBudgetUsd: number; queriesPerRun: number; maxAssessments: number };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
   policy: {
     approvalTimeoutMinutes: number;
@@ -246,6 +261,8 @@ function toConfig(env: Env): AppConfig {
       defaultProvider: env.LLM_DEFAULT_PROVIDER,
       openaiKey: env.OPENAI_API_KEY,
       anthropicKey: env.ANTHROPIC_API_KEY,
+      anthropicFastModel: env.ANTHROPIC_FAST_MODEL,
+      anthropicReasoningModel: env.ANTHROPIC_REASONING_MODEL,
       voyageKey: env.VOYAGE_API_KEY,
       embeddingProvider: env.EMBEDDING_PROVIDER,
       embeddingModel: env.EMBEDDING_MODEL,
@@ -285,6 +302,12 @@ function toConfig(env: Env): AppConfig {
       reverbEnabled: env.REVERB_ENABLED === "true",
       reverbApiToken: env.REVERB_API_TOKEN,
       fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
+    },
+    intel: {
+      braveApiKey: env.BRAVE_SEARCH_API_KEY,
+      dailyBudgetUsd: env.INTEL_DAILY_BUDGET_USD,
+      queriesPerRun: env.INTEL_QUERIES_PER_RUN,
+      maxAssessments: env.INTEL_MAX_ASSESSMENTS,
     },
     security: {
       approvalTokenSecret: env.APPROVAL_TOKEN_SECRET,

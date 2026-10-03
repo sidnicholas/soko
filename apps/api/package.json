@@ -31,6 +31,7 @@
     "@opportunity-os/discovery": "workspace:*",
     "@opportunity-os/domain": "workspace:*",
     "@opportunity-os/escrow": "workspace:*",
+    "@opportunity-os/intel": "workspace:*",
     "@opportunity-os/llm-gateway": "workspace:*",
     "@opportunity-os/negotiation": "workspace:*",
     "@opportunity-os/observability": "workspace:*",

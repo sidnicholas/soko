@@ -381,6 +381,95 @@ export interface GraphEdgesTable {
   created_at: Timestamp;
 }
 
+/** Postgres numeric: node-pg returns a string to keep precision. */
+type Numeric = ColumnType<string, number | string | undefined, number | string>;
+
+export interface IntelRunsTable {
+  id: Generated<string>;
+  started_at: Timestamp;
+  finished_at: string | null;
+  status: Generated<string>;
+  search_calls: Generated<number>;
+  llm_calls: Generated<number>;
+  search_usd: Numeric;
+  llm_usd: Numeric;
+  leads_found: Generated<number>;
+  candidates: Generated<number>;
+  notes: Json;
+}
+
+export interface IntelSourcesTable {
+  id: Generated<string>;
+  hostname: string;
+  source_type: string | null;
+  orientation: string | null;
+  leads: Generated<number>;
+  actionable: Generated<number>;
+  first_seen_at: Timestamp;
+  last_seen_at: Timestamp;
+}
+
+export interface IntelLeadsTable {
+  id: Generated<string>;
+  run_id: string | null;
+  kind: string;
+  title: string;
+  summary: string;
+  url: string;
+  url_hash: string;
+  hostname: string;
+  query: string;
+  search_provider: string;
+  discovered_at: Timestamp;
+  published_at: string | null;
+  age_text: string | null;
+  item: string | null;
+  category: string | null;
+  quantity: string | null;
+  location: string | null;
+  deadline: string | null;
+  price_minor: number | null;
+  currency: string | null;
+  urgency: string | null;
+  credibility: Numeric;
+  contact: Json;
+  facts: Json;
+  opposite_queries: Json;
+  status: Generated<string>;
+}
+
+export interface IntelCandidatesTable {
+  id: Generated<string>;
+  run_id: string | null;
+  lead_id: string;
+  counter_url: string | null;
+  counter_summary: string | null;
+  service_key: string | null;
+  match_kind: string;
+  title: string;
+  match_rationale: string;
+  verification_status: string;
+  freshness: Numeric;
+  economics: Json;
+  monetization: Json;
+  regulatory_flags: Json;
+  fraud_flags: Json;
+  contact: Json;
+  ev_low_usd: Numeric;
+  ev_high_usd: Numeric;
+  confidence: string;
+  score: Numeric;
+  explanation: Json;
+  outreach: Json;
+  bucket: string;
+  reject_reason: string | null;
+  user_status: Generated<string>;
+  outcome_reason: string | null;
+  realized_usd: Numeric | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
 export interface Database {
   users: UsersTable;
   missions: MissionsTable;
@@ -406,4 +495,8 @@ export interface Database {
   entity_members: EntityMembersTable;
   price_observations: PriceObservationsTable;
   graph_edges: GraphEdgesTable;
+  intel_runs: IntelRunsTable;
+  intel_sources: IntelSourcesTable;
+  intel_leads: IntelLeadsTable;
+  intel_candidates: IntelCandidatesTable;
 }

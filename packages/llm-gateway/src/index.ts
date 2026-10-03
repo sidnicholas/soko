@@ -2,7 +2,10 @@ import { z } from "zod";
 import type { CostTelemetry } from "@opportunity-os/contracts";
 import { getConfig } from "@opportunity-os/config";
 
+import { AnthropicProvider } from "./anthropic";
+
 export * from "./embed";
+export * from "./anthropic";
 
 /** §18 — task classes routed to provider/model profiles. */
 export const LLM_TASK_CLASSES = [
@@ -92,9 +95,38 @@ export class LlmGateway {
     this.profiles = { ...DEFAULT_PROFILES, ...(opts.profiles ?? {}) } as Record<LlmTaskClass, TaskProfile>;
   }
 
+  /**
+   * Echo-only without a model key (dev/CI stay keyless and deterministic).
+   * With ANTHROPIC_API_KEY: high-volume extraction/classification/summary on
+   * the fast model, reasoning-heavy tasks on the reasoning model, each falling
+   * back down the chain and finally to echo.
+   */
   static default(): LlmGateway {
-    getConfig(); // validate env is loadable
-    return new LlmGateway([new EchoProvider()]);
+    const cfg = getConfig();
+    const key = cfg.llm.anthropicKey;
+    if (!key) return new LlmGateway([new EchoProvider()]);
+    const fast = new AnthropicProvider({ name: "anthropic-fast", model: cfg.llm.anthropicFastModel, apiKey: key, maxTokens: 4000 });
+    const reasoning = new AnthropicProvider({
+      name: "anthropic-reasoning",
+      model: cfg.llm.anthropicReasoningModel,
+      apiKey: key,
+      maxTokens: 8000,
+      effort: "low",
+      refusalFallback: true,
+    });
+    const fastChain = ["anthropic-fast", "echo"];
+    const reasoningChain = ["anthropic-reasoning", "anthropic-fast", "echo"];
+    return new LlmGateway([fast, reasoning, new EchoProvider()], {
+      profiles: {
+        extraction: { providers: fastChain, maxUsd: 0.05, timeoutMs: 60_000 },
+        classification: { providers: fastChain, maxUsd: 0.05, timeoutMs: 60_000 },
+        summarization: { providers: fastChain, maxUsd: 0.05, timeoutMs: 60_000 },
+        matching_explanation: { providers: reasoningChain, maxUsd: 0.15, timeoutMs: 120_000 },
+        research_synthesis: { providers: reasoningChain, maxUsd: 0.15, timeoutMs: 120_000 },
+        negotiation_drafting: { providers: reasoningChain, maxUsd: 0.15, timeoutMs: 120_000 },
+        risk_reasoning: { providers: reasoningChain, maxUsd: 0.15, timeoutMs: 120_000 },
+      },
+    });
   }
 
   async run(req: LlmRequest): Promise<LlmResponse> {
@@ -137,10 +169,17 @@ export class LlmGateway {
   /** Structured output: run then validate against a zod schema (§18). */
   async runStructured<S extends z.ZodTypeAny>(req: LlmRequest, schema: S): Promise<{ value: z.output<S>; telemetry: CostTelemetry }> {
     const res = await this.run(req);
-    const jsonStart = res.text.indexOf("{");
-    const parsed = schema.parse(jsonStart >= 0 ? JSON.parse(res.text.slice(jsonStart)) : JSON.parse(res.text));
-    return { value: parsed, telemetry: res.telemetry };
+    return { value: schema.parse(extractJson(res.text)), telemetry: res.telemetry };
   }
+}
+
+/** The outermost JSON object/array in a model reply (tolerates prose or ``` fences around it). */
+export function extractJson(text: string): unknown {
+  const starts = [text.indexOf("{"), text.indexOf("[")].filter((i) => i >= 0);
+  if (starts.length === 0) throw new Error("no JSON in model output");
+  const start = Math.min(...starts);
+  const end = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
+  return JSON.parse(text.slice(start, end + 1));
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
