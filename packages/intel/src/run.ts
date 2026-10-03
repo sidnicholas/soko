@@ -14,7 +14,7 @@ import {
   upsertIntelCandidate,
   type IntelRunTotals,
 } from "@opportunity-os/db";
-import type { LlmGateway } from "@opportunity-os/llm-gateway";
+import { StructuredOutputError, type LlmGateway } from "@opportunity-os/llm-gateway";
 import { detectInjection } from "@opportunity-os/risk";
 import { createLogger } from "@opportunity-os/observability";
 import { SpendBudget } from "./budget";
@@ -152,6 +152,8 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         budget.recordLlm(res.telemetry.usd);
         detection = res.value;
       } catch (err) {
+        // A reply that never parsed was still billed: keep the ledger honest.
+        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
         errors.push(`detect "${q.query}": ${String(err).slice(0, 200)}`);
         continue;
       }
@@ -265,6 +267,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         budget.recordLlm(res.telemetry.usd);
         a = res.value;
       } catch (err) {
+        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
         errors.push(`assess ${lead.url}: ${String(err).slice(0, 200)}`);
         continue;
       }

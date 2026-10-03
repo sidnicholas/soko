@@ -41,3 +41,41 @@ describe("LlmGateway.preflight", () => {
     expect(new LlmGateway([]).hasRealProvider()).toBe(false);
   });
 });
+
+describe("structured output robustness (first live run, 2026-10-03)", () => {
+  it("stops at the end of the first JSON object, ignoring braces in trailing text", () => {
+    const reply = '{"leads": [{"title": "a {quoted} brace"}]}\n\nNote: I skipped {two} results.';
+    expect(extractJson(reply)).toEqual({ leads: [{ title: "a {quoted} brace" }] });
+    expect(extractJson('see [0] above, answer: {"x": "\\"}"}')).toEqual({ x: '"}' });
+  });
+
+  it("retries an invalid reply and bills every attempt; a final failure still reports its cost", async () => {
+    const { LlmGateway, StructuredOutputError } = await import("./index");
+    const { z } = await import("zod");
+    const replies = ['{"n": 1} trailing {junk', '{"n": "not a number"}', '{"n": 2}'];
+    let calls = 0;
+    const model = {
+      name: "m",
+      complete: async () => ({ text: replies[calls++]!, inputTokens: 10, outputTokens: 10, usd: 0.01, model: "m-1" }),
+    };
+    const gw = new LlmGateway([model], { profiles: { extraction: { providers: ["m"], maxUsd: 1, timeoutMs: 1000 } } });
+    const schema = z.object({ n: z.number() });
+
+    // 1st reply parses (trailing text ignored): one call, one charge.
+    const ok = await gw.runStructured({ taskClass: "extraction", prompt: "p" }, schema);
+    expect(ok.value).toEqual({ n: 1 });
+    expect(ok.telemetry.usd).toBeCloseTo(0.01);
+
+    // 2nd reply invalid, retry (3rd) valid: both calls billed.
+    const retried = await gw.runStructured({ taskClass: "extraction", prompt: "p" }, schema);
+    expect(retried.value).toEqual({ n: 2 });
+    expect(retried.telemetry.usd).toBeCloseTo(0.02);
+
+    // Never valid: error carries the cost of both attempts.
+    const bad = { name: "m", complete: async () => ({ text: "no json", inputTokens: 1, outputTokens: 1, usd: 0.005, model: "m-1" }) };
+    const gw2 = new LlmGateway([bad], { profiles: { extraction: { providers: ["m"], maxUsd: 1, timeoutMs: 1000 } } });
+    const err = await gw2.runStructured({ taskClass: "extraction", prompt: "p" }, schema).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StructuredOutputError);
+    expect((err as InstanceType<typeof StructuredOutputError>).telemetry.usd).toBeCloseTo(0.01);
+  });
+});

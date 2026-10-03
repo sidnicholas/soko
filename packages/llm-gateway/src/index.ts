@@ -183,20 +183,76 @@ export class LlmGateway {
     return Promise.all(checks.map(async (p) => ({ provider: p.name, result: await p.preflight!() })));
   }
 
-  /** Structured output: run then validate against a zod schema (§18). */
-  async runStructured<S extends z.ZodTypeAny>(req: LlmRequest, schema: S): Promise<{ value: z.output<S>; telemetry: CostTelemetry }> {
-    const res = await this.run(req);
-    return { value: schema.parse(extractJson(res.text)), telemetry: res.telemetry };
+  /**
+   * Structured output: run, then validate against a zod schema (§18). An
+   * unparseable or invalid reply is retried with the error shown to the
+   * model. Telemetry always covers every call made — including failed ones,
+   * via StructuredOutputError — so callers' spend ledgers never undercount.
+   */
+  async runStructured<S extends z.ZodTypeAny>(
+    req: LlmRequest,
+    schema: S,
+    opts: { retries?: number } = {},
+  ): Promise<{ value: z.output<S>; telemetry: CostTelemetry }> {
+    const retries = opts.retries ?? 1;
+    let usd = 0;
+    let last: CostTelemetry | undefined;
+    let lastErr: unknown;
+    let prompt = req.prompt;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const res = await this.run({ ...req, prompt });
+      usd += res.telemetry.usd;
+      last = res.telemetry;
+      try {
+        return { value: schema.parse(extractJson(res.text)), telemetry: { ...res.telemetry, usd, retries: res.telemetry.retries + attempt } };
+      } catch (err) {
+        lastErr = err;
+        prompt = `${req.prompt}\n\nYour previous reply could not be used: ${String(err).slice(0, 400)}\nReply again with exactly one JSON object and no other text.`;
+      }
+    }
+    throw new StructuredOutputError(`invalid structured output after ${retries + 1} attempt(s): ${String(lastErr).slice(0, 300)}`, { ...last!, usd });
   }
 }
 
-/** The outermost JSON object/array in a model reply (tolerates prose or ``` fences around it). */
+/** A model reply that never parsed/validated; carries the cost of every attempt. */
+export class StructuredOutputError extends Error {
+  constructor(
+    message: string,
+    readonly telemetry: CostTelemetry,
+  ) {
+    super(message);
+    this.name = "StructuredOutputError";
+  }
+}
+
+/**
+ * The first complete JSON value in a model reply — an object if the reply has
+ * one, else an array. Scans with string/escape awareness and stops at the
+ * matching close, so prose or a second block after the JSON is ignored.
+ */
 export function extractJson(text: string): unknown {
-  const starts = [text.indexOf("{"), text.indexOf("[")].filter((i) => i >= 0);
-  if (starts.length === 0) throw new Error("no JSON in model output");
-  const start = Math.min(...starts);
-  const end = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
-  return JSON.parse(text.slice(start, end + 1));
+  const brace = text.indexOf("{");
+  const start = brace >= 0 ? brace : text.indexOf("[");
+  if (start < 0) throw new Error("no JSON in model output");
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{" || c === "[") depth++;
+    else if (c === "}" || c === "]") {
+      depth--;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1));
+    }
+  }
+  throw new Error("unterminated JSON in model output");
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

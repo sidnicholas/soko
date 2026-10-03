@@ -29,17 +29,19 @@ const DEMAND_GOODS = [
 const SUPPLY_INTENT = ['"liquidation"', '"warehouse closing"', '"surplus inventory"', '"overstock"', '"must sell"', '"excess inventory"'];
 const SUPPLY_GOODS = ["restaurant equipment", "industrial machinery", "electronics pallets", "office furniture", "retail fixtures", "building materials"];
 
+// One quoted phrase at most: stacking exact phrases under a recency window
+// returned nothing in the first live run (2026-10-03).
 const PROBLEM_QUERIES = [
-  '"GA4" "not tracking" conversions help',
-  '"Google Tag Manager" tags "not firing" help',
-  'WordPress site "hacked" need help small business',
-  '"Divi" "broken after update" help',
-  'WooCommerce "checkout not working" urgent',
-  '"contact form" "not sending" emails WordPress business',
-  '"Facebook pixel" "not tracking" purchases help',
-  '"website down" losing customers need developer',
-  '"leads dropped" website "no idea why"',
-  '"project stalled" need "project manager" small business',
+  'GA4 "not tracking" conversions help',
+  'Google Tag Manager tags not firing help',
+  'WordPress site hacked need help small business',
+  'Divi theme "broken after update"',
+  'WooCommerce "checkout not working"',
+  'WordPress contact form "not sending" emails',
+  'Facebook pixel "not tracking" purchases',
+  '"website down" losing customers',
+  '"leads dropped" website help',
+  'project stalled need project manager small business',
 ];
 
 /** The full pool, in a stable order. */
@@ -51,7 +53,7 @@ export function stageOnePool(): StageOneQuery[] {
   SUPPLY_GOODS.forEach((goods, i) => {
     pool.push({ query: `${SUPPLY_INTENT[i % SUPPLY_INTENT.length]} ${goods}`, orientation: "supply", freshness: "month" });
   });
-  for (const q of PROBLEM_QUERIES) pool.push({ query: q, orientation: "problem", freshness: "week" });
+  for (const q of PROBLEM_QUERIES) pool.push({ query: q, orientation: "problem", freshness: "month" });
   return pool;
 }
 
