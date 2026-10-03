@@ -30,6 +30,11 @@ describe("createTokenVerifier", () => {
     await expect(verify(await hs256(claims()))).resolves.toEqual({ sub: SUB, email: "person@example.com" });
   });
 
+  it("uses only the project origin of SUPABASE_URL", async () => {
+    const verify = createTokenVerifier({ supabaseUrl: `${URL_BASE}/rest/v1/`, jwtSecret: SECRET, jwks: createLocalJWKSet({ keys: [] }) })!;
+    await expect(verify(await hs256(claims()))).resolves.toEqual({ sub: SUB, email: "person@example.com" });
+  });
+
   it("rejects a wrong signature, issuer, audience, or an expired token", async () => {
     const verify = createTokenVerifier({ supabaseUrl: URL_BASE, jwtSecret: SECRET, jwks: createLocalJWKSet({ keys: [] }) })!;
     await expect(verify(await hs256(claims(), { secret: "another-secret-another-secret-123" }))).rejects.toThrow();

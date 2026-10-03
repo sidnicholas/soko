@@ -29,7 +29,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * downgrade verification by naming a different `alg`.
  */
 export function createTokenVerifier(cfg: TokenVerifierConfig): TokenVerifier | undefined {
-  const base = cfg.supabaseUrl?.replace(/\/+$/, "");
+  // Only the project origin matters; a pasted endpoint URL (e.g. `.../rest/v1/`)
+  // would otherwise yield the wrong issuer and JWKS address.
+  const base = cfg.supabaseUrl ? new URL(cfg.supabaseUrl).origin : undefined;
   const issuer = base ? `${base}/auth/v1` : undefined;
   const secret = cfg.jwtSecret ? new TextEncoder().encode(cfg.jwtSecret) : undefined;
   const jwks = cfg.jwks ?? (issuer ? createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`)) : undefined);
