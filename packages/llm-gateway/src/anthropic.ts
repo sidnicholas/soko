@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { LlmProvider } from "./index";
+import type { LlmProvider, PreflightResult } from "./index";
 
 /** First-party API rates, USD per million tokens (input, output, cache read). */
 const PRICES: Record<string, { input: number; output: number; cacheRead: number }> = {
@@ -43,6 +43,23 @@ export class AnthropicProvider implements LlmProvider {
   constructor(private readonly opts: AnthropicProviderOptions) {
     this.name = opts.name;
     this.client = new Anthropic({ apiKey: opts.apiKey, maxRetries: 2 });
+  }
+
+  /**
+   * Free credential + model check (Models API, no tokens billed). Lets a
+   * scheduled job stop before it spends on anything else when the key is
+   * revoked or expired, lacks access, or the configured model id is wrong.
+   */
+  async preflight(): Promise<PreflightResult> {
+    try {
+      await this.client.models.retrieve(this.opts.model);
+      return { ok: true };
+    } catch (err) {
+      if (err instanceof Anthropic.AuthenticationError) return { ok: false, reason: "auth", message: err.message };
+      if (err instanceof Anthropic.PermissionDeniedError) return { ok: false, reason: "permission", message: err.message };
+      if (err instanceof Anthropic.NotFoundError) return { ok: false, reason: "model_not_found", message: `${this.opts.model}: ${err.message}` };
+      return { ok: false, reason: "transient", message: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   async complete(req: { system?: string; prompt: string; timeoutMs: number }) {

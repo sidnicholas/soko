@@ -35,8 +35,14 @@ export interface LlmResponse {
   telemetry: CostTelemetry;
 }
 
+export type PreflightResult =
+  | { ok: true }
+  | { ok: false; reason: "auth" | "permission" | "model_not_found" | "transient"; message: string };
+
 export interface LlmProvider {
   readonly name: string;
+  /** Optional cheap credential/model check, run before a scheduled job spends anything. */
+  preflight?(): Promise<PreflightResult>;
   complete(req: { system?: string; prompt: string; timeoutMs: number }): Promise<{ text: string; inputTokens: number; outputTokens: number; usd: number; model: string }>;
 }
 
@@ -164,6 +170,17 @@ export class LlmGateway {
       }
     }
     throw new Error(`all providers failed for ${req.taskClass}: ${String(lastErr)}`);
+  }
+
+  /** True when at least one real (non-echo) provider is configured. */
+  hasRealProvider(): boolean {
+    return Object.keys(this.providers).some((name) => name !== "echo");
+  }
+
+  /** Runs every provider's preflight check (providers without one are skipped). */
+  async preflight(): Promise<{ provider: string; result: PreflightResult }[]> {
+    const checks = Object.values(this.providers).filter((p) => typeof p.preflight === "function");
+    return Promise.all(checks.map(async (p) => ({ provider: p.name, result: await p.preflight!() })));
   }
 
   /** Structured output: run then validate against a zod schema (§18). */

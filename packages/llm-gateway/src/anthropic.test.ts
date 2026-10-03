@@ -22,3 +22,22 @@ describe("extractJson", () => {
     expect(() => extractJson("no json here")).toThrow("no JSON");
   });
 });
+
+describe("LlmGateway.preflight", () => {
+  it("collects each provider's check and skips providers without one", async () => {
+    const { LlmGateway } = await import("./index");
+    const good = { name: "good", preflight: async () => ({ ok: true as const }), complete: async () => ({ text: "", inputTokens: 0, outputTokens: 0, usd: 0, model: "x" }) };
+    const bad = {
+      name: "bad",
+      preflight: async () => ({ ok: false as const, reason: "auth" as const, message: "invalid x-api-key" }),
+      complete: async () => ({ text: "", inputTokens: 0, outputTokens: 0, usd: 0, model: "x" }),
+    };
+    const gateway = new LlmGateway([good, bad]);
+    expect(gateway.hasRealProvider()).toBe(true);
+    expect(await gateway.preflight()).toEqual([
+      { provider: "good", result: { ok: true } },
+      { provider: "bad", result: { ok: false, reason: "auth", message: "invalid x-api-key" } },
+    ]);
+    expect(new LlmGateway([]).hasRealProvider()).toBe(false);
+  });
+});
