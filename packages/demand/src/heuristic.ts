@@ -40,6 +40,18 @@ const CATEGORY_KEYWORDS: Record<string, string> = {
   shoes: "apparel",
   jacket: "apparel",
   dress: "apparel",
+  guitar: "musical_instruments",
+  bass: "musical_instruments",
+  amp: "musical_instruments",
+  amplifier: "musical_instruments",
+  drums: "musical_instruments",
+  piano: "musical_instruments",
+  synth: "musical_instruments",
+  synthesizer: "musical_instruments",
+  ukulele: "musical_instruments",
+  violin: "musical_instruments",
+  stratocaster: "musical_instruments",
+  telecaster: "musical_instruments",
 };
 
 const MONEY_RE = /\$\s?([\d,]+(?:\.\d{1,2})?)/;

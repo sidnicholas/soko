@@ -59,7 +59,7 @@ Monorepo: pnpm workspaces + Turborepo, TypeScript strict, ESM. Node via `.nvmrc`
 | `worker-lifecycle` | Periodic refresh sweep: discovery + synthesis + entity resolution + graph edges + graph deals. | Built |
 | `worker-temporal` | Durable workflows (mission discovery, opportunity execution / approval-wait, settlement milestone timer). | Built (verified against time-skipping test server); all three now started from `apps/api` as opt-in durable paths |
 | `worker-notifications` | Approval delivery loop (Telegram/email/log), marks notified. | Built |
-| `worker-agents` | Agent runtime host. | Stub / minimal |
+| `worker-agents` | Agent runtime host. | Stub / minimal (not deployed) |
 
 ## 3. Data model (22 tables)
 
@@ -124,6 +124,13 @@ live demand descriptions instead of a static seed term — `packages/
 discovery/src/pipeline.ts` already calls connectors with a real `input.
 query` derived from demand, so that's the pattern to extend to the periodic
 worker sweep, not a new mechanism.
+
+**Second real connector + production ingestion, 2026-10-03**: `makeReverbConnector` (`packages/connectors-sdk/src/reverb.ts`) — Reverb public listings API (music gear), `official_api`, keyless (optional `REVERB_API_TOKEN` for rate limits), opt-in via `REVERB_ENABLED=true`. Live-verified: 25/25 listings for "fender stratocaster" pass the risk gate. Three fixes this needed, all live in production now:
+- **Category mapping** (`canonicalCategory`, `connectors-sdk/src/category.ts`): the risk gate and matcher only know canonical categories (`electronics`, `furniture`, …), but marketplaces send their own labels ("Monitors", "Electric Guitars / Solid Body"), so the gate dropped **every** real listing — eBay included; it never surfaced because eBay was never configured. eBay now maps labels by keyword; Reverb maps everything to new canonical `musical_instruments` (allowed in `risk.CATEGORY_POLICY`; demand parser keywords added: guitar, amp, drums, …). Unmapped labels pass through unchanged and are still dropped (fail closed).
+- **Static seed query → live demand**: `worker-connectors` now searches query-driven connectors (eBay, Reverb) once per active mission, using `searchQueryFromDescription` (`apps/worker-connectors/src/queries.ts`: drops filler/prices/timing, ≤5 terms, ≤10 queries/cycle, sequential), falling back to `CONNECTOR_SEED_QUERY` (→ `EBAY_SEED_QUERY`). A failing source or DB blip is logged, not fatal to the worker.
+- **No fake data in production**: fixture connectors (static fake listings) now register only when `connectors.fixtures` is on — `FIXTURE_CONNECTORS`, defaulting to on outside production and off when `NODE_ENV=production` — in both `worker-connectors` and the discovery pipeline (`packages/discovery` now depends on `config`).
+
+**Workers on Railway, 2026-10-03** (cost-minimised): `worker-lifecycle` and `worker-connectors` (`REVERB_ENABLED=true`) run as Railway **cron services** every 15 minutes (`*/15 * * * *`) with `--once` — one cycle, close the DB pool, exit non-zero on failure — so they bill only while running (~$0.10/month each vs ~$2/month always-on). Built from `main` (Railpack, `buildCommand: true`, `pnpm --filter @opportunity-os/<worker> start -- --once`), same region as `api`; `DATABASE_URL`/`RAILPACK_NODE_VERSION` reference `api`'s. Deliberately **not** deployed yet: `worker-outbox` (log publisher only — no event consumers exist; the timeline reads the outbox table directly, so nothing depends on the relay), `worker-notifications` (no Telegram/SMTP configured in prod; would only log), `worker-temporal` (needs a Temporal server; the durable paths are opt-in and best-effort), `worker-agents` (stub). Add notifications back when a channel is configured (a 5-minute cron is the cheap option). eBay stays off until `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` are set on `worker-connectors`.
 
 ### Phase 2 — Human-Controlled Execution ✅
 - LLM negotiation drafting with deterministic template fallback (always non-binding; never auto-sends). Feeds market-graph comparables into the draft.

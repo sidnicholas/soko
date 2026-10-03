@@ -52,3 +52,14 @@ describe("ingestConnectors risk gates", () => {
     expect(kept[0]!.content.title).toBe("Refurbished monitor");
   });
 });
+
+describe("canonical categories pass the risk gate", () => {
+  it("keeps mapped marketplace categories and drops unmapped ones", async () => {
+    const { canonicalCategory } = await import("@opportunity-os/connectors-sdk");
+    const { isTransactableInV1 } = await import("@opportunity-os/risk");
+    for (const label of ["Monitors", "Electric Guitars / Solid Body", "Office Chairs"]) {
+      expect(isTransactableInV1(canonicalCategory(label))).toBe(true);
+    }
+    expect(isTransactableInV1(canonicalCategory("Rare Coins"))).toBe(false);
+  });
+});

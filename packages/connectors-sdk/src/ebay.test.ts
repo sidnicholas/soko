@@ -51,7 +51,7 @@ describe("makeEbayConnector", () => {
     expect(obs[0]!.automation).toBe("official_api");
     expect(obs[0]!.content["title"]).toBe("27in 4K Monitor");
     expect(obs[0]!.content["price"]).toBe(18900);
-    expect(obs[0]!.content["category"]).toBe("Monitors");
+    expect(obs[0]!.content["category"]).toBe("electronics");
 
     const tokenCall = calls.find((c) => c.url.includes("/oauth2/token"));
     expect(tokenCall).toBeDefined();

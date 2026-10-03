@@ -5,6 +5,7 @@ import {
   normalizeObservation,
   type NormalizedSupply,
 } from "@opportunity-os/connectors-sdk";
+import { getConfig } from "@opportunity-os/config";
 import { isTransactableInV1 } from "@opportunity-os/risk";
 import { matchesExcludedTerm } from "@opportunity-os/contracts";
 import { upsertMissionDemand, upsertSupply } from "@opportunity-os/db";
@@ -13,9 +14,19 @@ import { scoreAndPersistOpportunity } from "./score";
 
 const log = createLogger("discovery:pipeline");
 
-const registry = new ConnectorRegistry();
-registry.register(FixtureSupplyConnector);
-registry.register(FixtureDemandConnector);
+let registry: ConnectorRegistry | undefined;
+
+/** Fixture connectors only where configured (off in production by default) — see FIXTURE_CONNECTORS. */
+function connectorRegistry(): ConnectorRegistry {
+  if (!registry) {
+    registry = new ConnectorRegistry();
+    if (getConfig().connectors.fixtures) {
+      registry.register(FixtureSupplyConnector);
+      registry.register(FixtureDemandConnector);
+    }
+  }
+  return registry;
+}
 
 /** The mission's demand_spec projected into matchable/persistable fields (§6.4, §7). */
 export interface DiscoveryDemand {
@@ -62,7 +73,7 @@ export async function runDiscoveryCycle(input: DiscoveryInput): Promise<Discover
   });
 
   const observations = await Promise.all(
-    registry
+    connectorRegistry()
       .withCapability("supply")
       .map((c) => c.search({ query: input.query, category: input.category, max: 25, filters: {} })),
   );

@@ -14,6 +14,7 @@ const CATEGORY_POLICY: Record<string, CategoryPolicy> = {
   home_goods: "allowed",
   office_supplies: "allowed",
   tools: "allowed",
+  musical_instruments: "allowed",
   vehicles: "review_required",
   event_tickets: "review_required",
   collectibles: "review_required",

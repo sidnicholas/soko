@@ -96,6 +96,18 @@ const EnvSchema = z.object({
   // a coarse stand-in seed term until ingestion is driven by live demand
   // descriptions instead (see project memory backlog).
   EBAY_SEED_QUERY: z.string().default("electronics"),
+  // Search term for query-driven connectors (eBay, Reverb) when no active
+  // mission supplies one; falls back to EBAY_SEED_QUERY.
+  CONNECTOR_SEED_QUERY: z.string().optional(),
+
+  // Reverb public API connector (§17/ADR-014, official_api). Listing search
+  // is public, so it runs keyless once enabled; the token only raises rate
+  // limits. Opt-in so local dev and tests never call it by accident.
+  REVERB_ENABLED: z.enum(["true", "false"]).default("false"),
+  // Built-in fixture connectors (static fake listings). Default: on outside
+  // production, off in production so fake supply never reaches real data.
+  FIXTURE_CONNECTORS: z.enum(["true", "false"]).optional(),
+  REVERB_API_TOKEN: z.string().optional(),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
@@ -186,6 +198,10 @@ export interface AppConfig {
     ebayClientSecret?: string;
     ebayMarketplaceId: string;
     ebaySeedQuery: string;
+    seedQuery: string;
+    reverbEnabled: boolean;
+    reverbApiToken?: string;
+    fixtures: boolean;
   };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
   policy: {
@@ -265,6 +281,10 @@ function toConfig(env: Env): AppConfig {
       ebayClientSecret: env.EBAY_CLIENT_SECRET,
       ebayMarketplaceId: env.EBAY_MARKETPLACE_ID,
       ebaySeedQuery: env.EBAY_SEED_QUERY,
+      seedQuery: env.CONNECTOR_SEED_QUERY ?? env.EBAY_SEED_QUERY,
+      reverbEnabled: env.REVERB_ENABLED === "true",
+      reverbApiToken: env.REVERB_API_TOKEN,
+      fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
     },
     security: {
       approvalTokenSecret: env.APPROVAL_TOKEN_SECRET,

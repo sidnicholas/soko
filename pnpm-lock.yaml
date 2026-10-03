@@ -482,6 +482,9 @@ importers:
 
   packages/discovery:
     dependencies:
+      '@opportunity-os/config':
+        specifier: workspace:*
+        version: link:../config
       '@opportunity-os/connectors-sdk':
         specifier: workspace:*
         version: link:../connectors-sdk

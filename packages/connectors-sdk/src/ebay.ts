@@ -1,5 +1,6 @@
 import type { ConnectorPolicy } from "@opportunity-os/contracts";
 import { makeHttpApiConnector } from "./adapters";
+import { canonicalCategory } from "./category";
 import type { SourceConnector } from "./index";
 
 /**
@@ -101,7 +102,7 @@ export function makeEbayConnector(config: EbayConfig): SourceConnector {
           content: {
             title: item.title ?? "untitled",
             description: item.shortDescription ?? item.title ?? "",
-            category: item.categories?.[0]?.categoryName ?? null,
+            category: canonicalCategory(item.categories?.[0]?.categoryName),
             price: toMinorUnits(item.price?.value),
             currency: item.price?.currency ?? "USD",
           },

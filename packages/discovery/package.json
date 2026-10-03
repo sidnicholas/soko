@@ -15,11 +15,12 @@
     "lint": "echo lint-skip"
   },
   "dependencies": {
-    "@opportunity-os/contracts": "workspace:*",
+    "@opportunity-os/config": "workspace:*",
     "@opportunity-os/connectors-sdk": "workspace:*",
-    "@opportunity-os/scoring": "workspace:*",
-    "@opportunity-os/risk": "workspace:*",
+    "@opportunity-os/contracts": "workspace:*",
     "@opportunity-os/db": "workspace:*",
-    "@opportunity-os/observability": "workspace:*"
+    "@opportunity-os/observability": "workspace:*",
+    "@opportunity-os/risk": "workspace:*",
+    "@opportunity-os/scoring": "workspace:*"
   }
 }

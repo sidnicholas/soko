@@ -12,6 +12,8 @@ export * from "./fixtures";
 export * from "./normalize";
 export * from "./adapters";
 export * from "./ebay";
+export * from "./reverb";
+export * from "./category";
 
 /** §17 — every source adapter implements this interface. */
 export interface SourceConnector {
