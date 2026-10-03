@@ -27,17 +27,21 @@ interface Venue {
 
 // Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
 // documented for the search provider and could silently return nothing.
+// Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
+// documented for the search provider and could silently return nothing.
+// Exact phrases are avoided on reddit/liquidation: in the 18:00 UTC run on
+// 2026-10-03 every quoted query there returned zero results.
 const VENUES: Venue[] = [
   // Demand: people and organizations asking for a supplier or item.
-  { site: "reddit.com", orientation: "demand", topics: ['small business "looking for a supplier"', '"need a vendor" for my business', '"looking for a manufacturer" product', 'restaurant "looking for" used equipment', '"[hiring]" sourcing research'] },
+  { site: "reddit.com", orientation: "demand", topics: ["small business looking for supplier", "need a vendor for my business", "looking for manufacturer for my product", "restaurant looking for used equipment", "hiring sourcing research help"] },
   { site: "sam.gov", orientation: "demand", topics: ['"sources sought" equipment', '"request for quote" supplies', '"sources sought" services'] },
   // Supply: surplus, liquidation and distressed inventory venues.
   { site: "govdeals.com", orientation: "supply", topics: ["forklift", "restaurant equipment", "generator"] },
-  { site: "liquidation.com", orientation: "supply", topics: ["pallets electronics", "overstock"] },
-  { site: "reddit.com", orientation: "supply", topics: ['"closing my business" selling inventory', '"liquidating" equipment business'] },
+  { site: "liquidation.com", orientation: "supply", topics: ["electronics pallets", "overstock lots"] },
+  { site: "reddit.com", orientation: "supply", topics: ["closing my business selling inventory", "liquidating business equipment"] },
   // Problems: owners describing costly website / tracking / ops failures.
-  { site: "reddit.com", orientation: "problem", topics: ["GA4 conversions not tracking", "GA4 purchases missing shopify", "Google Tag Manager tags not firing", 'WordPress site hacked "my business"', 'WordPress "contact form" not sending', "WooCommerce checkout not working", "Shopify pixel not tracking purchases", "Google Ads conversions not recording"] },
-  { site: "wordpress.org", orientation: "problem", topics: ["site down urgent help", "contact form not sending emails", "broken after update"] },
+  // wordpress.org returned plugin pages, not support threads — WordPress problems go via reddit.
+  { site: "reddit.com", orientation: "problem", topics: ["GA4 conversions not tracking", "GA4 purchases missing shopify", "Google Tag Manager tags not firing", "WordPress site hacked my business", "WordPress contact form not sending emails", "WooCommerce checkout not working", "Shopify pixel not tracking purchases", "Google Ads conversions not recording", "website down losing customers help", "Divi site broken after update"] },
   { site: "community.shopify.com", orientation: "problem", topics: ["checkout broken", "tracking not working"] },
 ];
 

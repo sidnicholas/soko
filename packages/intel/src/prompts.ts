@@ -26,6 +26,28 @@ const looseNumber = z.preprocess(toNumber, z.number());
 const looseNullableNumber = z.preprocess(toNumber, z.number().nullable());
 const RangeSchema = z.tuple([looseNumber, looseNumber]);
 
+/**
+ * A [low, high] range that also accepts a single number (→ [n, n]) and maps
+ * null/missing to `whenUnknown`. The model writes null when it judges there
+ * is no figure — e.g. no way for the user to be paid — and the first live
+ * assessments (2026-10-03) were all lost to a strict tuple schema.
+ */
+function rangeOr(whenUnknown: [number, number]) {
+  return z.preprocess((v) => {
+    if (v === null || v === undefined) return whenUnknown;
+    const n = toNumber(v);
+    if (typeof n === "number") return [n, n];
+    return v;
+  }, RangeSchema);
+}
+
+/** A range that may legitimately be unknown (kept as null); a single number becomes [n, n]. */
+const optionalRange = z.preprocess((v) => {
+  if (v === null || v === undefined) return null;
+  const n = toNumber(v);
+  return typeof n === "number" ? [n, n] : v;
+}, RangeSchema.nullable());
+
 // ---------------------------------------------------------------- detection
 
 /** Why a result was not a lead — recorded per query so the yield table shows why a query fails. */
@@ -114,11 +136,14 @@ export const AssessmentSchema = z.object({
   match_rationale: z.string().min(1),
   evidence: z.enum(["verified", "strong", "plausible", "speculative", "none"]),
   economics: z.object({
-    gross_transaction_usd: RangeSchema.nullable(),
-    costs_usd: RangeSchema.nullable(),
-    user_compensation_usd: RangeSchema,
-    capital_required_usd: z.preprocess(toNumber, z.number().min(0)),
-    time_hours: RangeSchema,
+    gross_transaction_usd: optionalRange,
+    costs_usd: optionalRange,
+    // Unknown compensation = nothing accessible: EV 0, never ACT NOW.
+    user_compensation_usd: rangeOr([0, 0]),
+    // Unknown capital is treated as more than Rapid Opportunity Mode allows.
+    capital_required_usd: z.preprocess((v) => (v === null || v === undefined ? 1_000 : toNumber(v)), z.number().min(0)),
+    // Unknown effort earns no speed points.
+    time_hours: rangeOr([40, 120]),
     notes: z.string(),
   }),
   monetization: z.object({
@@ -127,7 +152,7 @@ export const AssessmentSchema = z.object({
     timing: nullableString,
     value_added: nullableString,
   }),
-  probability: RangeSchema,
+  probability: rangeOr([0, 0]),
   regulatory: z.array(z.object({ flag: z.string(), reason: z.string() })),
   fraud: z.array(z.object({ flag: z.string(), reason: z.string() })),
   contact: ContactSchema,
@@ -147,7 +172,7 @@ Decide whether there is a realistic match and, above all, apply the "Why do we g
 - Discovering two parties does not entitle anyone to a fee. If no payer and mechanism are realistic, set payer/mechanism to null.
 - For a problem lead, the user's matching service is the supply and the business is the payer of a service fee.
 
-Economics: give ranges, never false precision. user_compensation_usd is what the user would plausibly earn, not the transaction value. Probability is the chance the user actually gets paid, as a range.
+Economics: give ranges as [low, high], never false precision. If there is no realistic compensation, use [0, 0] rather than null. user_compensation_usd is what the user would plausibly earn, not the transaction value. Probability is the chance the user actually gets paid, as a range.
 Flag regulatory needs (broker/freight/real-estate/securities/insurance/employment-agency licensing, medical, export) and fraud signals (implausible prices, odd payment demands, pressure, unverifiable identity).
 contact: the decision-maker path; label it source_fact only if it appears in the source text.
 invalidators: what would make this assessment wrong.
