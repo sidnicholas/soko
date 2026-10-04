@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import type { z as z4 } from "zod/v4";
 import type { LlmProvider, PreflightResult } from "./index";
 
 /** First-party API rates, USD per million tokens (input, output, cache read). */
@@ -45,6 +47,25 @@ export class AnthropicProvider implements LlmProvider {
     this.client = new Anthropic({ apiKey: opts.apiKey, maxRetries: 2 });
   }
 
+  private send(req: { system?: string; prompt: string; timeoutMs: number; outputSchema?: z4.ZodType }, structured: boolean) {
+    // Structured outputs: the API constrains the reply to the schema's shape.
+    const outputConfig = {
+      ...(this.opts.effort ? { effort: this.opts.effort } : {}),
+      ...(structured && req.outputSchema ? { format: zodOutputFormat(req.outputSchema) } : {}),
+    };
+    return this.client.beta.messages.create(
+      {
+        model: this.opts.model,
+        max_tokens: this.opts.maxTokens,
+        ...(req.system ? { system: req.system } : {}),
+        messages: [{ role: "user", content: req.prompt }],
+        ...(Object.keys(outputConfig).length > 0 ? { output_config: outputConfig } : {}),
+        ...(this.opts.refusalFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
+      },
+      { timeout: req.timeoutMs },
+    );
+  }
+
   /**
    * Free credential + model check (Models API, no tokens billed). Lets a
    * scheduled job stop before it spends on anything else when the key is
@@ -62,18 +83,16 @@ export class AnthropicProvider implements LlmProvider {
     }
   }
 
-  async complete(req: { system?: string; prompt: string; timeoutMs: number }) {
-    const response = await this.client.beta.messages.create(
-      {
-        model: this.opts.model,
-        max_tokens: this.opts.maxTokens,
-        ...(req.system ? { system: req.system } : {}),
-        messages: [{ role: "user", content: req.prompt }],
-        ...(this.opts.effort ? { output_config: { effort: this.opts.effort } } : {}),
-        ...(this.opts.refusalFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-      },
-      { timeout: req.timeoutMs },
-    );
+  async complete(req: { system?: string; prompt: string; timeoutMs: number; outputSchema?: z4.ZodType }) {
+    let response;
+    try {
+      response = await this.send(req, true);
+    } catch (err) {
+      // If the API rejects the structured-output schema (an unbilled 400),
+      // send once more without it; the caller's lenient parser still validates.
+      if (!(req.outputSchema && err instanceof Anthropic.BadRequestError)) throw err;
+      response = await this.send(req, false);
+    }
     if (response.stop_reason === "refusal") throw new Error(`${this.opts.model} declined the request`);
     const text = response.content
       .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")

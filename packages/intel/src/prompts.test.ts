@@ -36,4 +36,50 @@ describe("DetectionSchema", () => {
     expect(single.economics.gross_transaction_usd).toEqual([50000, 50000]);
     expect(single.economics.time_hours).toEqual([10, 10]);
   });
+
+  it("survives every off-spec field seen in live runs (2026-10-04 00:00 UTC)", async () => {
+    const { AssessmentSchema } = await import("./prompts");
+    // Detection: free-text contact channel, numeric fact value, invalid kind dropped.
+    const det = DetectionSchema.parse({
+      skipped: [],
+      leads: [
+        {
+          index: 0, kind: "problem", title: "t", summary: "s", urgency: "urgent", credibility: 1.4,
+          contact: { channel: "Shopify community post; no direct contact provided", value: null, label: "source_fact" },
+          facts: [{ field: "orders_lost", value: 12, label: "source_fact" }], opposite_queries: [],
+        },
+        { index: 1, kind: "opportunity", title: "x", summary: "y", urgency: "low", credibility: 0.5, contact: null, facts: [], opposite_queries: [] },
+      ],
+    });
+    expect(det.leads).toHaveLength(1);
+    expect(det.leads[0]!.contact?.channel).toBe("unknown");
+    expect(det.leads[0]!.facts[0]!.value).toBe("12");
+    expect(det.leads[0]!.urgency).toBe("medium");
+    expect(det.leads[0]!.credibility).toBe(1);
+
+    // Assessment: capital as a range, regulatory flags as plain strings, off-list mechanism.
+    const a = AssessmentSchema.parse({
+      counterparty_found: false, counter_index: null, service_key: null, title: "t", match_rationale: "r", evidence: "weak",
+      economics: { gross_transaction_usd: [1, 2, 3], costs_usd: null, user_compensation_usd: [0, 0], capital_required_usd: [5000, 20000], time_hours: [10, 20], notes: "" },
+      monetization: { payer: "Agency", mechanism: "finder_fee", timing: null, value_added: "intro" },
+      probability: [0.01, 0.05],
+      regulatory: ["Federal contractor registration (SAM.gov) required"],
+      fraud: [], contact: null, factors: [], invalidators: [], outreach: { primary: null, secondary: null },
+    });
+    expect(a.economics.capital_required_usd).toBe(20000);
+    expect(a.economics.gross_transaction_usd).toEqual([1, 3]);
+    expect(a.regulatory).toEqual([{ flag: "Federal contractor registration (SAM.gov) required", reason: "Federal contractor registration (SAM.gov) required" }]);
+    expect(a.monetization.mechanism).toBeNull();
+    expect(a.evidence).toBe("speculative");
+  });
+
+  it("wire schemas convert to JSON Schema for structured outputs", async () => {
+    const { z } = await import("zod/v4");
+    const { DetectionWire, AssessmentWire } = await import("./prompts");
+    for (const wire of [DetectionWire, AssessmentWire]) {
+      const js = z.toJSONSchema(wire) as { type: string; properties: Record<string, unknown> };
+      expect(js.type).toBe("object");
+      expect(Object.keys(js.properties).length).toBeGreaterThanOrEqual(2);
+    }
+  });
 });

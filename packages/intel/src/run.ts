@@ -21,8 +21,10 @@ import { SpendBudget } from "./budget";
 import {
   ASSESSMENT_SYSTEM,
   AssessmentSchema,
+  AssessmentWire,
   DETECTION_SYSTEM,
   DetectionSchema,
+  DetectionWire,
   assessmentPrompt,
   detectionPrompt,
   type Assessment,
@@ -149,7 +151,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       let detection: Detection;
       try {
         const { prompt, untrusted } = detectionPrompt(q.query, fresh);
-        const res = await opts.llm.runStructured({ taskClass: "extraction", system: DETECTION_SYSTEM, prompt, untrustedContext: untrusted }, DetectionSchema);
+        const res = await opts.llm.runStructured({ taskClass: "extraction", system: DETECTION_SYSTEM, prompt, untrustedContext: untrusted }, DetectionSchema, { outputSchema: DetectionWire });
         budget.recordLlm(res.telemetry.usd);
         detection = res.value;
       } catch (err) {
@@ -273,7 +275,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
           { kind: lead.kind, title: lead.title, summary: lead.summary, url: lead.url, publishedAt: lead.publishedAt, facts: lead.facts, contact: lead.contact },
           counter,
         );
-        const res = await opts.llm.runStructured({ taskClass: "research_synthesis", system: ASSESSMENT_SYSTEM, prompt, untrustedContext: untrusted }, AssessmentSchema);
+        const res = await opts.llm.runStructured({ taskClass: "research_synthesis", system: ASSESSMENT_SYSTEM, prompt, untrustedContext: untrusted }, AssessmentSchema, { outputSchema: AssessmentWire });
         budget.recordLlm(res.telemetry.usd);
         a = res.value;
       } catch (err) {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { z as z4 } from "zod/v4";
 import type { CostTelemetry } from "@opportunity-os/contracts";
 import { getConfig } from "@opportunity-os/config";
 
@@ -22,6 +23,12 @@ export type LlmTaskClass = (typeof LLM_TASK_CLASSES)[number];
 export interface LlmRequest {
   taskClass: LlmTaskClass;
   prompt: string;
+  /**
+   * Plain-typed schema the provider should constrain its reply to (zod v4,
+   * as the Anthropic SDK's structured-output helper requires). Providers
+   * without structured outputs ignore it; runStructured still validates.
+   */
+  outputSchema?: z4.ZodType;
   /** Retrieved/connector content is untrusted; the gateway fences it (§13.3). */
   untrustedContext?: string;
   system?: string;
@@ -43,7 +50,7 @@ export interface LlmProvider {
   readonly name: string;
   /** Optional cheap credential/model check, run before a scheduled job spends anything. */
   preflight?(): Promise<PreflightResult>;
-  complete(req: { system?: string; prompt: string; timeoutMs: number }): Promise<{ text: string; inputTokens: number; outputTokens: number; usd: number; model: string }>;
+  complete(req: { system?: string; prompt: string; timeoutMs: number; outputSchema?: z4.ZodType }): Promise<{ text: string; inputTokens: number; outputTokens: number; usd: number; model: string }>;
 }
 
 /** Task profile: preferred provider chain + a default budget ceiling. */
@@ -149,7 +156,7 @@ export class LlmGateway {
       if (!provider) continue;
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-          const out = await withTimeout(provider.complete({ system: req.system, prompt, timeoutMs }), timeoutMs);
+          const out = await withTimeout(provider.complete({ system: req.system, prompt, timeoutMs, outputSchema: req.outputSchema }), timeoutMs);
           if (out.usd > budgetUsd) throw new Error(`llm task exceeded budget: ${out.usd} > ${budgetUsd}`);
           return {
             text: out.text,
@@ -192,7 +199,7 @@ export class LlmGateway {
   async runStructured<S extends z.ZodTypeAny>(
     req: LlmRequest,
     schema: S,
-    opts: { retries?: number } = {},
+    opts: { retries?: number; outputSchema?: z4.ZodType } = {},
   ): Promise<{ value: z.output<S>; telemetry: CostTelemetry }> {
     const retries = opts.retries ?? 1;
     let usd = 0;
@@ -200,7 +207,7 @@ export class LlmGateway {
     let lastErr: unknown;
     let prompt = req.prompt;
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const res = await this.run({ ...req, prompt });
+      const res = await this.run({ ...req, prompt, outputSchema: opts.outputSchema ?? req.outputSchema });
       usd += res.telemetry.usd;
       last = res.telemetry;
       try {
