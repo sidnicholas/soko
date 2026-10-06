@@ -4,6 +4,7 @@ import {
   expectedValue,
   fraudFlags,
   freshnessScore,
+  isGovernmentProcurement,
   monetizationResolved,
   regulatoryFlags,
   scoreCandidate,
@@ -98,6 +99,20 @@ describe("score and bucket", () => {
     expect(bucketFor({ ...strong, compensationHighUsd: 1000, fraud: twoFraud }).rejectReason).toBe("fraud_risk");
     expect(bucketFor({ ...strong, compensationHighUsd: 0 }).rejectReason).toBe("no_value_path");
   });
+
+  it("files rejections under the most specific true reason (live mislabels, 2026-10-04..06)", () => {
+    // Model rated evidence "none" because nobody would pay: that's no_value_path, not not_credible.
+    expect(bucketFor({ ...strong, compensationHighUsd: 0, resolved: false, verification: "rejected" }).rejectReason).toBe("no_value_path");
+    // Genuinely not credible stays not_credible when a payer and fee exist.
+    expect(bucketFor({ ...strong, compensationHighUsd: 500, verification: "rejected" }).rejectReason).toBe("not_credible");
+    // A competitor's own offer is its own reason, whatever else is true.
+    expect(bucketFor({ ...strong, compensationHighUsd: 1000, competitorOffer: true })).toEqual({ bucket: "rejected", rejectReason: "competitor_offer" });
+  });
+
+  it("recognizes government procurement hosts", () => {
+    for (const h of ["sam.gov", "www.sam.gov", "gsa.gov", "navy.mil"]) expect(isGovernmentProcurement(h)).toBe(true);
+    for (const h of ["reddit.com", "samgov.com", "community.shopify.com"]) expect(isGovernmentProcurement(h)).toBe(false);
+  });
 });
 
 describe("stage-one queries", () => {
@@ -105,7 +120,9 @@ describe("stage-one queries", () => {
     const run0 = stageOneQueries(0, 6);
     const run1 = stageOneQueries(1, 6);
     expect(run0).toHaveLength(6);
-    expect(new Set(run0.map((q) => q.orientation))).toEqual(new Set(["demand", "supply", "problem"]));
+    // Every lane that has queries is sampled each run (supply is empty by design since 2026-10-06: the user's services are the supply).
+    const nonEmpty = new Set(stageOnePool().map((q) => q.orientation));
+    expect(new Set(run0.map((q) => q.orientation))).toEqual(nonEmpty);
     expect(run0.map((q) => q.query)).not.toEqual(run1.map((q) => q.query));
     expect(new Set(run0.map((q) => q.query)).size).toBe(6);
   });

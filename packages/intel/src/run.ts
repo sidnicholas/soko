@@ -37,6 +37,7 @@ import {
   expectedValue,
   fraudFlags,
   freshnessScore,
+  isGovernmentProcurement,
   mergeFlags,
   monetizationResolved,
   regulatoryFlags,
@@ -251,7 +252,16 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
     notes.assessmentPool = { thisRun: detected.length, carriedOver: carried.length, eligible: ranked.length };
     let candidates = 0;
     let carriedAssessed = 0;
-    for (const lead of ranked.slice(0, opts.maxAssessments)) {
+    // Government procurement never needs a paid assessment to reject — screen it
+    // out of the pool first so it can't take the limited assessment slots.
+    const screened = ranked.filter((l) => isGovernmentProcurement(l.hostname));
+    for (const lead of screened) {
+      await persistScreenedCandidate(runId, lead, "federal_procurement", "Government procurement notice: responding needs contractor registration (SAM), clearances or the ability to supply directly — not reachable with near-zero capital. Screened without a paid assessment.");
+      await setIntelLeadStatus(lead.leadId, "assessed");
+    }
+    (notes.assessmentPool as Record<string, number>).screenedFederal = screened.length;
+    const assessable = ranked.filter((l) => !isGovernmentProcurement(l.hostname));
+    for (const lead of assessable.slice(0, opts.maxAssessments)) {
       const counter: WebSearchResult[] = [];
       if (lead.kind !== "problem") {
         for (const oq of lead.oppositeQueries.slice(0, 2)) {
@@ -352,6 +362,7 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
   const { bucket, rejectReason } = bucketFor({
     ...scoreInput,
     compensationHighUsd: Math.max(...a.economics.user_compensation_usd),
+    competitorOffer: a.lead_is_competitor_offer,
   });
   const matchKind = lead.kind === "problem" ? "problem_to_service" : lead.kind === "demand" ? "demand_to_supply" : "supply_to_demand";
 
@@ -381,4 +392,33 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
     rejectReason: rejectReason ?? (counterpartyFound ? null : "no_counterparty_found"),
   });
   return bucket;
+}
+
+/** Stores a lead rejected by a deterministic screen, without a paid model call. */
+async function persistScreenedCandidate(runId: string, lead: AssessableLead, reason: "federal_procurement", rationale: string) {
+  await upsertIntelCandidate({
+    runId,
+    leadId: lead.leadId,
+    counterUrl: null,
+    counterSummary: null,
+    serviceKey: null,
+    matchKind: lead.kind === "problem" ? "problem_to_service" : lead.kind === "demand" ? "demand_to_supply" : "supply_to_demand",
+    title: lead.title,
+    matchRationale: rationale,
+    verificationStatus: "speculative",
+    freshness: freshnessScore(lead.publishedAt, lead.urgency),
+    economics: { gross_transaction_usd: null, costs_usd: null, user_compensation_usd: [0, 0], capital_required_usd: 0, time_hours: [0, 0], notes: "Not assessed (screened).", label: "unknown" },
+    monetization: { payer: null, mechanism: null, timing: null, valueAdded: null, resolved: false, label: "unknown", note: "Screened before assessment" },
+    regulatoryFlags: [{ flag: "government_contracting", reason: "Federal contractor registration / clearances required" }],
+    fraudFlags: [],
+    contact: lead.contact ?? null,
+    evLowUsd: 0,
+    evHighUsd: 0,
+    confidence: "low",
+    score: 0,
+    explanation: { factors: [], modelFactors: [], invalidators: [], probability: [0, 0], screened: reason },
+    outreach: { primary: null, secondary: null, requiresApproval: true },
+    bucket: "rejected",
+    rejectReason: reason,
+  });
 }

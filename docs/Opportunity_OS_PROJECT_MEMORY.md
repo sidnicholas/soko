@@ -1,8 +1,8 @@
 # Opportunity OS — Project Memory (Implementation State)
 
-**Status:** V1 in active build — Phases 0–3 complete (Phase 3's fiat rail is real, live-verified Stripe test-mode, and the stablecoin rail is real, live-verified Circle Developer-Controlled Wallets on Base Sepolia; the on-chain/`chain` family remains a local reference), Phases 4–5 partial.
-**Last updated:** 2026-09-17
-**HEAD:** `f7c8b50` (CircleNftRail wired into AssetTransferService + API, committed) + this session: verified the reference-tier `ProgrammableAssetTransferAdapter` rail carries `defi_position`/`data_feed_subscription`/`synthetic_position` end to end through the same `AssetTransferService`/`asset_transfer_plans` path, no kind-specific code anywhere in it (`tests/e2e/asset-transfer.test.ts`, migration 0017 applied)
+**Status:** V1 in active build — Phases 0–4 complete; Supabase JWT auth live (2026-10-02); the AIOOS opportunity-intelligence slice (extended PRD) is live in production on a $1/day cap and producing its first actionable candidates; Phase 5 not started. Phase 3 rails: real Stripe test-mode + Circle/Base Sepolia; `chain` family still a local reference.
+**Last updated:** 2026-10-06
+**HEAD:** `2665f39` (Anthropic structured outputs for the intel model steps). Session narratives: `docs/SESSION_HANDOFF_2026-10-06.md` (auth → test isolation → workers → AIOOS) and `docs/SESSION_HANDOFF.md` (2026-09-27 Phase 4 work).
 **Purpose:** Living memory of *what actually exists in the codebase* and *what is next*. This supersedes the original concept-capture memory (`AI_Opportunity_Operating_System_Project_Memory.md`) for engineering purposes. Requirements live in `Opportunity_OS_TECHNICAL_REQUIREMENTS.md`; rationale lives in `docs/adr/`.
 
 ---
@@ -20,10 +20,10 @@ Internal spine:
 
 Monorepo: pnpm workspaces + Turborepo, TypeScript strict, ESM. Node via `.nvmrc`. `DATABASE_URL`-driven Postgres.
 
-- **19 packages** (`packages/*`): `contracts`, `config`, `ids`-in-contracts, `domain`, `audit`, `auth`, `risk`, `scoring`, `demand`, `discovery`, `connectors-sdk`, `verifiers-sdk`, `negotiation`, `escrow`, `settlement`, `chain`, `llm-gateway`, `observability`, `db`, `ui`.
-- **8 apps** (`apps/*`): `api` (NestJS/Fastify), `web` (Next.js), `worker-outbox`, `worker-connectors`, `worker-lifecycle`, `worker-temporal`, `worker-notifications`, `worker-agents`.
-- **16 SQL migrations** (`packages/db/migrations/0001`–`0016`), 22 tables, forward-only idempotent runner.
-- **31 ADRs** (`docs/adr/ADR-001`–`031`).
+- **20 packages** (`packages/*`): `contracts`, `config`, `ids`-in-contracts, `domain`, `audit`, `auth`, `risk`, `scoring`, `demand`, `discovery`, `connectors-sdk`, `verifiers-sdk`, `negotiation`, `escrow`, `settlement`, `chain`, `llm-gateway`, `observability`, `db`, `ui`, `intel` (AIOOS pipeline, 2026-10-03).
+- **9 apps** (`apps/*`): `api` (NestJS/Fastify), `web` (Next.js), `worker-outbox`, `worker-connectors`, `worker-lifecycle`, `worker-temporal`, `worker-notifications`, `worker-agents`, `worker-intel`. Deployed on Railway: `api`, `web`, and cron jobs `worker-lifecycle`/`worker-connectors` (every 15 min) and `worker-intel` (every 6 h).
+- **19 SQL migrations** (`packages/db/migrations/0001`–`0019`), forward-only idempotent runner. 0017 asset transfers, 0018 mission sharing/steering, 0019 intel (`intel_runs`, `intel_sources`, `intel_leads`, `intel_candidates`).
+- **32 ADRs** (`docs/adr/ADR-001`–`032`). The AIOOS decisions (Claude + Brave + $1/day cap, deterministic decision layer) are recorded in `docs/Opportunity_OS_AIOOS_Gap_Analysis.md`, not yet as an ADR.
 - **CI**: GitHub Actions — typecheck + unit/integration (vitest) + a Postgres job running migrations (incl. idempotency) + a pgvector job.
 
 ### Package roles
@@ -235,7 +235,7 @@ The API used to trust `x-user-id` / `x-user-role` headers from anyone, including
 - Tests: vitest; `packages/**`, `apps/**`, `tests/**` included. Live-DB e2e gated by `HAS_DB` (`describe.skipIf(!HAS_DB)`); pgvector e2e is CI-only (skips on plain Postgres).
 - **Live-DB tests never use `.env`'s `DATABASE_URL`** (it points at the production Supabase; tests there once left 30 missions + 43 users in prod, deleted 2026-10-03). `tests/setup/test-database.ts` (vitest `setupFiles`) sets `DATABASE_URL` from `TEST_DATABASE_URL`, refuses any non-local host, and blanks it when unset so live-DB suites skip. Run them with `pnpm test:db [vitest args]`: starts `infra/docker/docker-compose.test.yml` (pgvector/pg16 on port 54329, tmpfs), migrates it, runs vitest. `pnpm db:test:down` removes it. CI's migrations job runs the same suite against its service Postgres.
 - `scripts/verify-*.ts` still use `DATABASE_URL` directly — run them only with an explicit local `DATABASE_URL=...` prefix.
-- Current health: **suite 86 pass / 1 skip (30 files); typecheck 46/46.**
+- Current health (2026-10-06): **suite 195 pass / 1 skip (51 files)** via `pnpm test:db` on a fresh local Postgres.
 
 ## 8. Configuration surface (env)
 
@@ -476,9 +476,9 @@ Open ideas, unordered:
 
 ## 12. Immediate next options
 
-Ordered by leverage on the Transaction-OS thesis. Both money rails (fiat/Stripe, stablecoin/Circle) are now real, live-verified, and the create-milestone UI can drive both — the honest next step is production readiness, not more wiring:
-1. **A licensed money-transmitter partnership + audit** (§C-6) — the actual gate to going live with real funds on either rail; a business/compliance decision, code changes alone can't cross it.
-2. ~~Recipient-level webhook reconciliation~~ — done 2026-09-27 (§5 Phase 3). Leftover: split payout after an async Stripe capture.
-3. ~~Phase 4 polish~~ — timelines, sharing, steering, Search/Ask, archive done 2026-09-27. Left: agent→user questions (needs something that generates them).
-4. **Phase 5 learning loop** — outcome-driven score calibration + connector-yield optimization.
-5. **A full AND/OR escrow-condition builder in the UI** — the create-milestone form only offers a single predicate; the API already supports arbitrary trees.
+As of 2026-10-06 (details and evidence in `docs/SESSION_HANDOFF_2026-10-06.md`):
+1. **Intel signal quality** — the pipeline is mechanically sound (0 errors per run since `2665f39`) but source quality is the bottleneck: 29 leads → 1 VERIFY NEXT, 1 WATCH, 23 REJECTED, cost per actionable ≈ $1.98. Proposed: screen federal procurement (sam.gov) before paid assessment; prune dead queries (liquidation.com, article-only reddit queries, govdeals); fix reason codes (`not_credible`/`fraud_risk` mislabel "no way to get paid" and competitor posts); add freelance/RFQ boards as demand sources.
+2. **Silence or fix graph arbitrage** — `worker-lifecycle` keeps producing ~44 arbitrage opportunities from Reverb listings driven by echo embeddings (no embedding key in production).
+3. **A licensed money-transmitter partnership + audit** (§C-6) — still the gate to real funds on either rail; a business decision.
+4. **Phase 5 learning loop** — intel outcomes (contacted/won/lost + reason codes) are now recorded; nothing learns from them yet.
+5. **Escrow condition builder in the UI** — the create-milestone form offers a single predicate; the API supports trees.

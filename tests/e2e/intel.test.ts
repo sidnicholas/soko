@@ -173,4 +173,38 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
     // The first test's detection reported one skipped result as an article.
     expect(yieldRows.some((r) => (r.reasons.article ?? 0) >= 1)).toBe(true);
   });
+
+  it("screens government procurement leads without a paid assessment", async () => {
+    const SAM_URL = `https://sam.gov/opp/test-${RUN}/view`;
+    const samSearch: SearchProvider = {
+      id: "stub",
+      costPerQueryUsd: 0.005,
+      async search() {
+        return [result(SAM_URL, "Sources Sought: Generator Maintenance", "Coast Guard station seeks generator maintenance services.")];
+      },
+    };
+    let assessments = 0;
+    class SamModel implements LlmProvider {
+      readonly name = "stub";
+      async complete(req: { system?: string; prompt: string }) {
+        if (!req.system?.includes("signal-detection")) assessments++;
+        const text = JSON.stringify({
+          skipped: [],
+          leads: [{ index: 0, kind: "demand", title: "USCG generator maintenance sources sought", summary: "Federal sources sought notice.", item: null, category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "medium", credibility: 0.9, contact: { channel: "procurement_contact", value: null, label: "source_fact" }, facts: [], opposite_queries: ["generator maintenance contractor"] }],
+        });
+        return { text, inputTokens: 100, outputTokens: 50, usd: 0.001, model: "stub-1" };
+      }
+    }
+    const llm = new LlmGateway([new SamModel()], {
+      profiles: { extraction: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 }, research_synthesis: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 } },
+    });
+    const run = await runIntelCycle({ search: samSearch, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 1, maxAssessments: 5 });
+    expect(assessments).toBe(0);
+    // Only the discovery search ran: no opposite-side searches for a screened lead.
+    expect(run.searchCalls).toBe(1);
+    const { rejected } = await listIntelQueue();
+    const sam = rejected.find((c) => c.lead_url === SAM_URL);
+    expect(sam?.reject_reason).toBe("federal_procurement");
+    await getDb().deleteFrom("intel_leads").where("url", "=", SAM_URL).execute();
+  });
 });

@@ -27,22 +27,22 @@ interface Venue {
 
 // Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
 // documented for the search provider and could silently return nothing.
-// Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
-// documented for the search provider and could silently return nothing.
-// Exact phrases are avoided on reddit/liquidation: in the 18:00 UTC run on
-// 2026-10-03 every quoted query there returned zero results.
+//
+// Pruned 2026-10-06 from 15 runs of yield data: sam.gov (every lead an
+// unwinnable federal notice), liquidation.com (zero results every run),
+// govdeals.com (product pages), and reddit queries that returned only
+// articles/news over 3+ runs. Kept the queries that produced leads, and added
+// venues where buyers ask to hire for the user's own services.
 const VENUES: Venue[] = [
-  // Demand: people and organizations asking for a supplier or item.
-  { site: "reddit.com", orientation: "demand", topics: ["small business looking for supplier", "need a vendor for my business", "looking for manufacturer for my product", "restaurant looking for used equipment", "hiring sourcing research help"] },
-  { site: "sam.gov", orientation: "demand", topics: ['"sources sought" equipment', '"request for quote" supplies', '"sources sought" services'] },
-  // Supply: surplus, liquidation and distressed inventory venues.
-  { site: "govdeals.com", orientation: "supply", topics: ["forklift", "restaurant equipment", "generator"] },
-  { site: "liquidation.com", orientation: "supply", topics: ["electronics pallets", "overstock lots"] },
-  { site: "reddit.com", orientation: "supply", topics: ["closing my business selling inventory", "liquidating business equipment"] },
-  // Problems: owners describing costly website / tracking / ops failures.
-  // wordpress.org returned plugin pages, not support threads — WordPress problems go via reddit.
-  { site: "reddit.com", orientation: "problem", topics: ["GA4 conversions not tracking", "GA4 purchases missing shopify", "Google Tag Manager tags not firing", "WordPress site hacked my business", "WordPress contact form not sending emails", "WooCommerce checkout not working", "Shopify pixel not tracking purchases", "Google Ads conversions not recording", "website down losing customers help", "Divi site broken after update"] },
-  { site: "community.shopify.com", orientation: "problem", topics: ["checkout broken", "tracking not working"] },
+  // Demand for the user's services: people hiring for work the catalog covers.
+  { site: "upwork.com", orientation: "demand", topics: ["GA4 tracking fix job", "Google Tag Manager setup job", "Shopify conversion tracking job", "WordPress site fix urgent job"] },
+  { site: "reddit.com", orientation: "demand", topics: ["[hiring] GA4 tracking", "hiring shopify developer tracking fix", "small business looking for supplier", "need a vendor for my business", "hiring sourcing research help"] },
+  // B2B buying requests (demand for goods; the why-paid test decides if a sourcing fee is realistic).
+  { site: "tradekey.com", orientation: "demand", topics: ["buy offers packaging", "buy offers equipment"] },
+  // Problems: owners describing costly website / tracking failures.
+  { site: "reddit.com", orientation: "problem", topics: ["GA4 purchases missing shopify", "website down losing customers help"] },
+  { site: "community.shopify.com", orientation: "problem", topics: ["checkout broken", "tracking not working", "need someone to fix"] },
+  { site: "support.google.com", orientation: "problem", topics: ["GA4 purchases not showing", "conversions not recording analytics"] },
 ];
 
 /** The full pool, in a stable order. */

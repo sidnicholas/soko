@@ -22,7 +22,16 @@ export interface Flag {
 }
 
 /** Reason codes kept for learning (AIOOS §24). */
-export type RejectReason = "stale" | "not_credible" | "no_counterparty_found" | "fraud_risk" | "no_value_path";
+export type RejectReason =
+  | "stale"
+  | "not_credible"
+  | "no_counterparty_found"
+  | "fraud_risk"
+  | "no_value_path"
+  /** The "lead" is someone selling services like the user's — a competitor, not a buyer. */
+  | "competitor_offer"
+  /** Government procurement: needs contractor registration/clearances; screened before paid assessment. */
+  | "federal_procurement";
 
 export const RAPID_MODE = {
   /** Experimental revenue target (AIOOS §1) — a yardstick, never a scoring input. */
@@ -79,6 +88,17 @@ export function mergeFlags(...lists: Flag[][]): Flag[] {
   const seen = new Map<string, Flag>();
   for (const f of lists.flat()) if (!seen.has(f.flag)) seen.set(f.flag, f);
   return [...seen.values()];
+}
+
+/**
+ * Government procurement leads (sam.gov and other .gov/.mil notices) need
+ * contractor registration, clearances or the ability to supply directly —
+ * every one assessed in live runs was rejected for that. Screened before the
+ * paid assessment call.
+ */
+export function isGovernmentProcurement(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "sam.gov" || h.endsWith(".sam.gov") || h.endsWith(".gov") || h.endsWith(".mil");
 }
 
 // ---------------------------------------------------------------- verification
@@ -204,13 +224,22 @@ export function scoreCandidate(s: ScoreInput): { score: number; factors: ScoreFa
 
 export interface BucketInput extends ScoreInput {
   compensationHighUsd: number;
+  /** The model judged the lead to be a competitor's own offer, not a buyer. */
+  competitorOffer?: boolean;
 }
 
-/** §26 Action queue placement, with a reason code for every rejection. */
+/**
+ * §26 Action queue placement, with a reason code for every rejection. Order
+ * matters for the learning record: the most specific true reason wins, so
+ * "no way to get paid" isn't filed as "not credible" (live runs 2026-10-04..06
+ * mislabelled most rejections that way).
+ */
 export function bucketFor(b: BucketInput): { bucket: Bucket; rejectReason: RejectReason | null } {
-  if (b.verification === "rejected") return { bucket: "rejected", rejectReason: "not_credible" };
+  if (b.competitorOffer) return { bucket: "rejected", rejectReason: "competitor_offer" };
   if (b.freshness < 0.1) return { bucket: "rejected", rejectReason: "stale" };
   if (b.fraud.length >= 2) return { bucket: "rejected", rejectReason: "fraud_risk" };
+  const noValue = !b.resolved || b.compensationHighUsd <= 0;
+  if (b.verification === "rejected") return { bucket: "rejected", rejectReason: noValue ? "no_value_path" : "not_credible" };
   if (b.resolved && b.compensationHighUsd <= 0) return { bucket: "rejected", rejectReason: "no_value_path" };
   if (b.verification === "speculative") return { bucket: "watch", rejectReason: null };
 
