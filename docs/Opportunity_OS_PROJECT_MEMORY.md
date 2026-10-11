@@ -1,8 +1,8 @@
 # Opportunity OS — Project Memory (Implementation State)
 
 **Status:** V1 in active build — Phases 0–4 complete; Supabase JWT auth live (2026-10-02); the AIOOS opportunity-intelligence slice (extended PRD) is live in production on a $1/day cap and producing its first actionable candidates; Phase 5 not started. Phase 3 rails: real Stripe test-mode + Circle/Base Sepolia; `chain` family still a local reference.
-**Last updated:** 2026-10-06
-**HEAD:** `1c197db` (intel: federal-procurement screen, query pool pruned to 18, reason-code fixes, service-demand venues). Session narratives: `docs/SESSION_HANDOFF_2026-10-06.md` (auth → test isolation → workers → AIOOS) and `docs/SESSION_HANDOFF.md` (2026-09-27 Phase 4 work).
+**Last updated:** 2026-10-11
+**HEAD:** `1919160` (eBay Marketplace Account Deletion endpoint; before it `1c197db`, intel: federal-procurement screen, query pool pruned to 18, reason-code fixes, service-demand venues). Session narratives: `docs/SESSION_HANDOFF_2026-10-06.md` (auth → test isolation → workers → AIOOS) and `docs/SESSION_HANDOFF.md` (2026-09-27 Phase 4 work).
 **Purpose:** Living memory of *what actually exists in the codebase* and *what is next*. This supersedes the original concept-capture memory (`AI_Opportunity_Operating_System_Project_Memory.md`) for engineering purposes. Requirements live in `Opportunity_OS_TECHNICAL_REQUIREMENTS.md`; rationale lives in `docs/adr/`.
 
 ---
@@ -132,6 +132,14 @@ worker sweep, not a new mechanism.
 
 **Workers on Railway, 2026-10-03** (cost-minimised): `worker-lifecycle` and `worker-connectors` (`REVERB_ENABLED=true`) run as Railway **cron services** every 15 minutes (`*/15 * * * *`) with `--once` — one cycle, close the DB pool, exit non-zero on failure — so they bill only while running (~$0.10/month each vs ~$2/month always-on). Built from `main` (Railpack, `buildCommand: true`, `pnpm --filter @opportunity-os/<worker> start -- --once`), same region as `api`; `DATABASE_URL`/`RAILPACK_NODE_VERSION` reference `api`'s. Deliberately **not** deployed yet: `worker-outbox` (log publisher only — no event consumers exist; the timeline reads the outbox table directly, so nothing depends on the relay), `worker-notifications` (no Telegram/SMTP configured in prod; would only log), `worker-temporal` (needs a Temporal server; the durable paths are opt-in and best-effort), `worker-agents` (stub). Add notifications back when a channel is configured (a 5-minute cron is the cheap option). eBay stays off until `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` are set on `worker-connectors`.
 
+**eBay Marketplace Account Deletion endpoint, 2026-10-11** (`1919160`): eBay requires every production keyset to register one or the keyset is disabled, so this is the gate to turning the eBay connector on. `GET`/`POST /v1/webhooks/ebay/account-deletion` (`apps/api/src/webhooks/`, crypto in `apps/api/src/common/webhook-signature.ts`):
+- **Challenge (GET)**: returns `{"challengeResponse": sha256(challenge_code + EBAY_VERIFICATION_TOKEN + endpoint)}`. The endpoint is rebuilt as `PUBLIC_API_BASE_URL` + the path, so that variable must match the URL entered in the eBay developer portal byte-for-byte (same fragility as the Twilio signature).
+- **Notification (POST)**: verifies `x-ebay-signature` (base64 JSON `{alg, kid, signature, digest}`; ECDSA over the raw body; public key fetched by `kid` from the Notification API with an app token and cached), logs the `notificationId` (never the username) and acknowledges with 201. **Nothing is deleted, because nothing is stored**: the Browse connector keeps item id, title, description, category, price and URL only. Revisit the day a connector persists eBay seller or buyer identifiers.
+- **Without `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET` on `api`** the public key cannot be fetched, so the notification is acknowledged unverified with a warning — deliberate: it changes no state, and an unacknowledged endpoint gets the keyset marked non-compliant. This is the state in production as of 2026-10-11 (an unsigned POST returned 201).
+- `makeEbayAppToken` was extracted from `makeEbayConnector` so the connector and the webhook share one OAuth client-credentials path.
+- **Production**: `EBAY_VERIFICATION_TOKEN` and `PUBLIC_API_BASE_URL` (`https://api-production-eb9a.up.railway.app`) set on `api` and the endpoint entered in the eBay portal by the user, 2026-10-11; the live challenge returns 200 with a 64-hex response.
+- **Unverified**: signature verification is tested with a locally generated EC keypair only, not a real eBay notification; the challenge hash was not independently recomputed against the production token.
+
 ### Phase 2 — Human-Controlled Execution ✅
 - LLM negotiation drafting with deterministic template fallback (always non-binding; never auto-sends). Feeds market-graph comparables into the draft.
 - Approval service: request → mint HMAC approval token (bound to action + payload hash + expiry) → decision (approve/reject/modify/expire) → audit + events.
@@ -239,7 +247,7 @@ The API used to trust `x-user-id` / `x-user-role` headers from anyone, including
 
 ## 8. Configuration surface (env)
 
-`NODE_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `SUPABASE_*` (incl. `SUPABASE_JWT_SECRET`), `AUTH_DEV_HEADERS`, `AUTH_ADMIN_EMAILS`, `WEB_ORIGINS`, `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` (web), `REDIS_URL`, `TEMPORAL_*`, `LLM_DEFAULT_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`EMBEDDING_BACKEND`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `DEFAULT_STABLECOIN_NETWORK`, `CHAIN_RPC_URL`, `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID`, `TELEGRAM_*`/`EMAIL_FROM`/`SMTP_URL`, `APPROVAL_TOKEN_SECRET`, `AUDIT_ANCHOR_ENABLED`, `APPROVAL_TIMEOUT_MINUTES`, `MISSION_REFRESH_INTERVAL_MINUTES`, `SUPPLY_STALE_MINUTES`, `SETTLEMENT_AUTO_RELEASE_THRESHOLD_MINOR`. All validated in `config`; safe defaults let dev/CI run keyless.
+`NODE_ENV`, `LOG_LEVEL`, `DATABASE_URL`, `SUPABASE_*` (incl. `SUPABASE_JWT_SECRET`), `AUTH_DEV_HEADERS`, `AUTH_ADMIN_EMAILS`, `WEB_ORIGINS`, `NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY` (web), `REDIS_URL`, `TEMPORAL_*`, `LLM_DEFAULT_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`, `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM`/`EMBEDDING_BACKEND`, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, `DEFAULT_STABLECOIN_NETWORK`, `CHAIN_RPC_URL`, `CIRCLE_API_KEY`/`CIRCLE_ENTITY_SECRET`/`CIRCLE_WALLET_ID`, `EBAY_CLIENT_ID`/`EBAY_CLIENT_SECRET`/`EBAY_VERIFICATION_TOKEN`, `PUBLIC_API_BASE_URL`, `TELEGRAM_*`/`EMAIL_FROM`/`SMTP_URL`, `APPROVAL_TOKEN_SECRET`, `AUDIT_ANCHOR_ENABLED`, `APPROVAL_TIMEOUT_MINUTES`, `MISSION_REFRESH_INTERVAL_MINUTES`, `SUPPLY_STALE_MINUTES`, `SETTLEMENT_AUTO_RELEASE_THRESHOLD_MINOR`. All validated in `config`; safe defaults let dev/CI run keyless.
 
 ## 9. ADR index
 
