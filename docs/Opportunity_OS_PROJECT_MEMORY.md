@@ -2,7 +2,7 @@
 
 **Status:** V1 in active build — Phases 0–4 complete; Supabase JWT auth live (2026-10-02); the AIOOS opportunity-intelligence slice (extended PRD) is live in production on a $1/day cap and producing its first actionable candidates; Phase 5 not started. Phase 3 rails: real Stripe test-mode + Circle/Base Sepolia; `chain` family still a local reference.
 **Last updated:** 2026-10-06
-**HEAD:** `2665f39` (Anthropic structured outputs for the intel model steps). Session narratives: `docs/SESSION_HANDOFF_2026-10-06.md` (auth → test isolation → workers → AIOOS) and `docs/SESSION_HANDOFF.md` (2026-09-27 Phase 4 work).
+**HEAD:** `1c197db` (intel: federal-procurement screen, query pool pruned to 18, reason-code fixes, service-demand venues). Session narratives: `docs/SESSION_HANDOFF_2026-10-06.md` (auth → test isolation → workers → AIOOS) and `docs/SESSION_HANDOFF.md` (2026-09-27 Phase 4 work).
 **Purpose:** Living memory of *what actually exists in the codebase* and *what is next*. This supersedes the original concept-capture memory (`AI_Opportunity_Operating_System_Project_Memory.md`) for engineering purposes. Requirements live in `Opportunity_OS_TECHNICAL_REQUIREMENTS.md`; rationale lives in `docs/adr/`.
 
 ---
