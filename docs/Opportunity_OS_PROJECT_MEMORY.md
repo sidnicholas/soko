@@ -235,7 +235,7 @@ The API used to trust `x-user-id` / `x-user-role` headers from anyone, including
 - Tests: vitest; `packages/**`, `apps/**`, `tests/**` included. Live-DB e2e gated by `HAS_DB` (`describe.skipIf(!HAS_DB)`); pgvector e2e is CI-only (skips on plain Postgres).
 - **Live-DB tests never use `.env`'s `DATABASE_URL`** (it points at the production Supabase; tests there once left 30 missions + 43 users in prod, deleted 2026-10-03). `tests/setup/test-database.ts` (vitest `setupFiles`) sets `DATABASE_URL` from `TEST_DATABASE_URL`, refuses any non-local host, and blanks it when unset so live-DB suites skip. Run them with `pnpm test:db [vitest args]`: starts `infra/docker/docker-compose.test.yml` (pgvector/pg16 on port 54329, tmpfs), migrates it, runs vitest. `pnpm db:test:down` removes it. CI's migrations job runs the same suite against its service Postgres.
 - `scripts/verify-*.ts` still use `DATABASE_URL` directly — run them only with an explicit local `DATABASE_URL=...` prefix.
-- Current health (2026-10-06): **suite 195 pass / 1 skip (51 files)** via `pnpm test:db` on a fresh local Postgres.
+- Current health (2026-10-06): **suite 198 pass / 1 skip (51 files)** via `pnpm test:db` on a fresh local Postgres (as of `1c197db`).
 
 ## 8. Configuration surface (env)
 
