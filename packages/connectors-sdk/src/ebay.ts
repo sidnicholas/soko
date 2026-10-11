@@ -44,12 +44,16 @@ function toMinorUnits(value: string | undefined): number | null {
   return Number.isFinite(n) ? Math.round(n * 100) : null;
 }
 
-export function makeEbayConnector(config: EbayConfig): SourceConnector {
+/**
+ * Cached OAuth2 client-credentials app token. Shared by the Browse connector
+ * and anything else that calls eBay as the application rather than a user
+ * (e.g. fetching the Notification API's public key in `apps/api`).
+ */
+export function makeEbayAppToken(config: Pick<EbayConfig, "clientId" | "clientSecret" | "fetchImpl">): () => Promise<string> {
   const doFetch = config.fetchImpl ?? fetch;
-  const marketplaceId = config.marketplaceId ?? "EBAY_US";
   let cachedToken: { value: string; expiresAt: number } | undefined;
 
-  async function accessToken(): Promise<string> {
+  return async function accessToken(): Promise<string> {
     if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
     const basicAuth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
     const res = await doFetch(TOKEN_URL, {
@@ -68,7 +72,12 @@ export function makeEbayConnector(config: EbayConfig): SourceConnector {
       expiresAt: Date.now() + (json.expires_in ?? 7200) * 1000 - TOKEN_EXPIRY_BUFFER_MS,
     };
     return cachedToken.value;
-  }
+  };
+}
+
+export function makeEbayConnector(config: EbayConfig): SourceConnector {
+  const marketplaceId = config.marketplaceId ?? "EBAY_US";
+  const accessToken = makeEbayAppToken(config);
 
   return makeHttpApiConnector({
     id: "ebay-browse",

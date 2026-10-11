@@ -17,10 +17,14 @@ import {
   setRecipientPayoutStatus,
 } from "@opportunity-os/db";
 import { getConfig } from "@opportunity-os/config";
+import { makeEbayAppToken } from "@opportunity-os/connectors-sdk";
 import type { EventName, MilestoneRecipient, Money, RecipientPayoutStatus } from "@opportunity-os/contracts";
 import {
+  ebayChallengeResponse,
+  parseEbaySignatureHeader,
   payloadIdempotencyKey,
   timingSafeStringEqual,
+  verifyEbaySignature,
   verifyHmacSignature,
   verifyMailgunSignature,
   verifyTwilioSignature,
@@ -165,6 +169,29 @@ async function circlePublicKeyPem(keyId: string): Promise<string> {
  */
 export function verifyCircleSignature(rawBody: Buffer, signatureBase64: string, publicKeyPem: string): boolean {
   return verifyEcdsa("sha256", rawBody, createPublicKey(publicKeyPem), Buffer.from(signatureBase64, "base64"));
+}
+
+/** Route eBay calls, under the global `v1` prefix; appended to `PUBLIC_API_BASE_URL` to rebuild the registered endpoint. */
+export const EBAY_ACCOUNT_DELETION_PATH = "/v1/webhooks/ebay/account-deletion";
+
+const EBAY_PUBLIC_KEY_URL = "https://api.ebay.com/commerce/notification/v1/public_key";
+
+let ebayAppToken: (() => Promise<string>) | undefined;
+const ebayPublicKeyCache = new Map<string, string>();
+
+/** eBay signs notifications asymmetrically; `kid` names which public key to fetch (app token required) and cache. */
+async function ebayPublicKey(kid: string, clientId: string, clientSecret: string): Promise<string> {
+  const cached = ebayPublicKeyCache.get(kid);
+  if (cached) return cached;
+  ebayAppToken ??= makeEbayAppToken({ clientId, clientSecret });
+  const res = await fetch(`${EBAY_PUBLIC_KEY_URL}/${encodeURIComponent(kid)}`, {
+    headers: { authorization: `Bearer ${await ebayAppToken()}` },
+  });
+  if (!res.ok) throw new Error(`ebay public key request failed: ${res.status}`);
+  const key = ((await res.json()) as { key?: string }).key;
+  if (!key) throw new Error(`eBay returned no public key for key id ${kid}`);
+  ebayPublicKeyCache.set(kid, key);
+  return key;
 }
 
 function milestoneAmountMinor(total: Money, amount: { kind: "amount" | "percentage"; value: number }): number {
@@ -627,6 +654,71 @@ export class WebhooksService {
         this.logger.warn(`${channelId} message intake failed: ${String(err)}`);
       }
     }
+  }
+
+  /**
+   * eBay Marketplace Account Deletion — endpoint-ownership challenge. eBay
+   * calls this when the endpoint is saved in the developer portal (and again
+   * periodically) and expects the SHA-256 of `challenge_code + verification
+   * token + endpoint URL` back as JSON. The endpoint URL is rebuilt from
+   * `PUBLIC_API_BASE_URL`, so that must match what was entered in the portal
+   * byte-for-byte (same fragility as the Twilio signature above).
+   */
+  answerEbayChallenge(challengeCode: string | undefined): { challengeResponse: string } {
+    const verificationToken = getConfig().connectors.ebayVerificationToken;
+    const publicApiBaseUrl = getConfig().notifications.publicApiBaseUrl;
+    if (!verificationToken || !publicApiBaseUrl || !challengeCode) {
+      throw new UnauthorizedException("Invalid eBay challenge request");
+    }
+    const endpoint = `${publicApiBaseUrl.replace(/\/$/, "")}${EBAY_ACCOUNT_DELETION_PATH}`;
+    return { challengeResponse: ebayChallengeResponse(challengeCode, verificationToken, endpoint) };
+  }
+
+  /**
+   * eBay Marketplace Account Deletion notification. eBay requires an
+   * acknowledgement and that any stored data about the named user be
+   * deleted. This system stores none: the Browse connector keeps item id,
+   * title, description, category, price and URL only (`connectors-sdk/src/
+   * ebay.ts`) — no seller or buyer identifiers. So the notification is
+   * verified, logged by id (never by username) and acknowledged, with no
+   * state change. Revisit this the day a connector starts persisting eBay
+   * user identifiers.
+   *
+   * The signature is checked whenever the app credentials needed to fetch
+   * eBay's public key are present. Without them the notification is still
+   * acknowledged — it changes nothing, and an unacknowledged endpoint gets
+   * the keyset marked non-compliant.
+   */
+  async handleEbayAccountDeletion(signature: string | undefined, rawBody: Buffer | undefined) {
+    const { ebayVerificationToken, ebayClientId, ebayClientSecret } = getConfig().connectors;
+    if (!ebayVerificationToken || !rawBody) {
+      throw new UnauthorizedException("Invalid eBay notification");
+    }
+    if (ebayClientId && ebayClientSecret) {
+      const header = signature ? parseEbaySignatureHeader(signature) : undefined;
+      if (!header) throw new UnauthorizedException("Invalid eBay notification signature");
+      let publicKey: string;
+      try {
+        publicKey = await ebayPublicKey(header.kid, ebayClientId, ebayClientSecret);
+      } catch (err) {
+        throw new UnauthorizedException(`Could not retrieve eBay's notification public key: ${String(err)}`);
+      }
+      if (!verifyEbaySignature(rawBody, header, publicKey)) {
+        throw new UnauthorizedException("Invalid eBay notification signature");
+      }
+    } else {
+      this.logger.warn("eBay account-deletion notification acknowledged without signature verification (EBAY_CLIENT_ID/EBAY_CLIENT_SECRET not set)");
+    }
+
+    let body: Payload;
+    try {
+      body = JSON.parse(rawBody.toString("utf8")) as Payload;
+    } catch {
+      throw new BadRequestException("eBay notification body is not valid JSON");
+    }
+    const notification = body["notification"] as Payload | undefined;
+    this.logger.log(`eBay account-deletion notification ${String(notification?.["notificationId"] ?? "unknown")} acknowledged; no eBay user data is stored`);
+    return { received: true };
   }
 
   async handleChain(network: string, signature: string | undefined, body: Payload) {

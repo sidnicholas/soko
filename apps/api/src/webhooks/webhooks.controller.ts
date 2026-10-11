@@ -67,6 +67,19 @@ export class WebhooksController {
     return this.webhooks.handleWhatsApp(signature, req.rawBody);
   }
 
+  @Get("ebay/account-deletion")
+  ebayAccountDeletionChallenge(@Query("challenge_code") challengeCode: string | undefined) {
+    return this.webhooks.answerEbayChallenge(challengeCode);
+  }
+
+  @Post("ebay/account-deletion")
+  ebayAccountDeletion(
+    @Headers("x-ebay-signature") signature: string | undefined,
+    @Req() req: RawBodyRequest<FastifyRequest>,
+  ) {
+    return this.webhooks.handleEbayAccountDeletion(signature, req.rawBody);
+  }
+
   @Post("chain/:network")
   chain(
     @Param("network") network: string,

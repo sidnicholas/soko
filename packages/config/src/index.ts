@@ -96,6 +96,12 @@ const EnvSchema = z.object({
   EBAY_CLIENT_ID: z.string().optional(),
   EBAY_CLIENT_SECRET: z.string().optional(),
   EBAY_MARKETPLACE_ID: z.string().default("EBAY_US"),
+  // Marketplace Account Deletion notifications: eBay requires every
+  // production keyset to register an endpoint or the keyset is disabled. We
+  // choose this token (32-80 chars of A-Z a-z 0-9 _ -) and enter the same
+  // value in the developer portal; with PUBLIC_API_BASE_URL it answers eBay's
+  // challenge. Absent = the endpoint rejects every request.
+  EBAY_VERIFICATION_TOKEN: z.string().optional(),
   // Unlike the fixture connectors, eBay Browse API rejects a blank query —
   // a coarse stand-in seed term until ingestion is driven by live demand
   // descriptions instead (see project memory backlog).
@@ -213,6 +219,7 @@ export interface AppConfig {
     ebayClientId?: string;
     ebayClientSecret?: string;
     ebayMarketplaceId: string;
+    ebayVerificationToken?: string;
     ebaySeedQuery: string;
     seedQuery: string;
     reverbEnabled: boolean;
@@ -299,6 +306,7 @@ function toConfig(env: Env): AppConfig {
       ebayClientId: env.EBAY_CLIENT_ID,
       ebayClientSecret: env.EBAY_CLIENT_SECRET,
       ebayMarketplaceId: env.EBAY_MARKETPLACE_ID,
+      ebayVerificationToken: env.EBAY_VERIFICATION_TOKEN,
       ebaySeedQuery: env.EBAY_SEED_QUERY,
       seedQuery: env.CONNECTOR_SEED_QUERY ?? env.EBAY_SEED_QUERY,
       reverbEnabled: env.REVERB_ENABLED === "true",
