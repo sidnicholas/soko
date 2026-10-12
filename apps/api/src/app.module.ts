@@ -15,6 +15,7 @@ import { NegotiationsModule } from "./negotiations/negotiations.module";
 import { AssetTransferModule } from "./asset-transfers/asset-transfer.module";
 import { SearchModule } from "./search/search.module";
 import { IntelModule } from "./intel/intel.module";
+import { MarketplaceModule } from "./marketplace/marketplace.module";
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { IntelModule } from "./intel/intel.module";
     AssetTransferModule,
     SearchModule,
     IntelModule,
+    MarketplaceModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

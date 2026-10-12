@@ -22,4 +22,5 @@ export * from "./repositories/sharing";
 export * from "./repositories/steering";
 export * from "./repositories/search";
 export * from "./repositories/intel";
+export * from "./repositories/listings";
 export * from "./repositories/users";

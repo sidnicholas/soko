@@ -294,6 +294,34 @@ export interface IntelQueue {
     reasons: Record<string, number>;
   }[];
 }
+/** One demand or supply record (GET /marketplace/listings), listed whether or not it was matched. */
+export interface MarketListing {
+  id: string;
+  side: "demand" | "supply";
+  origin: "intel" | "marketplace";
+  type: "demand" | "supply" | "problem";
+  title: string;
+  description: string;
+  category: string | null;
+  /** Asking price (supply) or budget (demand), integer minor units. */
+  price_minor: number | null;
+  currency: string | null;
+  quantity: string | null;
+  location: string | null;
+  needed_by: string | null;
+  source: string;
+  url: string | null;
+  contact: IntelContact | null;
+  matched: boolean;
+  match_detail: string;
+  status: string;
+  created_at: string;
+}
+export interface MarketListings {
+  demand: MarketListing[];
+  supply: MarketListing[];
+  counts: Record<"demand" | "supply", { total: number; unmatched: number }>;
+}
 export interface IntelOutcomeInput {
   status: "open" | "contacted" | "responded" | "won" | "lost" | "dismissed";
   reason?: string | null;
@@ -306,6 +334,7 @@ export const api = {
   // Opportunity intelligence (AIOOS action queue)
   intelQueue: () => request<IntelQueue>("/intel/queue"),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
+  marketListings: () => request<MarketListings>("/marketplace/listings"),
 
   // Missions (§16)
   createMission: (input: CreateMissionInput) => request<Mission>("/missions", jsonBody(input)),
