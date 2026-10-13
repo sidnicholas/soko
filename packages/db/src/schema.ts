@@ -470,6 +470,24 @@ export interface IntelCandidatesTable {
   updated_at: Timestamp;
 }
 
+export interface OffnetworkMatchesTable {
+  id: Generated<string>;
+  listing_origin: string;
+  listing_side: string;
+  listing_ref: string;
+  listing_title: string;
+  counterparty_name: string;
+  counterparty_contact: string | null;
+  terms: string | null;
+  price_minor: number | null;
+  currency: string | null;
+  status: Generated<string>;
+  outcome_note: string | null;
+  created_by: string;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface Database {
   users: UsersTable;
   missions: MissionsTable;
@@ -499,4 +517,5 @@ export interface Database {
   intel_sources: IntelSourcesTable;
   intel_leads: IntelLeadsTable;
   intel_candidates: IntelCandidatesTable;
+  offnetwork_matches: OffnetworkMatchesTable;
 }

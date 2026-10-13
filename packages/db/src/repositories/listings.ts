@@ -12,6 +12,27 @@ import { getDb } from "../pool";
 export type ListingSide = "demand" | "supply";
 export type ListingOrigin = "intel" | "marketplace";
 
+export type OffNetworkStatus = "open" | "contacted" | "agreed" | "won" | "lost" | "dismissed";
+
+/** A counterparty the operator holds outside the network, recorded against one listing (migration 0020). */
+export interface OffNetworkMatch {
+  id: string;
+  /** The listing's id in the marketplace view, `<origin>:<row id>`. */
+  listing_id: string;
+  listing_side: ListingSide;
+  listing_title: string;
+  counterparty_name: string;
+  counterparty_contact: string | null;
+  terms: string | null;
+  price_minor: number | null;
+  currency: string | null;
+  status: OffNetworkStatus;
+  outcome_note: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MarketListing {
   /** `<origin>:<row id>` — ids from the three tables can't collide. */
   id: string;
@@ -38,6 +59,8 @@ export interface MarketListing {
   match_detail: string;
   /** Record state at its origin: intel lead status, or marketplace availability. */
   status: string;
+  /** Counterparties the operator recorded from outside the network, newest first. */
+  off_network: OffNetworkMatch[];
   created_at: string;
 }
 
@@ -109,6 +132,7 @@ async function intelListings(limit: number): Promise<MarketListing[]> {
       matched,
       match_detail: matched ? (r.best_bucket ?? "paired") : (r.reject_reason ?? (r.status === "new" ? "not_assessed" : r.status)),
       status: r.status,
+      off_network: [],
       created_at: r.created_at,
     };
   });
@@ -170,6 +194,7 @@ async function supplyListings(limit: number): Promise<MarketListing[]> {
     matched: r.matches > 0,
     match_detail: matchDetail(r.matches, r.opportunities),
     status: r.availability_status,
+    off_network: [],
     created_at: r.created_at,
   }));
 }
@@ -227,6 +252,7 @@ async function demandListings(limit: number): Promise<MarketListing[]> {
     matched: r.matches > 0,
     match_detail: matchDetail(r.matches, r.opportunities),
     status: r.availability_status,
+    off_network: [],
     created_at: r.created_at,
   }));
 }
@@ -237,6 +263,140 @@ async function demandListings(limit: number): Promise<MarketListing[]> {
  * permission (the same read-all standing as `missions/mission-access.ts`).
  */
 export async function listMarketListings(limitPerSource = DEFAULT_LIMIT_PER_SOURCE): Promise<MarketListing[]> {
-  const [intel, supply, demands] = await Promise.all([intelListings(limitPerSource), supplyListings(limitPerSource), demandListings(limitPerSource)]);
-  return [...intel, ...supply, ...demands].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  const [intel, supply, demands, offNetwork] = await Promise.all([
+    intelListings(limitPerSource),
+    supplyListings(limitPerSource),
+    demandListings(limitPerSource),
+    listOffNetworkMatches(),
+  ]);
+  const byListing = new Map<string, OffNetworkMatch[]>();
+  for (const m of offNetwork) byListing.set(m.listing_id, [...(byListing.get(m.listing_id) ?? []), m]);
+  return [...intel, ...supply, ...demands]
+    .map((l) => ({ ...l, off_network: byListing.get(l.id) ?? [] }))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+}
+
+const OFF_NETWORK_COLUMNS = [
+  "id",
+  "listing_origin",
+  "listing_side",
+  "listing_ref",
+  "listing_title",
+  "counterparty_name",
+  "counterparty_contact",
+  "terms",
+  "price_minor",
+  "currency",
+  "status",
+  "outcome_note",
+  "created_by",
+  sql<string>`created_at::text`.as("created_at"),
+  sql<string>`updated_at::text`.as("updated_at"),
+] as const;
+
+type OffNetworkRow = {
+  id: string;
+  listing_origin: string;
+  listing_side: string;
+  listing_ref: string;
+  listing_title: string;
+  counterparty_name: string;
+  counterparty_contact: string | null;
+  terms: string | null;
+  price_minor: number | null;
+  currency: string | null;
+  status: string;
+  outcome_note: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+function toOffNetworkMatch(r: OffNetworkRow): OffNetworkMatch {
+  return {
+    id: r.id,
+    listing_id: `${r.listing_origin}:${r.listing_ref}`,
+    listing_side: r.listing_side as ListingSide,
+    listing_title: r.listing_title,
+    counterparty_name: r.counterparty_name,
+    counterparty_contact: r.counterparty_contact,
+    terms: r.terms,
+    price_minor: r.price_minor,
+    currency: r.currency,
+    status: r.status as OffNetworkStatus,
+    outcome_note: r.outcome_note,
+    created_by: r.created_by,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+/** Every off-network match, newest first. */
+export async function listOffNetworkMatches(limit = 1000): Promise<OffNetworkMatch[]> {
+  const rows = await getDb().selectFrom("offnetwork_matches").select(OFF_NETWORK_COLUMNS).orderBy("created_at", "desc").limit(limit).execute();
+  return rows.map(toOffNetworkMatch);
+}
+
+/** Which side a listing is on and what it is called, or undefined when no such record exists. */
+export async function findMarketListing(origin: ListingOrigin, ref: string): Promise<{ side: ListingSide; title: string } | undefined> {
+  const db = getDb();
+  if (origin === "intel") {
+    const lead = await db.selectFrom("intel_leads").select(["kind", "title"]).where("id", "=", ref).executeTakeFirst();
+    return lead ? { side: lead.kind === "supply" ? "supply" : "demand", title: lead.title } : undefined;
+  }
+  const supply = await db.selectFrom("supply").select("title").where("id", "=", ref).executeTakeFirst();
+  if (supply) return { side: "supply", title: supply.title };
+  const demand = await db
+    .selectFrom("demands as d")
+    .leftJoin("missions as ms", "ms.id", "d.mission_id")
+    .select(["d.description", "ms.title as mission_title"])
+    .where("d.id", "=", ref)
+    .executeTakeFirst();
+  return demand ? { side: "demand", title: demand.mission_title ?? demand.description.slice(0, 120) } : undefined;
+}
+
+export interface NewOffNetworkMatch {
+  origin: ListingOrigin;
+  ref: string;
+  counterpartyName: string;
+  counterpartyContact: string | null;
+  terms: string | null;
+  priceMinor: number | null;
+  currency: string | null;
+  createdBy: string;
+}
+
+/** Records an off-network counterparty against a listing; undefined when the listing does not exist. */
+export async function createOffNetworkMatch(input: NewOffNetworkMatch): Promise<OffNetworkMatch | undefined> {
+  const listing = await findMarketListing(input.origin, input.ref);
+  if (!listing) return undefined;
+  const row = await getDb()
+    .insertInto("offnetwork_matches")
+    .values({
+      listing_origin: input.origin,
+      listing_side: listing.side,
+      listing_ref: input.ref,
+      listing_title: listing.title,
+      counterparty_name: input.counterpartyName,
+      counterparty_contact: input.counterpartyContact,
+      terms: input.terms,
+      price_minor: input.priceMinor,
+      currency: input.currency,
+      created_by: input.createdBy,
+    })
+    .returning(OFF_NETWORK_COLUMNS)
+    .executeTakeFirstOrThrow();
+  return toOffNetworkMatch(row);
+}
+
+/** Moves an off-network deal along (contacted, agreed, won, lost, ...); undefined when it does not exist. */
+export async function updateOffNetworkMatchStatus(id: string, input: { status: OffNetworkStatus; note?: string | null }): Promise<OffNetworkMatch | undefined> {
+  const row = await getDb()
+    .updateTable("offnetwork_matches")
+    // An omitted note keeps the one already recorded.
+    .set({ status: input.status, ...(input.note !== undefined ? { outcome_note: input.note } : {}), updated_at: sql`now()` })
+    .where("id", "=", id)
+    .returning(OFF_NETWORK_COLUMNS)
+    .executeTakeFirst();
+  return row ? toOffNetworkMatch(row) : undefined;
 }

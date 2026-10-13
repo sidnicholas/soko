@@ -11,6 +11,9 @@ import {
   insertIntelLead,
   upsertIntelCandidate,
   listMarketListings,
+  listOffNetworkMatches,
+  createOffNetworkMatch,
+  updateOffNetworkMatchStatus,
   type NewIntelCandidate,
   type NewIntelLead,
 } from "@opportunity-os/db";
@@ -157,5 +160,59 @@ describe.skipIf(!HAS_DB)("marketplace listings (live postgres)", () => {
     // A problem someone needs fixed is demand for a service.
     expect(byId.get(`intel:${serviced}`)).toMatchObject({ side: "demand", type: "problem", matched: true, match_detail: "verify_next" });
     expect(byId.get(`intel:${rejectedSupply}`)).toMatchObject({ side: "supply", type: "supply", matched: false, match_detail: "stale" });
+  });
+
+  it("records an off-network counterparty against a listing and tracks the deal", async () => {
+    const { supplyId } = await upsertSupply({ sourceId: "fixture", externalRef: `market-${RUN}-offnet`, title: `Pallet racking ${RUN}`, description: "listing", category: "equipment", priceMinor: 90000, currency: "USD", quantity: 1, sourceReliability: 0.8 });
+    const runId = await createIntelRun();
+    const leadId = (await insertIntelLead({
+      runId,
+      kind: "demand",
+      title: `Needs a reach truck ${RUN}`,
+      summary: "Warehouse needs a reach truck",
+      url: `https://board.example.com/offnet-${RUN}`,
+      urlHash: `market-${RUN}-offnet`,
+      hostname: "board.example.com",
+      query: "site:board.example.com test",
+      searchProvider: "stub",
+      publishedAt: null,
+      ageText: null,
+      item: "reach truck",
+      category: "equipment",
+      quantity: null,
+      location: null,
+      deadline: null,
+      priceMinor: null,
+      currency: null,
+      urgency: "medium",
+      credibility: 0.6,
+      contact: null,
+      facts: [],
+      oppositeQueries: [],
+    }))!;
+
+    // An intel demand lead: the operator brings the supply.
+    const forLead = (await createOffNetworkMatch({ origin: "intel", ref: leadId, counterpartyName: "Acme Lift Trucks", counterpartyContact: "sales@acme.example", terms: "2019 reach truck, delivered", priceMinor: 1200000, currency: "USD", createdBy: "op-1" }))!;
+    expect(forLead).toMatchObject({ listing_id: `intel:${leadId}`, listing_side: "demand", listing_title: `Needs a reach truck ${RUN}`, counterparty_name: "Acme Lift Trucks", price_minor: 1200000, status: "open", created_by: "op-1" });
+    // A marketplace supply row: the operator brings the buyer.
+    const forSupply = (await createOffNetworkMatch({ origin: "marketplace", ref: supplyId, counterpartyName: "Dayton Storage Co", counterpartyContact: null, terms: null, priceMinor: null, currency: null, createdBy: "op-1" }))!;
+    expect(forSupply).toMatchObject({ listing_id: `marketplace:${supplyId}`, listing_side: "supply", listing_title: `Pallet racking ${RUN}` });
+    // No such listing: nothing is recorded.
+    expect(await createOffNetworkMatch({ origin: "intel", ref: randomUUID(), counterpartyName: "Nobody", counterpartyContact: null, terms: null, priceMinor: null, currency: null, createdBy: "op-1" })).toBeUndefined();
+
+    const byId = new Map((await listMarketListings()).map((l) => [l.id, l]));
+    // The system still found no counterparty itself; the operator's deal rides alongside.
+    expect(byId.get(`intel:${leadId}`)).toMatchObject({ matched: false });
+    expect(byId.get(`intel:${leadId}`)!.off_network.map((m) => m.id)).toEqual([forLead.id]);
+    expect(byId.get(`marketplace:${supplyId}`)!.off_network.map((m) => m.counterparty_name)).toEqual(["Dayton Storage Co"]);
+
+    const agreed = (await updateOffNetworkMatchStatus(forLead.id, { status: "agreed", note: "PO expected Friday" }))!;
+    expect(agreed).toMatchObject({ status: "agreed", outcome_note: "PO expected Friday" });
+    // A status change without a note keeps the note already recorded.
+    expect(await updateOffNetworkMatchStatus(forLead.id, { status: "won" })).toMatchObject({ status: "won", outcome_note: "PO expected Friday" });
+    expect(await updateOffNetworkMatchStatus(randomUUID(), { status: "lost" })).toBeUndefined();
+
+    const mine = (await listOffNetworkMatches()).filter((m) => m.id === forLead.id || m.id === forSupply.id);
+    expect(mine.map((m) => m.status).sort()).toEqual(["open", "won"]);
   });
 });

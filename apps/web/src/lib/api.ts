@@ -294,6 +294,33 @@ export interface IntelQueue {
     reasons: Record<string, number>;
   }[];
 }
+export type OffNetworkStatus = "open" | "contacted" | "agreed" | "won" | "lost" | "dismissed";
+
+/** A counterparty you hold outside the network, recorded against one listing. */
+export interface OffNetworkMatch {
+  id: string;
+  listing_id: string;
+  listing_side: "demand" | "supply";
+  listing_title: string;
+  counterparty_name: string;
+  counterparty_contact: string | null;
+  terms: string | null;
+  price_minor: number | null;
+  currency: string | null;
+  status: OffNetworkStatus;
+  outcome_note: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface OffNetworkInput {
+  counterparty_name: string;
+  counterparty_contact?: string | null;
+  terms?: string | null;
+  price_minor?: number | null;
+  currency?: string | null;
+}
+
 /** One demand or supply record (GET /marketplace/listings), listed whether or not it was matched. */
 export interface MarketListing {
   id: string;
@@ -315,12 +342,15 @@ export interface MarketListing {
   matched: boolean;
   match_detail: string;
   status: string;
+  off_network: OffNetworkMatch[];
   created_at: string;
 }
 export interface MarketListings {
   demand: MarketListing[];
   supply: MarketListing[];
   counts: Record<"demand" | "supply", { total: number; unmatched: number }>;
+  /** Every off-network deal, newest first. */
+  off_network: OffNetworkMatch[];
 }
 export interface IntelOutcomeInput {
   status: "open" | "contacted" | "responded" | "won" | "lost" | "dismissed";
@@ -335,6 +365,8 @@ export const api = {
   intelQueue: () => request<IntelQueue>("/intel/queue"),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
   marketListings: () => request<MarketListings>("/marketplace/listings"),
+  addOffNetwork: (listingId: string, body: OffNetworkInput) => request<OffNetworkMatch>(`/marketplace/listings/${encodeURIComponent(listingId)}/off-network`, jsonBody(body)),
+  setOffNetworkStatus: (id: string, body: { status: OffNetworkStatus; note?: string | null }) => request<OffNetworkMatch>(`/marketplace/off-network/${id}/status`, jsonBody(body)),
 
   // Missions (§16)
   createMission: (input: CreateMissionInput) => request<Mission>("/missions", jsonBody(input)),
