@@ -8,8 +8,11 @@ import {
   intelRunsStartedToday,
   intelSpentTodayUsd,
   knownIntelLeadHashes,
+  listIntelQuerySources,
+  listIntelQueryYield,
   listUnassessedIntelLeads,
   setIntelLeadStatus,
+  setIntelQuerySourceStatus,
   touchIntelSource,
   upsertIntelCandidate,
   type IntelRunTotals,
@@ -30,7 +33,8 @@ import {
   type Assessment,
   type Detection,
 } from "./prompts";
-import { stageOneQueries } from "./queries";
+import { stageOneQueries, type StageOneQuery } from "./queries";
+import { isUnproductive, sourceQueries } from "./sources";
 import {
   bucketFor,
   confidenceFor,
@@ -129,7 +133,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
 
   try {
     // ---- Stage 1-2: broad discovery + detection
-    for (const q of stageOneQueries(runIndex, opts.queriesPerRun)) {
+    for (const q of stageOneQueries(runIndex, opts.queriesPerRun, await runtimeSourceQueries(errors))) {
       if (!budget.canSpend(opts.search.costPerQueryUsd + est.detectionUsd)) {
         exhausted = true;
         break;
@@ -314,6 +318,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       notes,
     };
     await finishIntelRun(runId, totals);
+    await pauseUnproductiveSources();
     log.info({ runId, ...totals, notes: undefined, errors: errors.length }, "intel.run.complete");
     return { runId, ...totals };
   } catch (err) {
@@ -329,6 +334,35 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
     };
     await finishIntelRun(runId, totals);
     throw err;
+  }
+}
+
+/**
+ * Queries from sources added at runtime. A failure here (e.g. the table not
+ * migrated yet) costs only those sources: the built-in pool still runs.
+ */
+async function runtimeSourceQueries(errors: string[]): Promise<StageOneQuery[]> {
+  try {
+    return (await listIntelQuerySources("active")).flatMap(sourceQueries);
+  } catch (err) {
+    errors.push(`runtime sources: ${String(err).slice(0, 200)}`);
+    return [];
+  }
+}
+
+/** Pauses runtime sources that have been searched repeatedly without one lead. Runs after the ledger is closed; never fails a run. */
+async function pauseUnproductiveSources(): Promise<void> {
+  try {
+    const active = await listIntelQuerySources("active");
+    if (active.length === 0) return;
+    const yieldByQuery = new Map((await listIntelQueryYield(5000)).map((y) => [y.query, { searches: y.searches, leads: y.leads }]));
+    for (const source of active) {
+      if (!isUnproductive(sourceQueries(source).map((q) => q.query), yieldByQuery)) continue;
+      await setIntelQuerySourceStatus(source.id, "paused", "no_leads_after_repeated_searches");
+      log.info({ domain: source.domain, orientation: source.orientation }, "intel.source.paused_unproductive");
+    }
+  } catch (err) {
+    log.warn({ err: String(err) }, "intel.source.pause_check_failed");
   }
 }
 

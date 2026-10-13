@@ -45,11 +45,26 @@ const VENUES: Venue[] = [
   { site: "support.google.com", orientation: "problem", topics: ["GA4 purchases not showing", "conversions not recording analytics"] },
 ];
 
-/** The full pool, in a stable order. */
-export function stageOnePool(): StageOneQuery[] {
+/** Sites the built-in venue list already searches. */
+export function builtinSites(): Set<string> {
+  return new Set(VENUES.map((v) => v.site));
+}
+
+/**
+ * The full pool, in a stable order: the built-in venues, then `extra` —
+ * queries from sources added at runtime (see sources.ts). A query already in
+ * the pool is not added twice.
+ */
+export function stageOnePool(extra: StageOneQuery[] = []): StageOneQuery[] {
   const pool: StageOneQuery[] = [];
   for (const v of VENUES) {
     for (const topic of v.topics) pool.push({ query: `site:${v.site} ${topic}`, orientation: v.orientation, freshness: "month" });
+  }
+  const seen = new Set(pool.map((q) => q.query));
+  for (const q of extra) {
+    if (seen.has(q.query)) continue;
+    seen.add(q.query);
+    pool.push(q);
   }
   return pool;
 }
@@ -59,8 +74,8 @@ export function stageOnePool(): StageOneQuery[] {
  * problem so every run samples all three orientations, and rotating through
  * the pool across runs.
  */
-export function stageOneQueries(runIndex: number, count: number): StageOneQuery[] {
-  const pool = stageOnePool();
+export function stageOneQueries(runIndex: number, count: number, extra: StageOneQuery[] = []): StageOneQuery[] {
+  const pool = stageOnePool(extra);
   const total = Math.min(count, pool.length);
   const lanes = (["demand", "problem", "supply"] as const).map((k) => pool.filter((q) => q.orientation === k));
   // How many picks each lane gets per run (interleaved, skipping empty lanes)…

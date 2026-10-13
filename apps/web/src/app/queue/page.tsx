@@ -5,6 +5,7 @@ import { Badge, Button, Card, EmptyState, PageHeader, StatCard, tokens, type Ton
 import { api, type IntelCandidate, type IntelOutcomeInput, type IntelQueue } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
+import { IntelSources } from "../../components/IntelSources";
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const range = (r: [number, number] | null | undefined) => (r ? `${usd(r[0])}–${usd(r[1])}` : "unknown");
@@ -361,6 +362,7 @@ export default function QueuePage() {
                 ))
               )}
             </Card>
+            <IntelSources />
             <Card title="Query yield" subtitle="What each discovery search produced. Prune queries that never yield leads; add variety where they do.">
               {q.queries.length === 0 ? (
                 <EmptyState compact title="No runs yet" description="Each scheduled run records results, new pages, leads and actionable candidates per query." />

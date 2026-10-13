@@ -470,6 +470,27 @@ export interface IntelCandidatesTable {
   updated_at: Timestamp;
 }
 
+export interface IntelQuerySourcesTable {
+  id: Generated<string>;
+  external_id: string | null;
+  name: string;
+  domain: string;
+  orientation: string;
+  topics: Json;
+  sector: string | null;
+  geography: string | null;
+  signal_type: string | null;
+  access_method: string | null;
+  notes: string | null;
+  priority: string | null;
+  evidence_url: string | null;
+  status: string;
+  status_reason: string | null;
+  origin: Generated<string>;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface OffnetworkMatchesTable {
   id: Generated<string>;
   listing_origin: string;
@@ -518,4 +539,5 @@ export interface Database {
   intel_leads: IntelLeadsTable;
   intel_candidates: IntelCandidatesTable;
   offnetwork_matches: OffnetworkMatchesTable;
+  intel_query_sources: IntelQuerySourcesTable;
 }

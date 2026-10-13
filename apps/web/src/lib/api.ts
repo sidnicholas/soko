@@ -294,6 +294,39 @@ export interface IntelQueue {
     reasons: Record<string, number>;
   }[];
 }
+/** A search source added at runtime (GET /intel/sources), with what it has yielded so far. */
+export interface IntelQuerySource {
+  id: string;
+  external_id: string | null;
+  name: string;
+  domain: string;
+  orientation: "demand" | "supply" | "problem";
+  topics: string[];
+  sector: string | null;
+  geography: string | null;
+  signal_type: string | null;
+  access_method: string | null;
+  notes: string | null;
+  priority: string | null;
+  evidence_url: string | null;
+  status: "active" | "paused" | "rejected";
+  status_reason: string | null;
+  origin: string;
+  created_at: string;
+  updated_at: string;
+  yield: { searches: number; results: number; leads: number; actionable: number };
+}
+/** What POST /intel/sources did with a submission. */
+export interface IntelSourceImport {
+  received: number;
+  added: number;
+  added_active: number;
+  added_paused: number;
+  already_known: number;
+  rejected: number;
+  results: { source_id: string | null; domain: string; orientation: string | null; outcome: "added" | "already_known" | "rejected"; status: string; reason: string | null }[];
+}
+
 export type OffNetworkStatus = "open" | "contacted" | "agreed" | "won" | "lost" | "dismissed";
 
 /** A counterparty you hold outside the network, recorded against one listing. */
@@ -364,6 +397,9 @@ export const api = {
   // Opportunity intelligence (AIOOS action queue)
   intelQueue: () => request<IntelQueue>("/intel/queue"),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
+  intelSources: () => request<IntelQuerySource[]>("/intel/sources"),
+  importIntelSources: (document: unknown) => request<IntelSourceImport>("/intel/sources", jsonBody(document)),
+  setIntelSourceStatus: (id: string, status: "active" | "paused") => request<IntelQuerySource>(`/intel/sources/${id}/status`, jsonBody({ status })),
   marketListings: () => request<MarketListings>("/marketplace/listings"),
   addOffNetwork: (listingId: string, body: OffNetworkInput) => request<OffNetworkMatch>(`/marketplace/listings/${encodeURIComponent(listingId)}/off-network`, jsonBody(body)),
   setOffNetworkStatus: (id: string, body: { status: OffNetworkStatus; note?: string | null }) => request<OffNetworkMatch>(`/marketplace/off-network/${id}/status`, jsonBody(body)),

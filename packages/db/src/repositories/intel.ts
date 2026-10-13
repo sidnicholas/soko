@@ -423,3 +423,123 @@ export async function listIntelQueryYield(limit = 100) {
   `.execute(getDb());
   return result.rows;
 }
+
+// ---------------------------------------------------------------- query sources (migration 0021)
+
+export type IntelQuerySourceStatus = "active" | "paused" | "rejected";
+export type IntelOrientation = "demand" | "supply" | "problem";
+
+export interface IntelQuerySource {
+  id: string;
+  external_id: string | null;
+  name: string;
+  domain: string;
+  orientation: IntelOrientation;
+  topics: string[];
+  sector: string | null;
+  geography: string | null;
+  signal_type: string | null;
+  access_method: string | null;
+  notes: string | null;
+  priority: string | null;
+  evidence_url: string | null;
+  status: IntelQuerySourceStatus;
+  status_reason: string | null;
+  origin: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const QUERY_SOURCE_COLUMNS = [
+  "id",
+  "external_id",
+  "name",
+  "domain",
+  "orientation",
+  "topics",
+  "sector",
+  "geography",
+  "signal_type",
+  "access_method",
+  "notes",
+  "priority",
+  "evidence_url",
+  "status",
+  "status_reason",
+  "origin",
+  sql<string>`created_at::text`.as("created_at"),
+  sql<string>`updated_at::text`.as("updated_at"),
+] as const;
+
+function toQuerySource(r: Record<string, unknown>): IntelQuerySource {
+  return { ...(r as unknown as IntelQuerySource), topics: Array.isArray(r["topics"]) ? (r["topics"] as string[]) : [] };
+}
+
+export interface NewIntelQuerySource {
+  externalId: string | null;
+  name: string;
+  domain: string;
+  orientation: IntelOrientation;
+  topics: string[];
+  /** True when the submitter supplied the topics; derived ones never overwrite what is stored. */
+  topicsExplicit: boolean;
+  sector: string | null;
+  geography: string | null;
+  signalType: string | null;
+  accessMethod: string | null;
+  notes: string | null;
+  priority: string | null;
+  evidenceUrl: string | null;
+  status: IntelQuerySourceStatus;
+  statusReason: string | null;
+  origin: string;
+}
+
+/**
+ * Adds a source, or refreshes the descriptive fields of one already known for
+ * that (domain, orientation). A resubmission never changes `status`: a source
+ * a person paused, or one paused for yielding nothing, stays that way.
+ */
+export async function upsertIntelQuerySource(s: NewIntelQuerySource): Promise<{ source: IntelQuerySource; created: boolean }> {
+  const described = {
+    external_id: s.externalId,
+    name: s.name,
+    sector: s.sector,
+    geography: s.geography,
+    signal_type: s.signalType,
+    access_method: s.accessMethod,
+    notes: s.notes,
+    priority: s.priority,
+    evidence_url: s.evidenceUrl,
+  };
+  const row = await getDb()
+    .insertInto("intel_query_sources")
+    .values({ ...described, domain: s.domain, orientation: s.orientation, topics: json(s.topics), status: s.status, status_reason: s.statusReason, origin: s.origin })
+    .onConflict((oc) =>
+      oc.columns(["domain", "orientation"]).doUpdateSet({
+        ...described,
+        ...(s.topicsExplicit ? { topics: json(s.topics) } : {}),
+        updated_at: sql`now()`,
+      }),
+    )
+    .returning([...QUERY_SOURCE_COLUMNS, sql<boolean>`(xmax = 0)`.as("created")])
+    .executeTakeFirstOrThrow();
+  const { created, ...source } = row;
+  return { source: toQuerySource(source), created };
+}
+
+export async function listIntelQuerySources(status?: IntelQuerySourceStatus): Promise<IntelQuerySource[]> {
+  let q = getDb().selectFrom("intel_query_sources").select(QUERY_SOURCE_COLUMNS).orderBy("status").orderBy("domain").orderBy("orientation").limit(2000);
+  if (status) q = q.where("status", "=", status);
+  return (await q.execute()).map(toQuerySource);
+}
+
+export async function setIntelQuerySourceStatus(id: string, status: IntelQuerySourceStatus, reason: string | null): Promise<IntelQuerySource | undefined> {
+  const row = await getDb()
+    .updateTable("intel_query_sources")
+    .set({ status, status_reason: reason, updated_at: sql`now()` })
+    .where("id", "=", id)
+    .returning(QUERY_SOURCE_COLUMNS)
+    .executeTakeFirst();
+  return row ? toQuerySource(row) : undefined;
+}
