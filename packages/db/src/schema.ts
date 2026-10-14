@@ -95,6 +95,10 @@ export interface SupplyTable {
   source_evidence_id: string | null;
   last_verified_at: Timestamp | null;
   created_at: Timestamp;
+  /** The listing's page at its source (0023). */
+  listing_url: Generated<string | null>;
+  /** Who is selling, as the source names them: `{ name, url?, detail? }` (0023). */
+  seller_json: Json;
 }
 
 export interface MatchesTable {

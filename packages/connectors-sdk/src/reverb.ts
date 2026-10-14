@@ -22,7 +22,19 @@ interface ReverbListing {
   condition?: { display_name?: string };
   price?: { amount_cents?: number; currency?: string };
   categories?: { full_name?: string }[];
+  shop_name?: string;
+  shop?: { slug?: string; preferred_seller?: boolean };
   _links?: { web?: { href?: string } };
+}
+
+/** The shop selling the listing. Reverb's listing search gives no item location. */
+function reverbSeller(l: ReverbListing) {
+  if (!l.shop_name) return undefined;
+  return {
+    name: l.shop_name,
+    ...(l.shop?.slug ? { url: `https://reverb.com/shop/${encodeURIComponent(l.shop.slug)}` } : {}),
+    ...(l.shop?.preferred_seller ? { detail: "Reverb preferred seller" } : {}),
+  };
 }
 
 const SEARCH_URL = "https://api.reverb.com/api/listings";
@@ -75,6 +87,8 @@ export function makeReverbConnector(config: ReverbConfig = {}): SourceConnector 
               category: "musical_instruments",
               price: typeof l.price?.amount_cents === "number" ? l.price.amount_cents : null,
               currency: l.price?.currency ?? "USD",
+              condition,
+              seller: reverbSeller(l),
             },
           };
         });

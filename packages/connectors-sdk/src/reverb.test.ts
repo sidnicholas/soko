@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeReverbConnector } from "./reverb";
+import { normalizeObservation } from "./normalize";
 
 function stubFetch(body: unknown): { fetchImpl: typeof fetch; calls: { url: string; init?: RequestInit }[] } {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -20,6 +21,8 @@ const LISTINGS = {
       condition: { display_name: "Excellent" },
       price: { amount: "649.99", amount_cents: 64999, currency: "USD" },
       categories: [{ full_name: "Electric Guitars / Solid Body" }],
+      shop_name: "Alegree",
+      shop: { slug: "alegree", preferred_seller: true },
       _links: { web: { href: "https://reverb.com/item/84598461-fender-player-stratocaster" } },
     },
     { title: "no id, dropped" },
@@ -46,6 +49,12 @@ describe("makeReverbConnector", () => {
       category: "musical_instruments",
       price: 64999,
       currency: "USD",
+    });
+    expect(normalizeObservation(obs[0]!)).toMatchObject({
+      uri: "https://reverb.com/item/84598461-fender-player-stratocaster",
+      condition: "Excellent",
+      seller: { name: "Alegree", url: "https://reverb.com/shop/alegree", detail: "Reverb preferred seller" },
+      location: null,
     });
   });
 

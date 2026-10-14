@@ -44,6 +44,58 @@ export type MissionListItem = Mission & {
 };
 
 /** GET /missions/:id/rejected rows: opportunities set aside, with who/why (Phase 4 steering). */
+/** A buyer or seller as the source describes them. */
+export interface OpportunityCounterparty {
+  name: string;
+  url?: string;
+  detail?: string;
+}
+
+/** One demand or supply record behind an opportunity (packages/db `OpportunityParty`). */
+export interface OpportunityParty {
+  kind: "demand" | "supply";
+  id: string;
+  title: string;
+  summary: string;
+  category: string | null;
+  price: { amount: number; currency: string } | null;
+  price_label: "Asking price" | "Budget" | "Target price";
+  quantity: number | null;
+  platform: string;
+  external_ref: string | null;
+  url: string | null;
+  location: string | null;
+  counterparty: OpportunityCounterparty | null;
+  condition: string | null;
+  needed_by: string | null;
+  availability: string;
+  last_verified_at: string | null;
+  created_at: string;
+  mission: { id: string; title: string } | null;
+  signal: { channel: string; captured_at: string } | null;
+}
+
+export interface OpportunitySide {
+  role: "buyer" | "seller";
+  label: string;
+  note: string | null;
+  parties: OpportunityParty[];
+}
+
+export interface OpportunityDetails {
+  kind: string;
+  sides: OpportunitySide[];
+  match: {
+    scores: { semantic: number; constraint: number; geography: number; timing: number; quality: number; total: number };
+    rationale: string | null;
+    shared_terms: string[];
+    category_aligned: boolean | null;
+    within_budget: boolean | null;
+  } | null;
+}
+
+export type OpportunityDetail = Opportunity & { details: OpportunityDetails | null };
+
 export interface RejectedOpportunity {
   id: string;
   overall_score: number;
@@ -425,7 +477,7 @@ export const api = {
 
   // Opportunities (§16)
   listOpportunities: () => request<Opportunity[]>("/opportunities"),
-  getOpportunity: (id: string) => request<Opportunity>(`/opportunities/${id}`),
+  getOpportunity: (id: string) => request<OpportunityDetail>(`/opportunities/${id}`),
   reverifyOpportunity: (id: string) => request<Opportunity>(`/opportunities/${id}/reverify`, jsonBody({})),
   prepareNegotiation: (id: string) => request<Negotiation>(`/opportunities/${id}/prepare-negotiation`, jsonBody({})),
 

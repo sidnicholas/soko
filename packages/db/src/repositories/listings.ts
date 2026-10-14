@@ -154,6 +154,7 @@ async function supplyListings(limit: number): Promise<MarketListing[]> {
     currency: string;
     quantity: number | null;
     location: string | null;
+    listing_url: string | null;
     availability_status: string;
     created_at: string;
     matches: number;
@@ -161,7 +162,7 @@ async function supplyListings(limit: number): Promise<MarketListing[]> {
   }>`
     select s.id, s.source_id, s.title, s.description, s.category, s.price, s.currency, s.quantity,
            coalesce(s.location->>'label', s.location->>'city', s.location->>'region') as location,
-           s.availability_status, s.created_at::text as created_at,
+           s.listing_url, s.availability_status, s.created_at::text as created_at,
            coalesce(m.matches, 0)::int as matches, coalesce(m.opportunities, 0)::int as opportunities
     from supply s
     left join lateral (
@@ -189,7 +190,7 @@ async function supplyListings(limit: number): Promise<MarketListing[]> {
     location: r.location,
     needed_by: null,
     source: r.source_id,
-    url: null,
+    url: r.listing_url,
     contact: null,
     matched: r.matches > 0,
     match_detail: matchDetail(r.matches, r.opportunities),

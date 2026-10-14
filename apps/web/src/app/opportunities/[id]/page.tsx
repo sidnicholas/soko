@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import type { Opportunity } from "@opportunity-os/contracts";
 import {
   Badge,
   Button,
   Card,
   PageHeader,
   StatCard,
+  formatDateTime,
   formatDuration,
   formatMoney,
   formatScore,
@@ -17,7 +17,7 @@ import {
   tonePalette,
   type Tone,
 } from "@opportunity-os/ui";
-import { api } from "../../../lib/api";
+import { api, type OpportunityDetail, type OpportunityDetails, type OpportunityParty, type OpportunitySide } from "../../../lib/api";
 import { useAsync } from "../../../lib/useAsync";
 import { AsyncView } from "../../../components/AsyncView";
 import { riskBand, scoreTone } from "../../../lib/opportunity";
@@ -37,8 +37,138 @@ function ScoreMeter({ label, value, tone }: { label: string; value: number; tone
   );
 }
 
+/** Display names for the connector and channel ids records carry as `source_id`. */
+const PLATFORM_LABELS: Record<string, string> = {
+  ebay: "eBay",
+  reverb: "Reverb",
+  mission: "Mission (entered in Opportunity OS)",
+  sms: "SMS",
+  telegram: "Telegram",
+  whatsapp: "WhatsApp",
+  email: "Email",
+};
+
+function platformLabel(id: string): string {
+  return PLATFORM_LABELS[id] ?? id;
+}
+
+const labelStyle = { fontSize: tokens.fontSize.xs, textTransform: "uppercase", letterSpacing: "0.04em", color: tokens.color.inkSubtle } as const;
+const valueStyle = { margin: `${tokens.space.xs}px 0 0`, fontSize: tokens.fontSize.sm, color: tokens.color.ink, wordBreak: "break-word" } as const;
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <dt style={labelStyle}>{label}</dt>
+      <dd style={valueStyle}>{children}</dd>
+    </div>
+  );
+}
+
+function ExternalLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer nofollow" className="oos-link">
+      {children}
+    </a>
+  );
+}
+
+function PartyDetails({ party }: { party: OpportunityParty }) {
+  const dash = <span style={{ color: tokens.color.inkSubtle }}>Not provided by the source</span>;
+  return (
+    <div className="oos-stack" style={{ gap: tokens.space.md }}>
+      <div>
+        <div style={{ fontWeight: 600, color: tokens.color.ink }}>
+          {party.url ? <ExternalLink href={party.url}>{party.title}</ExternalLink> : party.title}
+        </div>
+        {party.summary && party.summary !== party.title && (
+          <p style={{ margin: `${tokens.space.xs}px 0 0`, fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted, whiteSpace: "pre-wrap" }}>{party.summary}</p>
+        )}
+      </div>
+      <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: tokens.space.md, margin: 0 }}>
+        <Field label={party.kind === "supply" ? "Seller" : "Buyer"}>
+          {party.counterparty ? (
+            <>
+              {party.counterparty.url ? <ExternalLink href={party.counterparty.url}>{party.counterparty.name}</ExternalLink> : party.counterparty.name}
+              {party.counterparty.detail && <div style={{ color: tokens.color.inkMuted }}>{party.counterparty.detail}</div>}
+            </>
+          ) : party.mission ? (
+            "Mission owner"
+          ) : (
+            dash
+          )}
+        </Field>
+        <Field label="Platform">
+          {platformLabel(party.platform)}
+          {party.signal && <div style={{ color: tokens.color.inkMuted }}>via {party.signal.channel}, {formatDateTime(party.signal.captured_at)}</div>}
+        </Field>
+        <Field label={party.price_label}>{formatMoney(party.price)}</Field>
+        <Field label="Location">{party.location ?? dash}</Field>
+        {party.condition && <Field label="Condition">{party.condition}</Field>}
+        {party.quantity !== null && <Field label="Quantity">{party.quantity}</Field>}
+        {party.category && <Field label="Category">{party.category}</Field>}
+        {party.needed_by && <Field label="Needed by">{formatDateTime(party.needed_by)}</Field>}
+        {party.mission && (
+          <Field label="Mission">
+            <Link href={`/missions/${party.mission.id}`} className="oos-link">
+              {party.mission.title}
+            </Link>
+          </Field>
+        )}
+        <Field label="Listing">
+          {party.url ? <ExternalLink href={party.url}>Open on {platformLabel(party.platform)}</ExternalLink> : party.kind === "supply" ? dash : "No public listing"}
+          {party.external_ref && <div style={{ color: tokens.color.inkMuted, fontFamily: tokens.font.mono, fontSize: tokens.fontSize.xs }}>{party.external_ref}</div>}
+        </Field>
+        <Field label="Availability">
+          {statusLabel(party.availability)}
+          <div style={{ color: tokens.color.inkMuted }}>Verified {formatDateTime(party.last_verified_at, { dash: "never" })}</div>
+        </Field>
+      </dl>
+    </div>
+  );
+}
+
+function SideCard({ side }: { side: OpportunitySide }) {
+  return (
+    <Card title={side.label} subtitle={side.note ?? undefined}>
+      {side.parties.length === 0 ? (
+        <p style={{ margin: 0, fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>No {side.role} record is linked to this opportunity.</p>
+      ) : (
+        <div className="oos-stack" style={{ gap: tokens.space.lg }}>
+          {side.parties.map((p, i) => (
+            <div key={p.id} style={i > 0 ? { borderTop: `1px solid ${tokens.color.border}`, paddingTop: tokens.space.lg } : undefined}>
+              <PartyDetails party={p} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MatchCard({ match }: { match: NonNullable<OpportunityDetails["match"]> }) {
+  const yesNo = (v: boolean | null) => (v === null ? "Unknown" : v ? "Yes" : "No");
+  return (
+    <Card title="Why they matched" subtitle="Match scores from 0 to 1, higher is better.">
+      <div className="oos-stack" style={{ gap: tokens.space.md }}>
+        {match.rationale && <p style={{ margin: 0, fontSize: tokens.fontSize.sm, color: tokens.color.ink }}>{match.rationale}</p>}
+        <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: tokens.space.md, margin: 0 }}>
+          <Field label="Same category">{yesNo(match.category_aligned)}</Field>
+          <Field label="Within budget">{yesNo(match.within_budget)}</Field>
+          <Field label="Shared terms">{match.shared_terms.length > 0 ? match.shared_terms.join(", ") : "None"}</Field>
+        </dl>
+        <ScoreMeter label="Match total" value={match.scores.total} tone={scoreTone(match.scores.total)} />
+        <ScoreMeter label="Description similarity" value={match.scores.semantic} tone={scoreTone(match.scores.semantic)} />
+        <ScoreMeter label="Constraints" value={match.scores.constraint} tone={scoreTone(match.scores.constraint)} />
+        <ScoreMeter label="Geography" value={match.scores.geography} tone={scoreTone(match.scores.geography)} />
+        <ScoreMeter label="Timing" value={match.scores.timing} tone={scoreTone(match.scores.timing)} />
+        <ScoreMeter label="Quality" value={match.scores.quality} tone={scoreTone(match.scores.quality)} />
+      </div>
+    </Card>
+  );
+}
+
 export default function OpportunityDetailPage({ params }: { params: { id: string } }) {
-  const state = useAsync<Opportunity>(() => api.getOpportunity(params.id), [params.id]);
+  const state = useAsync<OpportunityDetail>(() => api.getOpportunity(params.id), [params.id]);
   const [busy, setBusy] = useState<null | "reverify" | "negotiate">(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -111,6 +241,16 @@ export default function OpportunityDetailPage({ params }: { params: { id: string
               <StatCard label="Net profit" value={formatMoney(o.expected_net_profit)} tone="success" hint={`Capital required ${formatMoney(o.capital_required)}`} />
               <StatCard label="Time to cash" value={formatDuration(o.time_to_cash_minutes)} hint={`Close probability ${formatScore(o.close_probability)}`} />
             </div>
+
+            {o.details && o.details.sides.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: tokens.space.lg }}>
+                {o.details.sides.map((side) => (
+                  <SideCard key={side.label} side={side} />
+                ))}
+              </div>
+            )}
+
+            {o.details?.match && <MatchCard match={o.details.match} />}
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: tokens.space.lg }}>
               <Card title="Value & likelihood" subtitle="Higher is better.">

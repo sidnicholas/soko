@@ -60,6 +60,10 @@ async function persist(supplyCount: { n: number }, normalized: NormalizedSupply)
     currency: normalized.price?.currency ?? "USD",
     quantity: normalized.quantity,
     sourceReliability: normalized.source_reliability,
+    listingUrl: normalized.uri,
+    seller: normalized.seller,
+    location: normalized.location,
+    condition: normalized.condition,
   });
   supplyCount.n++;
 }

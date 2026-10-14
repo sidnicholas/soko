@@ -6,6 +6,7 @@ import {
   getDb,
   getNegotiationContext,
   getOpportunity,
+  getOpportunityDetails,
   listOpportunitiesForOperator,
   recordOutcome,
   getEntityIdForMember,
@@ -29,6 +30,12 @@ export class OpportunityService {
     const opportunity = await getOpportunity(id);
     if (!opportunity) throw new NotFoundException(`Opportunity ${id} not found`);
     return opportunity;
+  }
+
+  /** The opportunity plus who is on each side of it (listings, sellers, locations, match explanation). */
+  async getWithDetails(id: string) {
+    const [opportunity, details] = await Promise.all([this.get(id), getOpportunityDetails(id)]);
+    return { ...opportunity, details: details ?? null };
   }
 
   /** Re-check availability: stamp last_verified_at and emit a verification event. */

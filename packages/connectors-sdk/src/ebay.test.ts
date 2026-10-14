@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { makeEbayConnector } from "./ebay";
+import { normalizeObservation } from "./normalize";
 
 function stubFetch(): { fetchImpl: typeof fetch; calls: { url: string; init?: RequestInit }[] } {
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -28,6 +29,9 @@ function stubFetch(): { fetchImpl: typeof fetch; calls: { url: string; init?: Re
               itemWebUrl: "https://www.ebay.com/itm/123456789",
               price: { value: "189.00", currency: "USD" },
               categories: [{ categoryName: "Monitors" }],
+              condition: "Seller refurbished",
+              seller: { username: "monitor_outlet", feedbackPercentage: "99.6", feedbackScore: 4210 },
+              itemLocation: { city: "Austin", stateOrProvince: "TX", postalCode: "787**", country: "US" },
             },
             { itemId: undefined, title: "malformed, dropped" },
           ],
@@ -52,6 +56,12 @@ describe("makeEbayConnector", () => {
     expect(obs[0]!.content["title"]).toBe("27in 4K Monitor");
     expect(obs[0]!.content["price"]).toBe(18900);
     expect(obs[0]!.content["category"]).toBe("electronics");
+    expect(normalizeObservation(obs[0]!)).toMatchObject({
+      uri: "https://www.ebay.com/itm/123456789",
+      condition: "Seller refurbished",
+      seller: { name: "monitor_outlet", url: "https://www.ebay.com/usr/monitor_outlet", detail: "99.6% positive, 4,210 ratings" },
+      location: { label: "Austin, TX, US", city: "Austin", region: "TX", postalCode: "787**", country: "US" },
+    });
 
     const tokenCall = calls.find((c) => c.url.includes("/oauth2/token"));
     expect(tokenCall).toBeDefined();

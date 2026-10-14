@@ -105,6 +105,10 @@ export async function runDiscoveryCycle(input: DiscoveryInput): Promise<Discover
       currency: s.price?.currency ?? input.demand.currency,
       quantity: s.quantity,
       sourceReliability: s.source_reliability,
+      listingUrl: s.uri,
+      seller: s.seller,
+      location: s.location,
+      condition: s.condition,
     });
     supplyPersisted++;
 

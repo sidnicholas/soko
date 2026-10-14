@@ -28,10 +28,15 @@ export class OpportunitiesController {
   }
 
   @Get(":id")
-  @ApiOperation({ summary: "Opportunity detail with economics and scores" })
-  get(@CurrentUser() user: Principal, @Param("id") id: string) {
+  @ApiOperation({ summary: "Opportunity detail with economics, scores, and the buyer and seller behind it" })
+  async get(@CurrentUser() user: Principal, @Param("id") id: string) {
     requirePermission(user, "opportunity:read");
-    return this.opportunities.get(id);
+    // The detail carries the buyer's mission text, so it follows mission access
+    // (404 without it, as on every per-mission route). Graph deals have no mission.
+    const missionId = await getOpportunityMissionId(id);
+    if (missionId === undefined) throw new NotFoundException(`Opportunity ${id} not found`);
+    if (missionId) await requireMissionAccess(user, missionId, "view");
+    return this.opportunities.getWithDetails(id);
   }
 
   @Post(":id/reject")

@@ -24,6 +24,18 @@ interface EbayItemSummary {
   itemWebUrl?: string;
   price?: { value?: string; currency?: string };
   categories?: { categoryName?: string }[];
+  condition?: string;
+  seller?: { username?: string; feedbackPercentage?: string; feedbackScore?: number };
+  itemLocation?: { city?: string; stateOrProvince?: string; postalCode?: string; country?: string };
+}
+
+/** The seller as eBay names them, with their feedback as the reputation note. */
+function ebaySeller(s: EbayItemSummary["seller"]) {
+  if (!s?.username) return undefined;
+  const feedback = [s.feedbackPercentage ? `${s.feedbackPercentage}% positive` : null, typeof s.feedbackScore === "number" ? `${s.feedbackScore.toLocaleString("en-US")} ratings` : null]
+    .filter(Boolean)
+    .join(", ");
+  return { name: s.username, url: `https://www.ebay.com/usr/${encodeURIComponent(s.username)}`, ...(feedback ? { detail: feedback } : {}) };
 }
 
 const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
@@ -114,6 +126,11 @@ export function makeEbayConnector(config: EbayConfig): SourceConnector {
             category: canonicalCategory(item.categories?.[0]?.categoryName),
             price: toMinorUnits(item.price?.value),
             currency: item.price?.currency ?? "USD",
+            condition: item.condition,
+            seller: ebaySeller(item.seller),
+            location: item.itemLocation
+              ? { city: item.itemLocation.city, region: item.itemLocation.stateOrProvince, postalCode: item.itemLocation.postalCode, country: item.itemLocation.country }
+              : undefined,
           },
         }));
     },
