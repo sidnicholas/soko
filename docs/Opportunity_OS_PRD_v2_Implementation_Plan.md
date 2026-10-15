@@ -65,9 +65,9 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 
 ## 5. Operator steps to close P0
 
-1. Apply migration 0024 to Supabase (no code depends on it, so it can go before or after the deploy): `DATABASE_URL=<prod> pnpm db:migrate`, or run the file in the SQL editor and insert `0024_missions_rest_read_only.sql` into `schema_migrations`.
-2. Confirm in production that 0022 and 0024 hold: as the `authenticated` role, selecting from `users` returns no rows and inserting into `missions` fails with a row-level security error.
-3. Add `worker-outbox` as a Railway cron (`pnpm --filter @opportunity-os/worker-outbox start -- --once`, every 5 minutes), same pattern as the other workers.
+1. **Done 2026-10-15.** Apply migration 0024 to Supabase (no code depends on it, so it can go before or after the deploy): `DATABASE_URL=<prod> pnpm db:migrate`, or run the file in the SQL editor and insert `0024_missions_rest_read_only.sql` into `schema_migrations`.
+2. **Done 2026-10-15.** Confirm in production that 0022 and 0024 hold: as the `authenticated` role, selecting from `users` returns no rows and inserting into `missions` fails with a row-level security error.
+3. **Done 2026-10-15** (first run published a 1,374-event backlog). Add `worker-outbox` as a Railway cron (`pnpm --filter @opportunity-os/worker-outbox start -- --once`, every 5 minutes), same pattern as the other workers.
 4. Leave `GRAPH_ARBITRAGE_DEALS` unset (auto). The next lifecycle sweep expires the open arbitrage deals. Set `EMBEDDING_PROVIDER` and a key to bring them back.
 5. Verify webhook signatures with real notifications: Stripe and Circle sandbox events, an eBay deletion notification, and Twilio and WhatsApp if those channels are used.
 6. Read `GET /v1/analytics/yield` after a week of runs to set the baseline before switching search or model providers.
