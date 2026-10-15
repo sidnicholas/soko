@@ -94,3 +94,76 @@ export function makeBraveSearch(config: BraveSearchConfig): SearchProvider {
     },
   };
 }
+
+export interface SerperSearchConfig {
+  apiKey: string;
+  /** Override if your plan's rate differs (about $1 per 1,000 queries on 2026 list pricing). */
+  costPerQueryUsd?: number;
+  /** Clock for turning "3 days ago" into a date; injectable for tests. */
+  now?: () => Date;
+  fetchImpl?: typeof fetch;
+}
+
+interface SerperResult {
+  link?: string;
+  title?: string;
+  snippet?: string;
+  date?: string;
+}
+
+const SERPER_URL = "https://google.serper.dev/search";
+const SERPER_FRESHNESS = { day: "qdr:d", week: "qdr:w", month: "qdr:m", year: "qdr:y" } as const;
+const UNIT_MS: Record<string, number> = {
+  minute: 60_000,
+  hour: 3_600_000,
+  day: 86_400_000,
+  week: 7 * 86_400_000,
+  month: 30 * 86_400_000,
+  year: 365 * 86_400_000,
+};
+
+/** Google's result date: "3 days ago", "1 hour ago" or an absolute date ("Sep 29, 2026"). */
+export function serperPublishedAt(date: string | undefined, now: Date): string | null {
+  if (!date) return null;
+  const rel = /^(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago$/i.exec(date.trim());
+  if (rel) return new Date(now.getTime() - Number(rel[1]) * UNIT_MS[rel[2]!.toLowerCase()]!).toISOString();
+  const abs = Date.parse(date);
+  return Number.isNaN(abs) ? null : new Date(abs).toISOString();
+}
+
+/**
+ * Serper (Google web results through an official, key-authenticated API).
+ * Supports the `site:` operator and a recency window like Brave. Asks for at
+ * most 10 results: larger pages are billed as more than one query.
+ */
+export function makeSerperSearch(config: SerperSearchConfig): SearchProvider {
+  const doFetch = config.fetchImpl ?? fetch;
+  const now = config.now ?? (() => new Date());
+  return {
+    id: "serper",
+    costPerQueryUsd: config.costPerQueryUsd ?? 0.001,
+    async search(q) {
+      const body: Record<string, unknown> = { q: q.query, num: Math.min(q.count ?? 10, 10) };
+      if (q.freshness) body.tbs = SERPER_FRESHNESS[q.freshness];
+      const res = await doFetch(SERPER_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": config.apiKey },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`serper search ${res.status}`);
+      const json = (await res.json()) as { organic?: SerperResult[] };
+      const at = now();
+      return (json.organic ?? [])
+        .filter((r): r is SerperResult & { link: string } => typeof r.link === "string")
+        .map((r) => ({
+          url: r.link,
+          title: (r.title ?? "").trim(),
+          snippet: (r.snippet ?? "").trim(),
+          hostname: hostOf(r.link),
+          publishedAt: serperPublishedAt(r.date, at),
+          ageText: r.date ?? null,
+          provider: "serper",
+        }));
+    },
+  };
+}

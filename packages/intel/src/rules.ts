@@ -101,6 +101,31 @@ export function isGovernmentProcurement(hostname: string): boolean {
   return h === "sam.gov" || h.endsWith(".sam.gov") || h.endsWith(".gov") || h.endsWith(".mil");
 }
 
+/**
+ * Reference, news and retail hosts that publish about needs but never carry a
+ * buyer's or seller's own request. Their results are dropped before the paid
+ * detection call; a query whose results are all dropped makes no model call.
+ */
+const NO_LEAD_HOSTS = [
+  "wikipedia.org",
+  "youtube.com",
+  "amazon.com",
+  "investopedia.com",
+  "forbes.com",
+  "nytimes.com",
+  "cnbc.com",
+  "bloomberg.com",
+  "reuters.com",
+  "businessinsider.com",
+  "techcrunch.com",
+  "wordpress.org",
+] as const;
+
+export function isNoLeadHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return NO_LEAD_HOSTS.some((d) => h === d || h.endsWith(`.${d}`));
+}
+
 // ---------------------------------------------------------------- verification
 
 export interface VerificationInput {

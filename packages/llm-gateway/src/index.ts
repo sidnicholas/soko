@@ -4,9 +4,11 @@ import type { CostTelemetry } from "@opportunity-os/contracts";
 import { getConfig } from "@opportunity-os/config";
 
 import { AnthropicProvider } from "./anthropic";
+import { OpenAiCompatProvider } from "./openai-compat";
 
 export * from "./embed";
 export * from "./anthropic";
+export * from "./openai-compat";
 
 /** §18 — task classes routed to provider/model profiles. */
 export const LLM_TASK_CLASSES = [
@@ -110,26 +112,55 @@ export class LlmGateway {
 
   /**
    * Echo-only without a model key (dev/CI stay keyless and deterministic).
-   * With ANTHROPIC_API_KEY: high-volume extraction/classification/summary on
-   * the fast model, reasoning-heavy tasks on the reasoning model, each falling
-   * back down the chain and finally to echo.
+   * High-volume extraction/classification/summary run on the fast tier,
+   * reasoning-heavy tasks on the reasoning tier. Each tier is Claude, or an
+   * OpenAI-compatible host when LLM_FAST_PROVIDER / LLM_REASONING_PROVIDER is
+   * "compat" (cheaper open-weight models). Every chain falls back to Claude
+   * when ANTHROPIC_API_KEY is set, and finally to echo.
    */
   static default(): LlmGateway {
     const cfg = getConfig();
     const key = cfg.llm.anthropicKey;
-    if (!key) return new LlmGateway([new EchoProvider()]);
-    const fast = new AnthropicProvider({ name: "anthropic-fast", model: cfg.llm.anthropicFastModel, apiKey: key, maxTokens: 4000 });
-    const reasoning = new AnthropicProvider({
-      name: "anthropic-reasoning",
-      model: cfg.llm.anthropicReasoningModel,
-      apiKey: key,
-      maxTokens: 8000,
-      effort: "low",
-      refusalFallback: true,
-    });
-    const fastChain = ["anthropic-fast", "echo"];
-    const reasoningChain = ["anthropic-reasoning", "anthropic-fast", "echo"];
-    return new LlmGateway([fast, reasoning, new EchoProvider()], {
+    const compat = cfg.llm.compat;
+    const providers: LlmProvider[] = [];
+    if (key) {
+      providers.push(new AnthropicProvider({ name: "anthropic-fast", model: cfg.llm.anthropicFastModel, apiKey: key, maxTokens: 4000 }));
+      providers.push(
+        new AnthropicProvider({
+          name: "anthropic-reasoning",
+          model: cfg.llm.anthropicReasoningModel,
+          apiKey: key,
+          maxTokens: 8000,
+          effort: "low",
+          refusalFallback: true,
+        }),
+      );
+    }
+    // config refuses a compat tier without its URL, key, model and price.
+    if (cfg.llm.fastProvider === "compat") {
+      providers.push(
+        new OpenAiCompatProvider({ name: "compat-fast", baseUrl: compat.baseUrl!, apiKey: compat.apiKey!, model: compat.fastModel!, price: compat.fastPrice!, maxTokens: 4000 }),
+      );
+    }
+    if (cfg.llm.reasoningProvider === "compat") {
+      providers.push(
+        new OpenAiCompatProvider({
+          name: "compat-reasoning",
+          baseUrl: compat.baseUrl!,
+          apiKey: compat.apiKey!,
+          model: compat.reasoningModel!,
+          price: compat.reasoningPrice!,
+          maxTokens: 8000,
+        }),
+      );
+    }
+    if (providers.length === 0) return new LlmGateway([new EchoProvider()]);
+
+    const claudeFast = key ? ["anthropic-fast"] : [];
+    const claudeReasoning = key ? ["anthropic-reasoning", "anthropic-fast"] : [];
+    const fastChain = [...(cfg.llm.fastProvider === "compat" ? ["compat-fast"] : []), ...claudeFast, "echo"];
+    const reasoningChain = [...(cfg.llm.reasoningProvider === "compat" ? ["compat-reasoning"] : []), ...claudeReasoning, "echo"];
+    return new LlmGateway([...providers, new EchoProvider()], {
       profiles: {
         extraction: { providers: fastChain, maxUsd: 0.05, timeoutMs: 60_000 },
         classification: { providers: fastChain, maxUsd: 0.05, timeoutMs: 60_000 },

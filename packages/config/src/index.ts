@@ -20,6 +20,20 @@ function findWorkspaceRoot(startDir: string): string | undefined {
   }
 }
 
+/** "0.14,0.28" → { input: 0.14, output: 0.28 } (USD per million tokens). */
+const tokenPrice = z
+  .string()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v?.trim()) return undefined;
+    const [input, output] = v.split(",").map((n) => Number(n.trim()));
+    if (input === undefined || output === undefined || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'expected "input,output" USD per million tokens, e.g. "0.14,0.28"' });
+      return z.NEVER;
+    }
+    return { input, output };
+  });
+
 let dotenvLoaded = false;
 
 /**
@@ -73,6 +87,20 @@ const EnvSchema = z.object({
   // Blank (as copied from .env.example) means the default, not an empty model id.
   ANTHROPIC_FAST_MODEL: z.string().optional().transform((v) => v?.trim() || "claude-haiku-4-5"),
   ANTHROPIC_REASONING_MODEL: z.string().optional().transform((v) => v?.trim() || "claude-sonnet-5-5"),
+  // Which provider serves each tier: Claude, or an OpenAI-compatible host
+  // (Together, Groq, DeepSeek, OpenRouter, …) running an open-weight model at
+  // a lower price. A compat tier falls back to Claude when ANTHROPIC_API_KEY
+  // is set. Set per service: on worker-intel alone, only intel changes.
+  LLM_FAST_PROVIDER: z.enum(["anthropic", "compat"]).default("anthropic"),
+  LLM_REASONING_PROVIDER: z.enum(["anthropic", "compat"]).default("anthropic"),
+  LLM_COMPAT_BASE_URL: z.string().optional(),
+  LLM_COMPAT_API_KEY: z.string().optional(),
+  LLM_COMPAT_FAST_MODEL: z.string().optional(),
+  LLM_COMPAT_REASONING_MODEL: z.string().optional(),
+  // "input,output" USD per million tokens, the host's list price for that
+  // model. Required for a compat tier: spend caps are only as good as this.
+  LLM_COMPAT_FAST_PRICE: tokenPrice,
+  LLM_COMPAT_REASONING_PRICE: tokenPrice,
   VOYAGE_API_KEY: z.string().optional(),
   EMBEDDING_PROVIDER: z.enum(["echo", "openai", "voyage"]).default("echo"),
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
@@ -119,6 +147,16 @@ const EnvSchema = z.object({
   // Runs only with both a search key and ANTHROPIC_API_KEY. The daily cap is a
   // hard ceiling on search + LLM spend across all runs that UTC day.
   BRAVE_SEARCH_API_KEY: z.string().optional(),
+  // Search provider for the intel sweep. Serper (Google results) lists at
+  // about $1 per 1,000 queries against Brave's $5.
+  INTEL_SEARCH_PROVIDER: z.enum(["brave", "serper"]).default("brave"),
+  SERPER_API_KEY: z.string().optional(),
+  // Override the per-query price the budget ledger charges (your plan's rate).
+  INTEL_SEARCH_COST_PER_QUERY_USD: z.coerce.number().nonnegative().optional(),
+  // Conservative per-call estimates the budget checks before each model call
+  // (a run stops when the next call might not fit). Lower them for cheaper models.
+  INTEL_DETECTION_ESTIMATE_USD: z.coerce.number().positive().default(0.006),
+  INTEL_ASSESSMENT_ESTIMATE_USD: z.coerce.number().positive().default(0.04),
   INTEL_DAILY_BUDGET_USD: z.coerce.number().nonnegative().default(1),
   INTEL_QUERIES_PER_RUN: z.coerce.number().int().positive().default(8),
   // Must match the worker-intel cron (every 6h = 4). Paces the daily cap across runs.
@@ -189,6 +227,16 @@ export interface AppConfig {
     anthropicKey?: string;
     anthropicFastModel: string;
     anthropicReasoningModel: string;
+    fastProvider: "anthropic" | "compat";
+    reasoningProvider: "anthropic" | "compat";
+    compat: {
+      baseUrl?: string;
+      apiKey?: string;
+      fastModel?: string;
+      reasoningModel?: string;
+      fastPrice?: { input: number; output: number };
+      reasoningPrice?: { input: number; output: number };
+    };
     voyageKey?: string;
     embeddingProvider: "echo" | "openai" | "voyage";
     embeddingModel: string;
@@ -230,7 +278,16 @@ export interface AppConfig {
     reverbApiToken?: string;
     fixtures: boolean;
   };
-  intel: { braveApiKey?: string; dailyBudgetUsd: number; runsPerDay: number; queriesPerRun: number; maxAssessments: number; sourcesToken?: string };
+  intel: {
+    searchProvider: "brave" | "serper";
+    braveApiKey?: string;
+    serperApiKey?: string;
+    searchCostPerQueryUsd?: number;
+    detectionEstimateUsd: number;
+    assessmentEstimateUsd: number;
+    dailyBudgetUsd: number; runsPerDay: number; queriesPerRun: number; maxAssessments: number;
+    sourcesToken?: string;
+  };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
   policy: {
     approvalTimeoutMinutes: number;
@@ -276,6 +333,16 @@ function toConfig(env: Env): AppConfig {
       anthropicKey: env.ANTHROPIC_API_KEY,
       anthropicFastModel: env.ANTHROPIC_FAST_MODEL,
       anthropicReasoningModel: env.ANTHROPIC_REASONING_MODEL,
+      fastProvider: env.LLM_FAST_PROVIDER,
+      reasoningProvider: env.LLM_REASONING_PROVIDER,
+      compat: {
+        baseUrl: env.LLM_COMPAT_BASE_URL,
+        apiKey: env.LLM_COMPAT_API_KEY,
+        fastModel: env.LLM_COMPAT_FAST_MODEL,
+        reasoningModel: env.LLM_COMPAT_REASONING_MODEL,
+        fastPrice: env.LLM_COMPAT_FAST_PRICE,
+        reasoningPrice: env.LLM_COMPAT_REASONING_PRICE,
+      },
       voyageKey: env.VOYAGE_API_KEY,
       embeddingProvider: env.EMBEDDING_PROVIDER,
       embeddingModel: env.EMBEDDING_MODEL,
@@ -318,7 +385,12 @@ function toConfig(env: Env): AppConfig {
       fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
     },
     intel: {
+      searchProvider: env.INTEL_SEARCH_PROVIDER,
       braveApiKey: env.BRAVE_SEARCH_API_KEY,
+      serperApiKey: env.SERPER_API_KEY,
+      searchCostPerQueryUsd: env.INTEL_SEARCH_COST_PER_QUERY_USD,
+      detectionEstimateUsd: env.INTEL_DETECTION_ESTIMATE_USD,
+      assessmentEstimateUsd: env.INTEL_ASSESSMENT_ESTIMATE_USD,
       dailyBudgetUsd: env.INTEL_DAILY_BUDGET_USD,
       runsPerDay: env.INTEL_RUNS_PER_DAY,
       queriesPerRun: env.INTEL_QUERIES_PER_RUN,
@@ -350,7 +422,29 @@ export function loadConfig(source: NodeJS.ProcessEnv = process.env): AppConfig {
   if (parsed.data.NODE_ENV === "production" && parsed.data.AUTH_DEV_HEADERS === "true") {
     throw new Error("Invalid environment configuration: AUTH_DEV_HEADERS=true is not allowed when NODE_ENV=production");
   }
+  const compatMissing = compatTierGaps(parsed.data);
+  if (compatMissing.length > 0) {
+    throw new Error(`Invalid environment configuration: an LLM tier is set to "compat" but ${compatMissing.join(", ")} is missing`);
+  }
   return toConfig(parsed.data);
+}
+
+/** Variables a "compat" LLM tier needs that are unset; a model priced at zero would slip past every spend cap. */
+function compatTierGaps(env: Env): string[] {
+  const missing: string[] = [];
+  const tiers = [
+    { on: env.LLM_FAST_PROVIDER === "compat", model: "LLM_COMPAT_FAST_MODEL", price: "LLM_COMPAT_FAST_PRICE" },
+    { on: env.LLM_REASONING_PROVIDER === "compat", model: "LLM_COMPAT_REASONING_MODEL", price: "LLM_COMPAT_REASONING_PRICE" },
+  ] as const;
+  if (!tiers.some((t) => t.on)) return missing;
+  if (!env.LLM_COMPAT_BASE_URL) missing.push("LLM_COMPAT_BASE_URL");
+  if (!env.LLM_COMPAT_API_KEY) missing.push("LLM_COMPAT_API_KEY");
+  for (const t of tiers) {
+    if (!t.on) continue;
+    if (!env[t.model]) missing.push(t.model);
+    if (!env[t.price]) missing.push(t.price);
+  }
+  return missing;
 }
 
 /** Process-wide singleton. */

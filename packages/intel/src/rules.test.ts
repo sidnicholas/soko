@@ -5,6 +5,7 @@ import {
   fraudFlags,
   freshnessScore,
   isGovernmentProcurement,
+  isNoLeadHost,
   monetizationResolved,
   regulatoryFlags,
   scoreCandidate,
@@ -112,6 +113,11 @@ describe("score and bucket", () => {
   it("recognizes government procurement hosts", () => {
     for (const h of ["sam.gov", "www.sam.gov", "gsa.gov", "navy.mil"]) expect(isGovernmentProcurement(h)).toBe(true);
     for (const h of ["reddit.com", "samgov.com", "community.shopify.com"]) expect(isGovernmentProcurement(h)).toBe(false);
+  });
+
+  it("recognizes reference, news and retail hosts that never carry a lead", () => {
+    for (const h of ["en.wikipedia.org", "youtube.com", "www.forbes.com", "wordpress.org"]) expect(isNoLeadHost(h)).toBe(true);
+    for (const h of ["reddit.com", "community.shopify.com", "notforbes.com", "upwork.com"]) expect(isNoLeadHost(h)).toBe(false);
   });
 });
 

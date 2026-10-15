@@ -42,6 +42,7 @@ import {
   fraudFlags,
   freshnessScore,
   isGovernmentProcurement,
+  isNoLeadHost,
   mergeFlags,
   monetizationResolved,
   regulatoryFlags,
@@ -148,8 +149,9 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       }
       budget.recordSearch(opts.search.costPerQueryUsd);
       const known = await knownIntelLeadHashes(results.map((r) => urlHash(r.url)));
-      const fresh = results.filter((r) => !known.has(urlHash(r.url)) && detectInjection(`${r.title} ${r.snippet}`).length === 0);
-      const queryNote: Record<string, unknown> = { q: q.query, results: results.length, new: fresh.length, leads: 0, kept: 0, reasons: {} };
+      const unseen = results.filter((r) => !known.has(urlHash(r.url)) && detectInjection(`${r.title} ${r.snippet}`).length === 0);
+      const fresh = unseen.filter((r) => !isNoLeadHost(r.hostname));
+      const queryNote: Record<string, unknown> = { q: q.query, results: results.length, new: fresh.length, noLeadHost: unseen.length - fresh.length, leads: 0, kept: 0, reasons: {} };
       (notes.queries as unknown[]).push(queryNote);
       if (fresh.length === 0) continue;
 
