@@ -3,6 +3,7 @@ import {
   expireStaleOpportunities,
   expireOverdueDemands,
   markStaleSupplyUnavailable,
+  expireGraphOpportunities,
 } from "@opportunity-os/db";
 import {
   runDiscoveryCycle,
@@ -29,6 +30,8 @@ export interface RefreshSummary {
   crossArbitrageEdges: number;
   bundleEntities: number;
   arbitrageDeals: number;
+  /** Open arbitrage deals expired this sweep because arbitrage is suppressed. */
+  arbitrageSuppressed: number;
   bundleDeals: number;
 }
 
@@ -42,7 +45,8 @@ export interface RefreshSummary {
  * current supply, otherwise the same sweep's re-ingestion would keep everything
  * perpetually fresh.
  */
-export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshSummary> {
+export async function refreshCycle(supplyStaleMinutes: number, opts: { graphArbitrageDeals?: boolean } = {}): Promise<RefreshSummary> {
+  const arbitrageOn = opts.graphArbitrageDeals ?? true;
   const nowIso = new Date().toISOString();
   const staleCutoffIso = new Date(Date.now() - supplyStaleMinutes * 60_000).toISOString();
 
@@ -70,7 +74,10 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
   const graph = await buildGraphEdges();
 
   // Surface graph edges as first-class deals (arbitrage/bundle) on the feed.
-  const deals = await opportunitiesFromGraph();
+  // Cross-entity arbitrage is suppressed while embeddings are the echo stub
+  // (PRD v2 FR-04); its open deals leave the feed.
+  const deals = await opportunitiesFromGraph({ arbitrage: arbitrageOn });
+  const arbitrageSuppressed = arbitrageOn ? 0 : await expireGraphOpportunities("arbitrage");
 
   const summary: RefreshSummary = {
     expiredOpportunities,
@@ -85,6 +92,7 @@ export async function refreshCycle(supplyStaleMinutes: number): Promise<RefreshS
     crossArbitrageEdges: graph.crossArbitrage,
     bundleEntities: graph.bundles,
     arbitrageDeals: deals.arbitrage,
+    arbitrageSuppressed,
     bundleDeals: deals.bundle,
   };
   log.info(summary, "lifecycle.refresh.cycle");

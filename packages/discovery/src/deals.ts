@@ -31,9 +31,11 @@ export interface GraphDealsResult {
  *  - BUNDLE_AVAILABLE: aggregate multiple sellers (savings = median - min).
  * Idempotent via dedupe_key. Runs each lifecycle sweep after buildGraphEdges.
  */
-export async function opportunitiesFromGraph(): Promise<GraphDealsResult> {
+export async function opportunitiesFromGraph(opts: { arbitrage?: boolean } = {}): Promise<GraphDealsResult> {
   let arbitrage = 0;
-  for (const e of await listArbitrageEdges()) {
+  // Cross-entity arbitrage rests on SUBSTITUTE_OF edges, i.e. on embedding
+  // similarity; with the echo embedding those are noise (PRD v2 FR-04).
+  for (const e of opts.arbitrage === false ? [] : await listArbitrageEdges()) {
     const buy = readMinor(e.meta, "buyMinor");
     const sell = readMinor(e.meta, "sellRefMinor");
     if (buy === null || sell === null || sell <= buy) continue;

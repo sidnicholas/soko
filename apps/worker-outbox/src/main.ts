@@ -1,5 +1,5 @@
 import { getConfig } from "@opportunity-os/config";
-import { claimUnpublished, closeDb, getDb, markPublished, toEventEnvelope } from "@opportunity-os/db";
+import { closeDb, getDb, relayOutboxBatch } from "@opportunity-os/db";
 import { createLogger, type Logger } from "@opportunity-os/observability";
 import { LogPublisher, RedisPublisher, type EventPublisher } from "./publisher";
 
@@ -8,19 +8,11 @@ const POLL_INTERVAL_MS = 2000;
 /**
  * §10/§550 transactional-outbox relay. Publishes the oldest unpublished events
  * then marks them published, guaranteeing DB state and the event stream never
- * diverge. Exported so it can be driven once (CLI `--once`) or in a loop.
+ * diverge. Rows are locked while a batch runs, so two relays never publish the
+ * same event. Exported so it can be driven once (CLI `--once`) or in a loop.
  */
 export async function runRelayOnce(publisher: EventPublisher, batchSize = 100): Promise<number> {
-  const db = getDb();
-  const rows = await claimUnpublished(db, batchSize);
-  if (rows.length === 0) return 0;
-  const publishedIds: string[] = [];
-  for (const row of rows) {
-    await publisher.publish(toEventEnvelope(row));
-    publishedIds.push(row.id);
-  }
-  await markPublished(db, publishedIds);
-  return publishedIds.length;
+  return relayOutboxBatch(getDb(), (envelope) => publisher.publish(envelope), batchSize);
 }
 
 function makePublisher(log: Logger): EventPublisher {

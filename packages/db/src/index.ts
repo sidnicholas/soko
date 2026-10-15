@@ -25,3 +25,4 @@ export * from "./repositories/search";
 export * from "./repositories/intel";
 export * from "./repositories/listings";
 export * from "./repositories/users";
+export * from "./repositories/analytics";

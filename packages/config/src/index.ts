@@ -106,6 +106,11 @@ const EnvSchema = z.object({
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
   EMBEDDING_DIM: z.coerce.number().int().positive().default(512),
   EMBEDDING_BACKEND: z.enum(["jsonb", "pgvector"]).default("jsonb"),
+  // Cross-entity arbitrage deals from the market graph. They pair "substitute"
+  // items by embedding similarity, so with the echo embedding they are noise.
+  // auto = on only when EMBEDDING_PROVIDER is a real model; off also expires
+  // the open ones already on the feed.
+  GRAPH_ARBITRAGE_DEALS: z.enum(["auto", "on", "off"]).default("auto"),
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
@@ -191,6 +196,9 @@ const EnvSchema = z.object({
   // Email inbound (Mailgun Routes, §11 messaging backlog) + outbound (SMTP,
   // reusing EMAIL_FROM/SMTP_URL above rather than adding a parallel set).
   MAILGUN_SIGNING_KEY: z.string().optional(),
+  // Inbound messages accepted per sender per hour on the Telegram, SMS, email
+  // and WhatsApp webhooks; more are dropped without a reply. Per API process.
+  INBOUND_MESSAGES_PER_HOUR: z.coerce.number().int().nonnegative().default(20),
 
   // WhatsApp Business Cloud API (Meta), §11 messaging backlog.
   WHATSAPP_ACCESS_TOKEN: z.string().optional(),
@@ -243,6 +251,7 @@ export interface AppConfig {
     embeddingDim: number;
     embeddingBackend: "jsonb" | "pgvector";
   };
+  discovery: { graphArbitrageDeals: boolean };
   settlement: {
     stripeSecretKey?: string;
     stripeWebhookSecret?: string;
@@ -262,6 +271,7 @@ export interface AppConfig {
     twilioFromNumber?: string;
     publicApiBaseUrl?: string;
     mailgunSigningKey?: string;
+    inboundMessagesPerHour: number;
     whatsappAccessToken?: string;
     whatsappPhoneNumberId?: string;
     whatsappAppSecret?: string;
@@ -349,6 +359,9 @@ function toConfig(env: Env): AppConfig {
       embeddingDim: env.EMBEDDING_DIM,
       embeddingBackend: env.EMBEDDING_BACKEND,
     },
+    discovery: {
+      graphArbitrageDeals: env.GRAPH_ARBITRAGE_DEALS === "auto" ? env.EMBEDDING_PROVIDER !== "echo" : env.GRAPH_ARBITRAGE_DEALS === "on",
+    },
     settlement: {
       stripeSecretKey: env.STRIPE_SECRET_KEY,
       stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
@@ -368,6 +381,7 @@ function toConfig(env: Env): AppConfig {
       twilioFromNumber: env.TWILIO_FROM_NUMBER,
       publicApiBaseUrl: env.PUBLIC_API_BASE_URL,
       mailgunSigningKey: env.MAILGUN_SIGNING_KEY,
+      inboundMessagesPerHour: env.INBOUND_MESSAGES_PER_HOUR,
       whatsappAccessToken: env.WHATSAPP_ACCESS_TOKEN,
       whatsappPhoneNumberId: env.WHATSAPP_PHONE_NUMBER_ID,
       whatsappAppSecret: env.WHATSAPP_APP_SECRET,

@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   if (process.argv.includes("--once")) {
     let code = 0;
     try {
-      await refreshCycle(cfg.policy.supplyStaleMinutes);
+      await refreshCycle(cfg.policy.supplyStaleMinutes, { graphArbitrageDeals: cfg.discovery.graphArbitrageDeals });
     } catch (err) {
       log.error({ err: String(err) }, "lifecycle.refresh.failed");
       code = 1;
@@ -34,7 +34,7 @@ async function main(): Promise<void> {
   log.info({ intervalMs, supplyStaleMinutes: cfg.policy.supplyStaleMinutes }, "lifecycle worker started");
   while (running) {
     try {
-      await refreshCycle(cfg.policy.supplyStaleMinutes);
+      await refreshCycle(cfg.policy.supplyStaleMinutes, { graphArbitrageDeals: cfg.discovery.graphArbitrageDeals });
     } catch (err) {
       log.error({ err: String(err) }, "lifecycle.refresh.failed");
     }

@@ -32,6 +32,7 @@ import {
 import { SignalsService } from "../signals/signals.service";
 import { SignalSubmitSchema, type SignalSubmitBody } from "../signals/signal.dto";
 import { MessageChannelRegistry } from "../messaging/channels";
+import { WindowRateLimiter } from "../common/rate-limit";
 
 type Payload = Record<string, unknown>;
 
@@ -245,6 +246,9 @@ function paymentIntentRef(event: Stripe.Event): string | null {
 @Injectable()
 export class WebhooksService {
   private readonly logger = new Logger("WebhooksService");
+
+  /** Inbound messages per sender per hour, across all four message channels. */
+  private readonly inbound = new WindowRateLimiter(getConfig().notifications.inboundMessagesPerHour, 3_600_000);
 
   constructor(
     @Inject(SignalsService) private readonly signals: SignalsService,
@@ -642,6 +646,12 @@ export class WebhooksService {
    * the provider doesn't retry a signal we already captured.
    */
   private async intakeAndAck(signal: SignalSubmitBody, channelId: string, identity: string): Promise<void> {
+    // Over the per-sender limit: drop without intake or reply, so a flood
+    // neither fills the signals table nor gets us to send messages back.
+    if (!this.inbound.allow(`${channelId}:${identity}`)) {
+      this.logger.warn(`${channelId} inbound rate limit hit; message dropped`);
+      return;
+    }
     try {
       await this.signals.submit(signal);
       await this.channels

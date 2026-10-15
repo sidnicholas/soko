@@ -16,6 +16,7 @@ import { AssetTransferModule } from "./asset-transfers/asset-transfer.module";
 import { SearchModule } from "./search/search.module";
 import { IntelModule } from "./intel/intel.module";
 import { MarketplaceModule } from "./marketplace/marketplace.module";
+import { AnalyticsModule } from "./analytics/analytics.module";
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { MarketplaceModule } from "./marketplace/marketplace.module";
     SearchModule,
     IntelModule,
     MarketplaceModule,
+    AnalyticsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

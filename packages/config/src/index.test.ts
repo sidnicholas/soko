@@ -37,6 +37,13 @@ describe("LLM tier and intel search config", () => {
     expect(() => loadConfig({ ...compat, LLM_COMPAT_FAST_PRICE: "cheap,0.2" })).toThrow("input,output");
   });
 
+  it("turns graph arbitrage deals off while embeddings are the echo stub", () => {
+    expect(loadConfig({}).discovery.graphArbitrageDeals).toBe(false);
+    expect(loadConfig({ EMBEDDING_PROVIDER: "voyage" }).discovery.graphArbitrageDeals).toBe(true);
+    expect(loadConfig({ GRAPH_ARBITRAGE_DEALS: "on" }).discovery.graphArbitrageDeals).toBe(true);
+    expect(loadConfig({ EMBEDDING_PROVIDER: "openai", GRAPH_ARBITRAGE_DEALS: "off" }).discovery.graphArbitrageDeals).toBe(false);
+  });
+
   it("takes Serper and a per-query price override", () => {
     const cfg = loadConfig({ INTEL_SEARCH_PROVIDER: "serper", SERPER_API_KEY: "s", INTEL_SEARCH_COST_PER_QUERY_USD: "0.0008" });
     expect(cfg.intel.searchProvider).toBe("serper");

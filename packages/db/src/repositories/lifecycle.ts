@@ -42,6 +42,21 @@ export async function expireStaleOpportunities(nowIso: string): Promise<number> 
 }
 
 /**
+ * Expire open graph-derived opportunities of one kind (PRD v2 FR-04): used
+ * when that kind is suppressed, so deals already on the feed leave it too.
+ * Rows someone is acting on (awaiting_approval and later) are left alone.
+ */
+export async function expireGraphOpportunities(kind: "arbitrage" | "bundle"): Promise<number> {
+  const result = await getDb()
+    .updateTable("opportunities")
+    .set({ status: "expired" })
+    .where("kind", "=", kind)
+    .where("status", "in", ["candidate", "qualified"])
+    .executeTakeFirst();
+  return Number(result.numUpdatedRows ?? 0n);
+}
+
+/**
  * §3.1(9) expire demands whose needed_by has passed, emitting demand.expired.v1
  * once per newly expired demand. Idempotent across sweeps.
  */

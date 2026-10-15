@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
 import type { SearchProvider, WebSearchResult } from "@opportunity-os/connectors-sdk";
-import { closeDb, getDb, listIntelQueue, listIntelQueryYield, intelStats } from "@opportunity-os/db";
+import { closeDb, getDb, listIntelQueue, listIntelQueryYield, intelStats, yieldReport } from "@opportunity-os/db";
 import { LlmGateway, type LlmProvider } from "@opportunity-os/llm-gateway";
 import { runIntelCycle } from "@opportunity-os/intel";
 
@@ -114,6 +114,14 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
     const stats = await intelStats();
     expect(stats.runs).toBeGreaterThanOrEqual(1);
     expect(stats.spentTotalUsd).toBeGreaterThan(0);
+
+    // PRD v2 P0 baseline report: today's run and the stub provider's leads show up.
+    const report = await yieldReport(1);
+    const today = report.intelByDay.find((d) => d.day === new Date().toISOString().slice(0, 10));
+    expect(today?.runs).toBeGreaterThanOrEqual(1);
+    expect((today?.searchUsd ?? 0) + (today?.llmUsd ?? 0)).toBeGreaterThan(0);
+    expect(report.intelByProvider.find((p) => p.provider === "stub")?.leads).toBeGreaterThanOrEqual(2);
+    expect(Array.isArray(report.opportunityFunnel)).toBe(true);
   });
 
   it("re-surfaced pages cost no model call, and an exhausted budget stops before spending", async () => {

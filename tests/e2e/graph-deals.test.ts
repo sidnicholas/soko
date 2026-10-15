@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from "vitest";
-import { createSignal, resolveSignal, getEntityIdForMember, listOpportunitiesForOperator, getDb, closeDb } from "@opportunity-os/db";
+import { createSignal, resolveSignal, getEntityIdForMember, listOpportunitiesForOperator, expireGraphOpportunities, getDb, closeDb } from "@opportunity-os/db";
 import { resolveEntities, buildGraphEdges, opportunitiesFromGraph } from "@opportunity-os/discovery";
 
 /**
@@ -56,5 +56,16 @@ describe.skipIf(!HAS_DB)("graph deals (live postgres)", () => {
     // suites sharing this database add higher-scoring deals, so read it whole.
     const feed = await listOpportunitiesForOperator(100_000);
     expect(feed.some((o) => o.id === arb.id)).toBe(true);
+
+    // Suppressed (echo embeddings, PRD v2 FR-04): no new arbitrage deals, the
+    // open one leaves the feed, bundles are unaffected.
+    const suppressed = await opportunitiesFromGraph({ arbitrage: false });
+    expect(suppressed.arbitrage).toBe(0);
+    expect(suppressed.bundle).toBeGreaterThanOrEqual(1);
+    expect(await expireGraphOpportunities("arbitrage")).toBeGreaterThanOrEqual(1);
+    const after = await getDb().selectFrom("opportunities").select("status").where("id", "=", arb.id).executeTakeFirstOrThrow();
+    expect(after.status).toBe("expired");
+    const bundleAfter = await getDb().selectFrom("opportunities").select("status").where("id", "=", bundle.id).executeTakeFirstOrThrow();
+    expect(bundleAfter.status).not.toBe("expired");
   });
 });

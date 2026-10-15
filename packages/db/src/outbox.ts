@@ -56,8 +56,52 @@ export async function claimUnpublished(db: Kysely<Database>, limit = 100): Promi
   return rows.map((r) => ({ ...r, created_at: String(r.created_at) }));
 }
 
+/**
+ * Relay one batch: lock the oldest unpublished rows (`for update skip locked`,
+ * so a second relay running at the same time takes different rows instead of
+ * publishing these again), publish each, and mark the ones the publisher
+ * accepted, all in one transaction. A publish failure still marks the rows
+ * published before it, then rethrows; the failed row and the rest are retried
+ * next batch. Delivery is at-least-once (a crash between publish and commit
+ * re-sends), so consumers dedupe on the envelope's idempotency key.
+ */
+export async function relayOutboxBatch(
+  db: Kysely<Database>,
+  publish: (envelope: EventEnvelope) => Promise<void>,
+  limit = 100,
+): Promise<number> {
+  const result = await db.transaction().execute(async (tx) => {
+    const rows = await tx
+      .selectFrom("outbox")
+      .select(["id", "event_name", "aggregate_type", "aggregate_id", "payload", "idempotency_key", "created_at"])
+      .where("published", "=", false)
+      .orderBy("created_at", "asc")
+      .limit(limit)
+      .forUpdate()
+      .skipLocked()
+      .execute();
+    const published: string[] = [];
+    let failure: unknown;
+    for (const row of rows) {
+      try {
+        await publish(toEventEnvelope({ ...row, created_at: String(row.created_at) }));
+      } catch (err) {
+        failure = err;
+        break;
+      }
+      published.push(row.id);
+    }
+    // Commit the marks before surfacing a failure: throwing inside the
+    // transaction would roll them back and re-send what was already accepted.
+    await markPublished(tx, published);
+    return { count: published.length, failure };
+  });
+  if (result.failure !== undefined) throw result.failure;
+  return result.count;
+}
+
 /** Mark events published once the publisher has durably accepted them. */
-export async function markPublished(db: Kysely<Database>, ids: readonly string[]): Promise<void> {
+export async function markPublished(db: Kysely<Database> | Transaction<Database>, ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return;
   await db
     .updateTable("outbox")
