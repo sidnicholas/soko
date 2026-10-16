@@ -28,7 +28,7 @@ export type RejectReason =
   | "no_counterparty_found"
   | "fraud_risk"
   | "no_value_path"
-  /** The "lead" is someone selling services like the user's — a competitor, not a buyer. */
+  /** The "lead" is a broker, sourcing agent or agency offering what the user offers — a competitor, not a buyer or seller. */
   | "competitor_offer"
   /** Government procurement: needs contractor registration/clearances; screened before paid assessment. */
   | "federal_procurement";

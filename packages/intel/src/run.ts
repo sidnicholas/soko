@@ -270,17 +270,17 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
     const assessable = ranked.filter((l) => !isGovernmentProcurement(l.hostname));
     for (const lead of assessable.slice(0, opts.maxAssessments)) {
       const counter: WebSearchResult[] = [];
-      if (lead.kind !== "problem") {
-        for (const oq of lead.oppositeQueries.slice(0, 2)) {
-          if (!budget.canSpend(opts.search.costPerQueryUsd + est.assessmentUsd)) break;
-          try {
-            const found = await opts.search.search({ query: oq, count: 5, freshness: "month" });
-            counter.push(...found.filter((r) => detectInjection(`${r.title} ${r.snippet}`).length === 0));
-          } catch (err) {
-            errors.push(`opposite "${oq}": ${String(err)}`);
-          }
-          budget.recordSearch(opts.search.costPerQueryUsd);
+      // Opposite-side search for every kind: a problem lead may be referred to a
+      // third-party provider, not only matched to the user's own services.
+      for (const oq of lead.oppositeQueries.slice(0, 2)) {
+        if (!budget.canSpend(opts.search.costPerQueryUsd + est.assessmentUsd)) break;
+        try {
+          const found = await opts.search.search({ query: oq, count: 5, freshness: "month" });
+          counter.push(...found.filter((r) => detectInjection(`${r.title} ${r.snippet}`).length === 0));
+        } catch (err) {
+          errors.push(`opposite "${oq}": ${String(err)}`);
         }
+        budget.recordSearch(opts.search.costPerQueryUsd);
       }
       if (!budget.canSpend(est.assessmentUsd)) {
         exhausted = true;

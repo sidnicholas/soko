@@ -22,6 +22,7 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 | D12 | FR-11: keep Stripe/Circle separate from legal escrow | Code and UI call milestone holds "escrow" | P3/P4: relabel to "payment hold" where no licensed escrow is involved |
 | D13 | §8 event names | None of the 24 proposed names exist; `opportunity.economics_updated` overlaps `opportunity.score_changed` | Add per slice; reuse `score_changed` for economics |
 | D14 | §13: Apify actors | No Apify code | P1, after per-source terms review |
+| D16 | Vision: industry-agnostic brokerage of any product or service | Intel searched only for buyers of the user's own web services (since `1c197db`); missed in the first version of this list | Fixed 2026-10-16: category-agnostic venues and broker framing in the prompts |
 | D15 | Audit: suite 230 pass / 1 skip | Superseded by the run recorded in project memory §7 | — |
 
 ## 2. Feature-to-owner matrix (PRD §16.2)

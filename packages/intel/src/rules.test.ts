@@ -126,7 +126,7 @@ describe("stage-one queries", () => {
     const run0 = stageOneQueries(0, 6);
     const run1 = stageOneQueries(1, 6);
     expect(run0).toHaveLength(6);
-    // Every lane that has queries is sampled each run (supply is empty by design since 2026-10-06: the user's services are the supply).
+    // Every lane that has queries is sampled each run.
     const nonEmpty = new Set(stageOnePool().map((q) => q.orientation));
     expect(new Set(run0.map((q) => q.orientation))).toEqual(nonEmpty);
     expect(run0.map((q) => q.query)).not.toEqual(run1.map((q) => q.query));

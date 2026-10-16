@@ -5,7 +5,7 @@ import { SourceSubmissionSchema, deriveTopic, isUnproductive, normalizeDomain, o
 const base: SubmittedSource = {
   source_id: "SRC-1",
   name: "Surplus Record",
-  domain: "surplusrecord.com",
+  domain: "industrial-surplus-auctions.com",
   side: "both",
   sector: "Industrial surplus equipment",
   signal_type: "Equipment listings and wanted requests",
@@ -31,7 +31,7 @@ describe("vetSource", () => {
       ["demand", "active", ["industrial surplus equipment request"]],
       ["supply", "active", ["industrial surplus equipment for sale"]],
     ]);
-    expect(vetted[0]).toMatchObject({ externalId: "SRC-1", domain: "surplusrecord.com", topicsExplicit: false });
+    expect(vetted[0]).toMatchObject({ externalId: "SRC-1", domain: "industrial-surplus-auctions.com", topicsExplicit: false });
   });
 
   it("maps side variants and drops what is neither demand nor supply", () => {
@@ -91,18 +91,19 @@ describe("deriveTopic", () => {
 });
 
 describe("runtime sources in the stage-1 pool", () => {
-  const extra = sourceQueries({ domain: "surplusrecord.com", orientation: "supply", topics: ["industrial surplus equipment for sale"] });
+  const extra = sourceQueries({ domain: "industrial-surplus-auctions.com", orientation: "supply", topics: ["industrial surplus equipment for sale"] });
 
   it("joins the built-in pool without duplicating a query", () => {
     const builtin = stageOnePool();
     const pool = stageOnePool([...extra, ...extra, builtin[0]!]);
     expect(pool).toHaveLength(builtin.length + 1);
-    expect(pool.at(-1)).toEqual({ query: "site:surplusrecord.com industrial surplus equipment for sale", orientation: "supply", freshness: "month" });
+    expect(pool.at(-1)).toEqual({ query: "site:industrial-surplus-auctions.com industrial surplus equipment for sale", orientation: "supply", freshness: "month" });
   });
 
-  it("gets searched: a supply source fills the otherwise empty supply lane", () => {
-    expect(stageOneQueries(0, 8).some((q) => q.orientation === "supply")).toBe(false);
-    expect(stageOneQueries(0, 8, extra).filter((q) => q.orientation === "supply").map((q) => q.query)).toEqual([extra[0]!.query]);
+  it("gets searched: a supply source joins the supply lane's rotation", () => {
+    const searched = new Set<string>();
+    for (let run = 0; run < 12; run++) for (const q of stageOneQueries(run, 8, extra)) searched.add(q.query);
+    expect(searched.has(extra[0]!.query)).toBe(true);
   });
 });
 

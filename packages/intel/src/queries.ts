@@ -28,21 +28,29 @@ interface Venue {
 // Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
 // documented for the search provider and could silently return nothing.
 //
-// Pruned 2026-10-06 from 15 runs of yield data: sam.gov (every lead an
-// unwinnable federal notice), liquidation.com (zero results every run),
-// govdeals.com (product pages), and reddit queries that returned only
-// articles/news over 3+ runs. Kept the queries that produced leads, and added
-// venues where buyers ask to hire for the user's own services.
+// Category-agnostic since 2026-10-16: the user brokers any product or
+// service, so venues are chosen for where buyers and sellers of anything
+// post, and topics use intent language rather than one industry. (From
+// 2026-10-06 the pool searched only for buyers of the user's own web
+// services; 13 days of that produced 1 actionable lead.) Earlier pruning
+// still holds: sam.gov (unwinnable federal notices), liquidation.com (no
+// results), govdeals.com (product pages). New venues are unproven; prune by
+// the per-query yield table on the Action Queue and /yield.
 const VENUES: Venue[] = [
-  // Demand for the user's services: people hiring for work the catalog covers.
-  { site: "upwork.com", orientation: "demand", topics: ["GA4 tracking fix job", "Google Tag Manager setup job", "Shopify conversion tracking job", "WordPress site fix urgent job"] },
-  { site: "reddit.com", orientation: "demand", topics: ["[hiring] GA4 tracking", "hiring shopify developer tracking fix", "small business looking for supplier", "need a vendor for my business", "hiring sourcing research help"] },
-  // B2B buying requests (demand for goods; the why-paid test decides if a sourcing fee is realistic).
-  { site: "tradekey.com", orientation: "demand", topics: ["buy offers packaging", "buy offers equipment"] },
-  // Problems: owners describing costly website / tracking failures.
-  { site: "reddit.com", orientation: "problem", topics: ["GA4 purchases missing shopify", "website down losing customers help"] },
-  { site: "community.shopify.com", orientation: "problem", topics: ["checkout broken", "tracking not working", "need someone to fix"] },
-  { site: "support.google.com", orientation: "problem", topics: ["GA4 purchases not showing", "conversions not recording analytics"] },
+  // Buyers of goods: open buying requests on B2B trade boards and communities.
+  { site: "tradekey.com", orientation: "demand", topics: ["buy offers", "buying request bulk"] },
+  { site: "go4worldbusiness.com", orientation: "demand", topics: ["buying leads"] },
+  { site: "ec21.com", orientation: "demand", topics: ["buy offers"] },
+  { site: "reddit.com", orientation: "demand", topics: ["WTB bulk wholesale", "looking for a supplier", "looking for a manufacturer", "where can I buy in bulk", "need a vendor for my business"] },
+  // Buyers of services: people hiring for sourcing, procurement or any outsourced work.
+  { site: "upwork.com", orientation: "demand", topics: ["product sourcing agent job", "find suppliers job", "procurement specialist job"] },
+  // Sellers: surplus, liquidation, overstock, used equipment and spare capacity.
+  { site: "reddit.com", orientation: "supply", topics: ["surplus inventory for sale", "liquidating inventory", "excess stock wholesale lot", "closeout pallets for sale"] },
+  { site: "surplusrecord.com", orientation: "supply", topics: ["surplus equipment"] },
+  { site: "machinio.com", orientation: "supply", topics: ["used equipment for sale"] },
+  // Problems any provider (or the user's own services) could fix, at a business that would pay.
+  { site: "reddit.com", orientation: "problem", topics: ["small business need help finding a company", "need a contractor urgently", "recommend a vendor for my business"] },
+  { site: "community.shopify.com", orientation: "problem", topics: ["need someone to fix"] },
 ];
 
 /** Sites the built-in venue list already searches. */
