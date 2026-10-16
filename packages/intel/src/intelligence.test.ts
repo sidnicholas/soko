@@ -73,4 +73,12 @@ describe("detection parse defaults", () => {
     expect(parsed.leads[0]).toMatchObject({ evidence_level: "inferred", signal_type: "other", title_unverified: false, supply_terms: { moq: null } });
     expect(parsed.hypotheses).toEqual([]);
   });
+
+  it("drops an evidence label the model wrote inside a supply term (seen in production, 2026-10-16)", () => {
+    const parsed = DetectionSchema.parse({
+      skipped: [],
+      leads: [{ index: 0, kind: "supply", title: "t", summary: "s", urgency: "low", credibility: 0.8, contact: null, facts: [], opposite_queries: [], evidence_level: "observed", supply_terms: { moq: "source_fact: 1 part", capacity: "inference: up to 50", condition: "unknown:" } }],
+    });
+    expect(parsed.leads[0]!.supply_terms).toMatchObject({ moq: "1 part", capacity: "up to 50", condition: null });
+  });
 });

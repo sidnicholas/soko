@@ -96,15 +96,18 @@ export const DEMAND_SIGNALS = ["rfq", "purchase_request", "hiring_expansion", "p
 export const SIGNAL_TYPES = [...SUPPLY_SIGNALS, ...DEMAND_SIGNALS, "other"] as const;
 const EVIDENCE_LEVELS = ["observed", "inferred"] as const;
 
+/** A stated term; the model sometimes prefixes its evidence label ("source_fact: 1 part"), which is dropped. */
+const termString = nullableString.transform((v) => (v ? v.replace(/^(source_fact|inference|estimate|unknown)\s*:\s*/i, "").trim() || null : null));
+
 /** Stated supply terms; each null when the source does not say. */
 const SupplyTermsSchema = z
   .object({
-    moq: nullableString,
-    price_breaks: nullableString,
-    condition: nullableString,
-    shipping_terms: nullableString,
-    expiry: nullableString,
-    capacity: nullableString,
+    moq: termString,
+    price_breaks: termString,
+    condition: termString,
+    shipping_terms: termString,
+    expiry: termString,
+    capacity: termString,
   })
   .catch({ moq: null, price_breaks: null, condition: null, shipping_terms: null, expiry: null, capacity: null });
 
