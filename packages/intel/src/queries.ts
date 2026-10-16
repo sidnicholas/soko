@@ -8,71 +8,47 @@ import type { WebSearchQuery } from "@opportunity-os/connectors-sdk";
  */
 export interface StageOneQuery extends WebSearchQuery {
   orientation: "demand" | "supply" | "problem";
+  /** The registry source this query belongs to, for its run record and yield. */
+  sourceId?: string;
 }
 
 /**
- * Where intent actually gets written down. The first live runs (2026-10-03)
- * showed open-web results are mostly articles, product pages and directories,
- * so each query is pinned to a community, procurement or surplus venue.
- * Rules learned from those runs: at most one quoted phrase, month windows.
- * Venues are reached only through the search provider's index (snippets) —
- * no site is fetched or scraped.
+ * The pool comes from the source registry (migration 0025, ADR-037): every
+ * active search venue that passes its permission policy contributes
+ * `site:<domain> <topic>` queries. The built-in venues that used to live here
+ * are registry rows with origin `builtin`; they are reviewed, paused and
+ * measured like any other source.
+ *
+ * Rules learned from live runs that the registry's topics keep: host-level
+ * `site:` filters only (path filters aren't documented for the search
+ * provider), at most one quoted phrase, month windows. A venue is reached only
+ * through the search provider's index (snippets); no site is fetched.
  */
-interface Venue {
-  site: string;
-  orientation: StageOneQuery["orientation"];
-  /** Topics searched within this venue. */
+
+/** A registry row as the pool needs it. */
+export interface PoolSource {
+  id: string;
+  domain: string;
+  orientation: string;
   topics: string[];
 }
 
-// Host-level site: filters only — path filters (site:reddit.com/r/x) aren't
-// documented for the search provider and could silently return nothing.
-//
-// Category-agnostic since 2026-10-16: the user brokers any product or
-// service, so venues are chosen for where buyers and sellers of anything
-// post, and topics use intent language rather than one industry. (From
-// 2026-10-06 the pool searched only for buyers of the user's own web
-// services; 13 days of that produced 1 actionable lead.) Earlier pruning
-// still holds: sam.gov (unwinnable federal notices), liquidation.com (no
-// results), govdeals.com (product pages). New venues are unproven; prune by
-// the per-query yield table on the Action Queue and /yield.
-const VENUES: Venue[] = [
-  // Buyers of goods: open buying requests on B2B trade boards and communities.
-  { site: "tradekey.com", orientation: "demand", topics: ["buy offers", "buying request bulk"] },
-  { site: "go4worldbusiness.com", orientation: "demand", topics: ["buying leads"] },
-  { site: "ec21.com", orientation: "demand", topics: ["buy offers"] },
-  { site: "reddit.com", orientation: "demand", topics: ["WTB bulk wholesale", "looking for a supplier", "looking for a manufacturer", "where can I buy in bulk", "need a vendor for my business"] },
-  // Buyers of services: people hiring for sourcing, procurement or any outsourced work.
-  { site: "upwork.com", orientation: "demand", topics: ["product sourcing agent job", "find suppliers job", "procurement specialist job"] },
-  // Sellers: surplus, liquidation, overstock, used equipment and spare capacity.
-  { site: "reddit.com", orientation: "supply", topics: ["surplus inventory for sale", "liquidating inventory", "excess stock wholesale lot", "closeout pallets for sale"] },
-  { site: "surplusrecord.com", orientation: "supply", topics: ["surplus equipment"] },
-  { site: "machinio.com", orientation: "supply", topics: ["used equipment for sale"] },
-  // Problems any provider (or the user's own services) could fix, at a business that would pay.
-  { site: "reddit.com", orientation: "problem", topics: ["small business need help finding a company", "need a contractor urgently", "recommend a vendor for my business"] },
-  { site: "community.shopify.com", orientation: "problem", topics: ["need someone to fix"] },
-];
-
-/** Sites the built-in venue list already searches. */
-export function builtinSites(): Set<string> {
-  return new Set(VENUES.map((v) => v.site));
-}
-
 /**
- * The full pool, in a stable order: the built-in venues, then `extra` —
- * queries from sources added at runtime (see sources.ts). A query already in
- * the pool is not added twice.
+ * The full pool, in a stable order, each query tagged with the source it
+ * came from. A query two sources would both produce is kept once.
  */
-export function stageOnePool(extra: StageOneQuery[] = []): StageOneQuery[] {
+export function poolFromSources(sources: PoolSource[]): StageOneQuery[] {
   const pool: StageOneQuery[] = [];
-  for (const v of VENUES) {
-    for (const topic of v.topics) pool.push({ query: `site:${v.site} ${topic}`, orientation: v.orientation, freshness: "month" });
-  }
-  const seen = new Set(pool.map((q) => q.query));
-  for (const q of extra) {
-    if (seen.has(q.query)) continue;
-    seen.add(q.query);
-    pool.push(q);
+  const seen = new Set<string>();
+  const ordered = [...sources].sort((a, b) => a.domain.localeCompare(b.domain) || a.orientation.localeCompare(b.orientation) || a.id.localeCompare(b.id));
+  for (const s of ordered) {
+    if (s.orientation !== "demand" && s.orientation !== "supply" && s.orientation !== "problem") continue;
+    for (const topic of s.topics) {
+      const query = `site:${s.domain} ${topic}`;
+      if (seen.has(query)) continue;
+      seen.add(query);
+      pool.push({ query, orientation: s.orientation, freshness: "month", sourceId: s.id });
+    }
   }
   return pool;
 }
@@ -82,8 +58,7 @@ export function stageOnePool(extra: StageOneQuery[] = []): StageOneQuery[] {
  * problem so every run samples all three orientations, and rotating through
  * the pool across runs.
  */
-export function stageOneQueries(runIndex: number, count: number, extra: StageOneQuery[] = []): StageOneQuery[] {
-  const pool = stageOnePool(extra);
+export function stageOneQueries(runIndex: number, count: number, pool: StageOneQuery[]): StageOneQuery[] {
   const total = Math.min(count, pool.length);
   const lanes = (["demand", "problem", "supply"] as const).map((k) => pool.filter((q) => q.orientation === k));
   // How many picks each lane gets per run (interleaved, skipping empty lanes)…

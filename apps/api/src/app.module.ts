@@ -17,6 +17,7 @@ import { SearchModule } from "./search/search.module";
 import { IntelModule } from "./intel/intel.module";
 import { MarketplaceModule } from "./marketplace/marketplace.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
+import { SourcesModule } from "./sources/sources.module";
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { AnalyticsModule } from "./analytics/analytics.module";
     IntelModule,
     MarketplaceModule,
     AnalyticsModule,
+    SourcesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

@@ -278,6 +278,9 @@ importers:
       '@opportunity-os/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@opportunity-os/intel':
+        specifier: workspace:*
+        version: link:../../packages/intel
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability

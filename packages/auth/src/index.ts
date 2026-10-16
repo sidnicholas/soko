@@ -32,7 +32,9 @@ export type Permission =
   | "notification:deliver"
   | "signal:submit"
   | "outcome:record"
-  | "audit:read";
+  | "audit:read"
+  /** PRD v2 FR-01: record a source's permission-policy review and change its status. Never granted to agents. */
+  | "source:review";
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   user: ["mission:create", "mission:read", "mission:update", "mission:archive", "opportunity:read", "transaction:read", "signal:submit"],
@@ -54,6 +56,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "audit:read",
     "signal:submit",
     "outcome:record",
+    "source:review",
   ],
   reviewer: ["mission:read", "opportunity:read", "approval:read", "approval:decide", "audit:read"],
   admin: [
@@ -80,6 +83,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "audit:read",
     "signal:submit",
     "outcome:record",
+    "source:review",
   ],
   service: ["settlement:execute", "settlement:release", "settlement:dispute", "asset_transfer:execute", "audit:read"],
   // Agents may propose but never approve, send, or move money (§8, §13.5).

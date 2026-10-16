@@ -347,32 +347,56 @@ export interface IntelQueue {
   }[];
 }
 /** A search source added at runtime (GET /intel/sources), with what it has yielded so far. */
-export interface IntelQuerySource {
+/** PRD v2 FR-01 source registry row, as GET /sources returns it. */
+export interface RegistrySource {
   id: string;
+  kind: "search_venue" | "connector" | "apify_actor";
   external_id: string | null;
   name: string;
   domain: string;
-  orientation: "demand" | "supply" | "problem";
+  url: string | null;
+  orientation: string;
   topics: string[];
+  markets: string[];
   sector: string | null;
   geography: string | null;
-  signal_type: string | null;
   access_method: string | null;
-  notes: string | null;
-  priority: string | null;
-  evidence_url: string | null;
-  status: "active" | "paused" | "rejected";
+  permission_basis: PermissionBasis;
+  robots_tos_assessment: string | null;
+  data_use_constraints: string | null;
+  terms_reviewed_at: string | null;
+  terms_review_due_at: string | null;
+  status: "proposed" | "active" | "paused" | "rejected";
   status_reason: string | null;
   origin: string;
-  created_at: string;
-  updated_at: string;
-  yield: { searches: number; results: number; leads: number; actionable: number };
+  health: "unknown" | "ok" | "degraded" | "failing";
+  consecutive_failures: number;
+  last_run_at: string | null;
+  policy_gaps: string[];
+  yield: { searches: number; results: number; leads: number; actionable: number; errors: number; costUsd: number; lastRunAt: string | null } | null;
 }
-/** What POST /intel/sources did with a submission. */
-export interface IntelSourceImport {
+
+export type PermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract";
+
+export interface RegistrySourceDetail extends RegistrySource {
+  reviews: { id: string; decision: "approved" | "rejected"; permission_basis: string; robots_tos_assessment: string | null; data_use_constraints: string | null; terms_review_due_at: string | null; notes: string | null; reviewer_label: string | null; created_at: string }[];
+  runs: { id: string; query: string; results: number; new_results: number; leads: number; cost_usd: number; error: string | null; created_at: string }[];
+}
+
+export interface SourceReviewInput {
+  decision: "approved" | "rejected";
+  permission_basis: PermissionBasis;
+  robots_tos_assessment?: string | null;
+  data_use_constraints?: string | null;
+  terms_review_due_at?: string;
+  notes?: string | null;
+}
+
+/** What POST /sources did with a submission. */
+export interface SourceImport {
   received: number;
   added: number;
-  added_active: number;
+  added_proposed: number;
   added_paused: number;
   already_known: number;
   rejected: number;
@@ -467,9 +491,12 @@ export const api = {
   intelQueue: () => request<IntelQueue>("/intel/queue"),
   yieldReport: (days: number) => request<YieldReport>(`/analytics/yield?days=${days}`),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
-  intelSources: () => request<IntelQuerySource[]>("/intel/sources"),
-  importIntelSources: (document: unknown) => request<IntelSourceImport>("/intel/sources", jsonBody(document)),
-  setIntelSourceStatus: (id: string, status: "active" | "paused") => request<IntelQuerySource>(`/intel/sources/${id}/status`, jsonBody({ status })),
+  // Source registry (PRD v2 FR-01)
+  listSources: () => request<RegistrySource[]>("/sources"),
+  getSource: (id: string) => request<RegistrySourceDetail>(`/sources/${id}`),
+  importSources: (document: unknown) => request<SourceImport>("/sources", jsonBody(document)),
+  reviewSource: (id: string, body: SourceReviewInput) => request<RegistrySource>(`/sources/${id}/review`, jsonBody(body)),
+  setSourceStatus: (id: string, status: "active" | "paused", reason?: string) => request<RegistrySource>(`/sources/${id}/status`, jsonBody({ status, reason: reason ?? null })),
   marketListings: () => request<MarketListings>("/marketplace/listings"),
   addOffNetwork: (listingId: string, body: OffNetworkInput) => request<OffNetworkMatch>(`/marketplace/listings/${encodeURIComponent(listingId)}/off-network`, jsonBody(body)),
   setOffNetworkStatus: (id: string, body: { status: OffNetworkStatus; note?: string | null }) => request<OffNetworkMatch>(`/marketplace/off-network/${id}/status`, jsonBody(body)),

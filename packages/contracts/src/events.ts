@@ -50,6 +50,9 @@ export const EVENT_NAMES = [
   "outcome.recorded.v1",
   "asset_transfer.prepared.v1",
   "asset_transfer.executed.v1",
+  "source.reviewed.v1",
+  "source.activated.v1",
+  "source.paused.v1",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { stageOnePool, stageOneQueries } from "./queries";
-import { SourceSubmissionSchema, deriveTopic, isUnproductive, normalizeDomain, orientationsForSide, sourceQueries, vetSource, type SubmittedSource } from "./sources";
+import { poolFromSources, stageOneQueries } from "./queries";
+import { SourceSubmissionSchema, deriveTopic, normalizeDomain, orientationsForSide, sourceQueries, vetSource, type SubmittedSource } from "./sources";
+import { isUnproductive } from "./source-policy";
 
 const base: SubmittedSource = {
   source_id: "SRC-1",
@@ -24,12 +25,12 @@ describe("normalizeDomain", () => {
 });
 
 describe("vetSource", () => {
-  it("lists a both-sided source on each side, searched from the next run", () => {
+  it("lists a both-sided source on each side, waiting for a policy review", () => {
     const { vetted, rejected } = vetSource(base);
     expect(rejected).toBeNull();
     expect(vetted.map((v) => [v.orientation, v.status, v.topics])).toEqual([
-      ["demand", "active", ["industrial surplus equipment request"]],
-      ["supply", "active", ["industrial surplus equipment for sale"]],
+      ["demand", "proposed", ["industrial surplus equipment request"]],
+      ["supply", "proposed", ["industrial surplus equipment for sale"]],
     ]);
     expect(vetted[0]).toMatchObject({ externalId: "SRC-1", domain: "industrial-surplus-auctions.com", topicsExplicit: false });
   });
@@ -47,7 +48,6 @@ describe("vetSource", () => {
     expect(held({ access_method: "documented REST API" })).toEqual([["paused", "no_public_pages"]]);
     expect(held({ domain: "eva.virginia.gov", access_method: "public bulletin board" })).toEqual([["paused", "government_portal_screened"]]);
     expect(held({ domain: "emarketplace.state.pa.us", access_method: "public portal" })).toEqual([["paused", "government_portal_screened"]]);
-    expect(held({ domain: "upwork.com" })).toEqual([["paused", "already_in_builtin_pool"]]);
     expect(held({ domain: "ebay.com", side: "supply" })).toEqual([["paused", "covered_by_connector"]]);
     expect(held({ domain: "docs.ted.europa.eu", access_method: "public search" })).toEqual([["paused", "documentation_host"]]);
     expect(held({ access_method: "documented public JSON API" })).toEqual([["paused", "no_public_pages"]]);
@@ -56,7 +56,7 @@ describe("vetSource", () => {
   it("keeps a side out when the reviewer holds it, without touching the other side", () => {
     const { vetted } = vetSource({ ...base, hold: { supply: "profiles_not_offers" } });
     expect(vetted.map((v) => [v.orientation, v.status, v.statusReason])).toEqual([
-      ["demand", "active", null],
+      ["demand", "proposed", "awaiting_policy_review"],
       ["supply", "paused", "profiles_not_offers"],
     ]);
   });
@@ -64,7 +64,7 @@ describe("vetSource", () => {
   it("holds supplier directories on the supply side only", () => {
     const { vetted } = vetSource({ ...base, domain: "manufacturers.directory", signal_type: "Manufacturer profiles, RFQs, catalogs", access_method: "public directory; account for RFQs" });
     expect(vetted.map((v) => [v.orientation, v.status, v.statusReason])).toEqual([
-      ["demand", "active", null],
+      ["demand", "proposed", "awaiting_policy_review"],
       ["supply", "paused", "directory_not_live_offers"],
     ]);
   });
@@ -90,20 +90,18 @@ describe("deriveTopic", () => {
   });
 });
 
-describe("runtime sources in the stage-1 pool", () => {
-  const extra = sourceQueries({ domain: "industrial-surplus-auctions.com", orientation: "supply", topics: ["industrial surplus equipment for sale"] });
+describe("submitted sources in the stage-1 pool", () => {
+  const source = { id: "src-1", domain: "industrial-surplus-auctions.com", orientation: "supply", topics: ["industrial surplus equipment for sale"] };
 
-  it("joins the built-in pool without duplicating a query", () => {
-    const builtin = stageOnePool();
-    const pool = stageOnePool([...extra, ...extra, builtin[0]!]);
-    expect(pool).toHaveLength(builtin.length + 1);
-    expect(pool.at(-1)).toEqual({ query: "site:industrial-surplus-auctions.com industrial surplus equipment for sale", orientation: "supply", freshness: "month" });
+  it("contributes site-pinned queries tagged with its registry id", () => {
+    expect(sourceQueries(source)).toEqual([{ query: "site:industrial-surplus-auctions.com industrial surplus equipment for sale", orientation: "supply", freshness: "month", sourceId: "src-1" }]);
   });
 
-  it("gets searched: a supply source joins the supply lane's rotation", () => {
+  it("gets searched once active: it joins its lane's rotation", () => {
+    const pool = poolFromSources([source, { id: "b", domain: "reddit.com", orientation: "supply", topics: ["closeout pallets", "surplus lot", "overstock"] }]);
     const searched = new Set<string>();
-    for (let run = 0; run < 12; run++) for (const q of stageOneQueries(run, 8, extra)) searched.add(q.query);
-    expect(searched.has(extra[0]!.query)).toBe(true);
+    for (let run = 0; run < 12; run++) for (const q of stageOneQueries(run, 2, pool)) searched.add(q.query);
+    expect(searched.has(sourceQueries(source)[0]!.query)).toBe(true);
   });
 });
 

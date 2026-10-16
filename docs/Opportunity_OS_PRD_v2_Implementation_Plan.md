@@ -15,7 +15,7 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 | D5 | §10: inbound rate limiting | None | Fixed: per-sender hourly limit on the four message webhooks |
 | D6 | §3.5: one canonical deal id end to end | None. Intel candidates, off-network deals, opportunities and transactions are separate records | Open. Introduce as a column on existing records with the first P2/P3 slice (ADR-033) |
 | D7 | §3.2: workers never write around policy | Connectors, lifecycle and intel workers write discovery data directly (non-binding). The settlement timer activity auto-refunds and auto-releases below threshold with no human token, by ADR-029 design | Allowed for non-binding data. Timer behaviour stays on test rails; revisit before any live rail (ADR-033) |
-| D8 | FR-01: a source registry | Three partial registries already: `intel_query_sources` (runtime search sources), `intel_sources` (host yield), and the connector registry in code | P1 must unify these, not add a fourth table |
+| D8 | FR-01: a source registry | Three partial registries already: `intel_query_sources` (runtime search sources), `intel_sources` (host yield), and the connector registry in code | Resolved by P1 slice 1: `intel_query_sources` renamed to `source_registry`; built-in venues and connectors are rows; `intel_sources` kept as lead-host yield |
 | D9 | FR-07: map channel identities to counterparties | `counterparties` exists; no channel identity lookup; inbound messages are always recorded as supply signals | P2 slice |
 | D10 | §5/§12: a `messaging` package | Messaging lives in `apps/api/src/messaging` | Keep there until a second host needs it |
 | D11 | FR-10: e-sign adapter | `verifiers-sdk` has a deterministic e-signature reference verifier only | P3: real provider behind the existing verifier interface |
@@ -49,7 +49,7 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 | Phase | Scope | Gate (PRD §14) | Status |
 | --- | --- | --- | --- |
 | P0 Stabilize | REST write bypass, webhook validation, graph noise, outbox relay, baseline, ADRs | Unauthorized REST write blocked; events replay without duplication; measurable source yield | Code done; production steps below |
-| P1 Discovery expansion | Unified source registry, Apify, independent supply/demand, hypotheses, provenance, profit economics, watchlist | Vetted sources only; reproducible evidence; budget adherence; better verified leads per dollar | Not started; needs D8 unification first |
+| P1 Discovery expansion | Unified source registry, Apify, independent supply/demand, hypotheses, provenance, profit economics, watchlist | Vetted sources only; reproducible evidence; budget adherence; better verified leads per dollar | Slice 1 (source registry, ADR-037) built 2026-10-16, which also resolves D8; slices 2–4 not started |
 | P2 Relationship and outreach | CRM, consent, threading, client brief, digest, approval-first outbound | No unauthorized sends; correct threading and opt-outs; memory correction | Blocked on §17: channels, call recording, retention |
 | P3 Broker deal execution | Strategy, fee protection, e-sign, deal rooms, KYB/KYC | Full sandbox deal with signed terms; isolation tests | Blocked on §17: jurisdictions, counterparty accounts; counsel templates |
 | P4 Regulated money and fulfillment | Licensed escrow, stablecoin option, freight, customs, reconciliation, exceptions | Legal signoff; provider sandbox end to end; no premature release | Blocked on §17: providers, freight classes; licensed partner |

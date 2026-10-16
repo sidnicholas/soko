@@ -1,14 +1,14 @@
 import { z } from "zod";
 import { isGovernmentProcurement } from "./rules";
-import { builtinSites, type StageOneQuery } from "./queries";
+import type { StageOneQuery } from "./queries";
 
 /**
- * Sources submitted at runtime (AIOOS §3 source registry). An external agent
- * periodically proposes places where demand or supply is written down; each is
- * vetted by the deterministic rules here and, if it passes, joins the stage-1
- * query pool straight away. Yield then decides whether it stays: a source
- * that has been searched {@link UNPRODUCTIVE_AFTER_SEARCHES} times without a
- * single lead is paused.
+ * Sources submitted at runtime into the source registry (PRD v2 FR-01,
+ * ADR-037). An external agent or a member of staff proposes places where
+ * demand or supply is written down; each is screened by the deterministic
+ * rules here. One that passes is `proposed`: it waits for a permission-policy
+ * review (source-policy.ts) before it can run. Yield then decides whether it
+ * stays: an active source searched repeatedly without a lead is paused.
  *
  * A source is only ever used as a `site:` filter on the search provider — its
  * pages are never fetched (ADR-014), so a source with no public, indexed
@@ -44,7 +44,8 @@ export const SourceSubmissionSchema = z.union([
 ]);
 
 export type SourceOrientation = "demand" | "supply";
-export type SourceStatus = "active" | "paused" | "rejected";
+/** What screening can decide; only a policy review makes a source active. */
+export type SourceStatus = "proposed" | "paused" | "rejected";
 
 export interface VettedSource {
   externalId: string | null;
@@ -63,8 +64,6 @@ export interface VettedSource {
   priority: string | null;
   evidenceUrl: string | null;
 }
-
-export const UNPRODUCTIVE_AFTER_SEARCHES = 3;
 
 const HOSTNAME = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
 
@@ -119,7 +118,6 @@ function cleanTopic(topic: string): string {
 
 function vetStatus(domain: string, orientation: SourceOrientation, s: SubmittedSource): { status: SourceStatus; reason: string | null } {
   if (CONNECTOR_SITES.has(domain)) return { status: "paused", reason: "covered_by_connector" };
-  if (builtinSites().has(domain)) return { status: "paused", reason: "already_in_builtin_pool" };
   // An API's documentation site has no listings on it.
   if (/^(docs|developers?|api)\./.test(domain)) return { status: "paused", reason: "documentation_host" };
   // Paid, login-only and API-only sources have nothing a search index can show ("public API" is still an API).
@@ -132,7 +130,7 @@ function vetStatus(domain: string, orientation: SourceOrientation, s: SubmittedS
   }
   const held = s.hold?.[orientation];
   if (held) return { status: "paused", reason: held };
-  return { status: "active", reason: null };
+  return { status: "proposed", reason: "awaiting_policy_review" };
 }
 
 export interface VetOutcome {
@@ -175,23 +173,8 @@ export function vetSource(s: SubmittedSource): VetOutcome {
 }
 
 /** The stage-1 queries one source contributes. */
-export function sourceQueries(source: { domain: string; orientation: string; topics: string[] }): StageOneQuery[] {
+export function sourceQueries(source: { id?: string; domain: string; orientation: string; topics: string[] }): StageOneQuery[] {
   if (source.orientation !== "demand" && source.orientation !== "supply" && source.orientation !== "problem") return [];
   const orientation = source.orientation;
-  return source.topics.map((topic) => ({ query: `site:${source.domain} ${topic}`, orientation, freshness: "month" as const }));
-}
-
-/**
- * True once every query of a source has been searched at least
- * {@link UNPRODUCTIVE_AFTER_SEARCHES} times and none produced a lead.
- */
-export function isUnproductive(queries: string[], yieldByQuery: Map<string, { searches: number; leads: number }>): boolean {
-  if (queries.length === 0) return false;
-  let leads = 0;
-  for (const q of queries) {
-    const y = yieldByQuery.get(q);
-    if (!y || y.searches < UNPRODUCTIVE_AFTER_SEARCHES) return false;
-    leads += y.leads;
-  }
-  return leads === 0;
+  return source.topics.map((topic) => ({ query: `site:${source.domain} ${topic}`, orientation, freshness: "month" as const, ...(source.id ? { sourceId: source.id } : {}) }));
 }

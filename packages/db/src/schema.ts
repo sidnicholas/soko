@@ -474,8 +474,10 @@ export interface IntelCandidatesTable {
   updated_at: Timestamp;
 }
 
-export interface IntelQuerySourcesTable {
+/** Migration 0025 (renamed from intel_query_sources): every place discovery reads from. */
+export interface SourceRegistryTable {
   id: Generated<string>;
+  kind: Generated<string>;
   external_id: string | null;
   name: string;
   domain: string;
@@ -491,8 +493,52 @@ export interface IntelQuerySourcesTable {
   status: string;
   status_reason: string | null;
   origin: Generated<string>;
+  url: string | null;
+  markets: Generated<Json>;
+  api_available: Generated<boolean>;
+  apify_actor_id: string | null;
+  apify_actor_version: string | null;
+  permission_basis: Generated<string>;
+  robots_tos_assessment: string | null;
+  data_use_constraints: string | null;
+  terms_reviewed_at: Timestamp | null;
+  terms_review_due_at: Timestamp | null;
+  contact_path: string | null;
+  min_interval_minutes: number | null;
+  cost_per_run_usd: Numeric | null;
+  max_daily_usd: Numeric | null;
+  health: Generated<string>;
+  consecutive_failures: Generated<number>;
+  last_run_at: Timestamp | null;
   created_at: Generated<Timestamp>;
   updated_at: Generated<Timestamp>;
+}
+
+export interface SourcePolicyReviewsTable {
+  id: Generated<string>;
+  source_id: string;
+  decision: string;
+  permission_basis: string;
+  robots_tos_assessment: string | null;
+  data_use_constraints: string | null;
+  terms_review_due_at: Timestamp | null;
+  notes: string | null;
+  reviewed_by: string | null;
+  reviewer_label: string | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface SourceRunsTable {
+  id: Generated<string>;
+  source_id: string | null;
+  intel_run_id: string | null;
+  query: string;
+  results: Generated<number>;
+  new_results: Generated<number>;
+  leads: Generated<number>;
+  cost_usd: Numeric;
+  error: string | null;
+  created_at: Generated<Timestamp>;
 }
 
 export interface OffnetworkMatchesTable {
@@ -543,5 +589,7 @@ export interface Database {
   intel_leads: IntelLeadsTable;
   intel_candidates: IntelCandidatesTable;
   offnetwork_matches: OffnetworkMatchesTable;
-  intel_query_sources: IntelQuerySourcesTable;
+  source_registry: SourceRegistryTable;
+  source_policy_reviews: SourcePolicyReviewsTable;
+  source_runs: SourceRunsTable;
 }

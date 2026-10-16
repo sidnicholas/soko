@@ -1,23 +1,14 @@
-import { Controller, Get, Headers, NotFoundException, Param, ParseUUIDPipe, Post, Req, UnauthorizedException } from "@nestjs/common";
+import { Controller, Get, Headers, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
-import {
-  getIntelCandidate,
-  intelStats,
-  listIntelQuerySources,
-  listIntelQueryYield,
-  listIntelQueue,
-  listIntelSources,
-  setIntelQuerySourceStatus,
-  updateIntelCandidateStatus,
-  upsertIntelQuerySource,
-} from "@opportunity-os/db";
-import { getConfig } from "@opportunity-os/config";
-import { RAPID_MODE, SourceSubmissionSchema, sourceQueries, vetSource } from "@opportunity-os/intel";
+import { getIntelCandidate, intelStats, listIntelQueryYield, listIntelQueue, listIntelSources, updateIntelCandidateStatus } from "@opportunity-os/db";
+import { RAPID_MODE, SourceSubmissionSchema } from "@opportunity-os/intel";
 import type { AuthenticatedRequest } from "../common/auth.guard";
 import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
-import { timingSafeStringEqual } from "../common/webhook-signature";
 import { ZodBody } from "../common/zod-validation.pipe";
+import { SourcesService } from "../sources/sources.service";
+import { SourceStatusSchema } from "../sources/sources.dto";
+import { submitter } from "../sources/sources.controller";
 
 /** AIOOS §26 queue sizes: a handful to act on, a short list to check. */
 const ACT_NOW_LIMIT = 3;
@@ -56,74 +47,38 @@ const OutcomeSchema = z.object({
   realized_usd: z.number().nonnegative().nullable().optional(),
 });
 
-const SourceStatusSchema = z.object({
-  status: z.enum(["active", "paused"]),
-  reason: z.string().trim().min(1).max(200).nullable().optional(),
-});
 
 @ApiTags("intel")
 @Controller("intel")
 export class IntelController {
+  constructor(@Inject(SourcesService) private readonly registry: SourcesService) {}
+
+  // Older paths for the source registry, kept so an agent already posting here
+  // keeps working. They behave exactly like /v1/sources (submissions wait for
+  // a policy review); new callers use /v1/sources.
   @Get("sources")
-  @ApiOperation({ summary: "Search sources added at runtime, with what each has yielded so far" })
+  @ApiOperation({ summary: "Alias of GET /v1/sources" })
   async sources(@CurrentUser() user: Principal) {
     requirePermission(user, "opportunity:reverify");
-    const [sources, yields] = await Promise.all([listIntelQuerySources(), listIntelQueryYield(5000)]);
-    const byQuery = new Map(yields.map((y) => [y.query, y]));
-    return sources.map((s) => {
-      const rows = sourceQueries(s).map((q) => byQuery.get(q.query));
-      const sum = (pick: (y: (typeof yields)[number]) => number) => rows.reduce((n, y) => n + (y ? pick(y) : 0), 0);
-      return { ...s, yield: { searches: sum((y) => y.searches), results: sum((y) => y.results), leads: sum((y) => y.leads), actionable: sum((y) => y.actionable) } };
-    });
+    return this.registry.list();
   }
 
   @Post("sources")
-  @ApiOperation({ summary: "Submit new search sources (an agent's report or a bare array). Vetted on arrival; those that pass are searched from the next run" })
+  @ApiOperation({ summary: "Alias of POST /v1/sources" })
   async submitSources(
     @Req() req: AuthenticatedRequest,
     @Headers("x-intel-sources-token") token: string | undefined,
     @ZodBody(SourceSubmissionSchema) body: z.infer<typeof SourceSubmissionSchema>,
   ) {
-    // Two ways in: the agent's shared secret, or a signed-in member of staff.
-    const expected = getConfig().intel.sourcesToken;
-    const byToken = Boolean(expected && token && timingSafeStringEqual(expected, token));
-    if (!byToken) {
-      if (!req.authUser) throw new UnauthorizedException(req.authError ?? "Authentication required");
-      requirePermission({ ...req.authUser, hasApprovedActionToken: false }, "opportunity:reverify");
-    }
-    const submitted = Array.isArray(body) ? body : body.sources;
-    const results: { source_id: string | null; domain: string; orientation: string | null; outcome: "added" | "already_known" | "rejected"; status: string; reason: string | null }[] = [];
-    for (const item of submitted) {
-      const { vetted, rejected } = vetSource(item);
-      if (rejected) {
-        results.push({ source_id: item.source_id ?? null, domain: item.domain, orientation: null, outcome: "rejected", status: "rejected", reason: rejected });
-        continue;
-      }
-      for (const v of vetted) {
-        const { source, created } = await upsertIntelQuerySource({ ...v, origin: byToken ? "agent" : "staff_upload" });
-        // An already-known source keeps the status it has; report that, not what vetting would say today.
-        results.push({ source_id: v.externalId, domain: v.domain, orientation: v.orientation, outcome: created ? "added" : "already_known", status: source.status, reason: source.status_reason });
-      }
-    }
-    const added = results.filter((r) => r.outcome === "added");
-    return {
-      received: submitted.length,
-      added: added.length,
-      added_active: added.filter((r) => r.status === "active").length,
-      added_paused: added.filter((r) => r.status === "paused").length,
-      already_known: results.filter((r) => r.outcome === "already_known").length,
-      rejected: results.filter((r) => r.outcome === "rejected").length,
-      results,
-    };
+    const { actor, origin } = submitter(req, token);
+    return this.registry.submit(Array.isArray(body) ? body : body.sources, actor, origin);
   }
 
   @Post("sources/:id/status")
-  @ApiOperation({ summary: "Pause or resume one search source" })
+  @ApiOperation({ summary: "Alias of POST /v1/sources/:id/status" })
   async setSourceStatus(@CurrentUser() user: Principal, @Param("id", ParseUUIDPipe) id: string, @ZodBody(SourceStatusSchema) body: z.infer<typeof SourceStatusSchema>) {
-    requirePermission(user, "opportunity:reverify");
-    const updated = await setIntelQuerySourceStatus(id, body.status, body.status === "active" ? null : (body.reason ?? "paused_by_staff"));
-    if (!updated) throw new NotFoundException(`Source ${id} not found`);
-    return updated;
+    requirePermission(user, "source:review");
+    return this.registry.setStatus(id, body.status, body.reason ?? null, { type: "user", id: user.userId });
   }
 
   @Get("queue")

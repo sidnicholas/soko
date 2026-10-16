@@ -8,12 +8,17 @@ import {
   intelRunsStartedToday,
   intelSpentTodayUsd,
   knownIntelLeadHashes,
-  listIntelQuerySources,
-  listIntelQueryYield,
+  listSources,
   listUnassessedIntelLeads,
+  recordSourceOutcome,
+  recordSourceRuns,
   setIntelLeadStatus,
-  setIntelQuerySourceStatus,
+  setSourceStatus,
+  sourceQueryStats,
+  sourceSpendToday,
   touchIntelSource,
+  type RegistrySource,
+  type SourceRunRecord,
   upsertIntelCandidate,
   type IntelRunTotals,
 } from "@opportunity-os/db";
@@ -33,8 +38,8 @@ import {
   type Assessment,
   type Detection,
 } from "./prompts";
-import { stageOneQueries, type StageOneQuery } from "./queries";
-import { isUnproductive, sourceQueries } from "./sources";
+import { poolFromSources, stageOneQueries, type StageOneQuery } from "./queries";
+import { SOURCE_POLICY_VERSION, healthFor, isUnproductive, policyGaps, skipReason } from "./source-policy";
 import {
   bucketFor,
   confidenceFor,
@@ -131,28 +136,42 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
   const errors = notes.errors as string[];
   let exhausted = false;
   const detected: AssessableLead[] = [];
+  // One record per search, written to source_runs when the run ends (PRD v2 FR-01).
+  const sourceRuns: SourceRunRecord[] = [];
 
   try {
-    // ---- Stage 1-2: broad discovery + detection
-    for (const q of stageOneQueries(runIndex, opts.queriesPerRun, await runtimeSourceQueries(errors))) {
+    // ---- Stage 1-2: broad discovery + detection, from the sources the registry clears for this run
+    const { pool: queryPool, skipped } = await runnablePool();
+    notes.sources = { runnable: new Set(queryPool.map((q) => q.sourceId)).size, skipped };
+    for (const q of stageOneQueries(runIndex, opts.queriesPerRun, queryPool)) {
       if (!budget.canSpend(opts.search.costPerQueryUsd + est.detectionUsd)) {
         exhausted = true;
         break;
       }
       let results: WebSearchResult[];
+      const spentBefore = budget.spentUsd;
+      const record: SourceRunRecord = { sourceId: q.sourceId ?? null, intelRunId: runId, query: q.query, results: 0, newResults: 0, leads: 0, costUsd: 0, error: null };
+      sourceRuns.push(record);
       try {
         results = await opts.search.search({ query: q.query, count: 10, freshness: q.freshness });
       } catch (err) {
         errors.push(`search "${q.query}": ${String(err)}`);
         budget.recordSearch(opts.search.costPerQueryUsd);
+        record.error = String(err).slice(0, 500);
+        record.costUsd = budget.spentUsd - spentBefore;
+        if (q.sourceId) await recordSourceOutcome(q.sourceId, false, healthFor);
         continue;
       }
       budget.recordSearch(opts.search.costPerQueryUsd);
+      if (q.sourceId) await recordSourceOutcome(q.sourceId, true, healthFor);
       const known = await knownIntelLeadHashes(results.map((r) => urlHash(r.url)));
       const unseen = results.filter((r) => !known.has(urlHash(r.url)) && detectInjection(`${r.title} ${r.snippet}`).length === 0);
       const fresh = unseen.filter((r) => !isNoLeadHost(r.hostname));
       const queryNote: Record<string, unknown> = { q: q.query, results: results.length, new: fresh.length, noLeadHost: unseen.length - fresh.length, leads: 0, kept: 0, reasons: {} };
       (notes.queries as unknown[]).push(queryNote);
+      record.results = results.length;
+      record.newResults = fresh.length;
+      record.costUsd = budget.spentUsd - spentBefore;
       if (fresh.length === 0) continue;
 
       let detection: Detection;
@@ -160,11 +179,13 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         const { prompt, untrusted } = detectionPrompt(q.query, fresh);
         const res = await opts.llm.runStructured({ taskClass: "extraction", system: DETECTION_SYSTEM, prompt, untrustedContext: untrusted }, DetectionSchema, { outputSchema: DetectionWire });
         budget.recordLlm(res.telemetry.usd);
+        record.costUsd = budget.spentUsd - spentBefore;
         detection = res.value;
       } catch (err) {
         // A reply that never parsed was still billed: keep the ledger honest.
         if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
         else throw modelUnavailable(err);
+        record.costUsd = budget.spentUsd - spentBefore;
         errors.push(`detect "${q.query}": ${String(err).slice(0, 200)}`);
         continue;
       }
@@ -207,6 +228,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         });
         if (!leadId) continue;
         queryNote.kept = (queryNote.kept as number) + 1;
+        record.leads++;
         await touchIntelSource(result.hostname, lead.kind, { leads: 1 });
         detected.push({
           leadId,
@@ -322,6 +344,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       notes,
     };
     await finishIntelRun(runId, totals);
+    await flushSourceRuns(sourceRuns);
     await pauseUnproductiveSources();
     log.info({ runId, ...totals, notes: undefined, errors: errors.length }, "intel.run.complete");
     return { runId, ...totals };
@@ -337,6 +360,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       notes: { ...notes, fatal: String(err) },
     };
     await finishIntelRun(runId, totals);
+    await flushSourceRuns(sourceRuns);
     throw err;
   }
 }
@@ -351,29 +375,59 @@ function modelUnavailable(err: unknown): Error {
   return new Error(`model provider unavailable; run stopped before further spend: ${String(err).slice(0, 300)}`);
 }
 
+const SYSTEM = { type: "system" as const, id: null };
+const POLICY = { policyGaps: (s: RegistrySource) => policyGaps(s), policyVersion: SOURCE_POLICY_VERSION };
+
 /**
- * Queries from sources added at runtime. A failure here (e.g. the table not
- * migrated yet) costs only those sources: the built-in pool still runs.
+ * The stage-1 pool for this run: active search venues that pass their
+ * permission policy, minimum interval and daily budget (source-policy.ts). An
+ * active source whose policy no longer holds (an expired review) is paused,
+ * with an event, rather than silently skipped forever.
  */
-async function runtimeSourceQueries(errors: string[]): Promise<StageOneQuery[]> {
+async function runnablePool(): Promise<{ pool: StageOneQuery[]; skipped: Record<string, number> }> {
+  const [active, spend] = await Promise.all([listSources({ kind: "search_venue", status: "active" }), sourceSpendToday()]);
+  const runnable: RegistrySource[] = [];
+  const skipped: Record<string, number> = {};
+  for (const s of active) {
+    const why = skipReason(s, spend.get(s.id) ?? 0);
+    if (why === null) {
+      runnable.push(s);
+      continue;
+    }
+    skipped[why] = (skipped[why] ?? 0) + 1;
+    if (policyGaps(s).length > 0) {
+      await setSourceStatus(s.id, "paused", why, SYSTEM, POLICY);
+      log.info({ domain: s.domain, orientation: s.orientation, reason: why }, "intel.source.paused_policy");
+    }
+  }
+  return { pool: poolFromSources(runnable), skipped };
+}
+
+/** Writes the run's per-search records. Never fails a run. */
+async function flushSourceRuns(runs: SourceRunRecord[]): Promise<void> {
   try {
-    return (await listIntelQuerySources("active")).flatMap(sourceQueries);
+    await recordSourceRuns(runs);
   } catch (err) {
-    errors.push(`runtime sources: ${String(err).slice(0, 200)}`);
-    return [];
+    log.warn({ err: String(err) }, "intel.source_runs.write_failed");
   }
 }
 
-/** Pauses runtime sources that have been searched repeatedly without one lead. Runs after the ledger is closed; never fails a run. */
+/**
+ * Pauses active search venues that keep failing, or that every query of has
+ * been searched repeatedly without one lead. Built-in venues included. Runs
+ * after the ledger is closed; never fails a run.
+ */
 async function pauseUnproductiveSources(): Promise<void> {
   try {
-    const active = await listIntelQuerySources("active");
+    const active = await listSources({ kind: "search_venue", status: "active" });
     if (active.length === 0) return;
-    const yieldByQuery = new Map((await listIntelQueryYield(5000)).map((y) => [y.query, { searches: y.searches, leads: y.leads }]));
+    const stats = await sourceQueryStats();
     for (const source of active) {
-      if (!isUnproductive(sourceQueries(source).map((q) => q.query), yieldByQuery)) continue;
-      await setIntelQuerySourceStatus(source.id, "paused", "no_leads_after_repeated_searches");
-      log.info({ domain: source.domain, orientation: source.orientation }, "intel.source.paused_unproductive");
+      const reason =
+        source.health === "failing" ? "failing_repeatedly" : isUnproductive(poolFromSources([source]).map((q) => q.query), stats) ? "no_leads_after_repeated_searches" : null;
+      if (!reason) continue;
+      await setSourceStatus(source.id, "paused", reason, SYSTEM, POLICY);
+      log.info({ domain: source.domain, orientation: source.orientation, reason }, "intel.source.paused");
     }
   } catch (err) {
     log.warn({ err: String(err) }, "intel.source.pause_check_failed");

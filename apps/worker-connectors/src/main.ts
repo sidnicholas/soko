@@ -9,7 +9,8 @@ import {
   type NormalizedSupply,
   type SourceConnector,
 } from "@opportunity-os/connectors-sdk";
-import { closeDb, listActiveMissionsForDiscovery, upsertSupply } from "@opportunity-os/db";
+import { closeDb, getConnectorSource, listActiveMissionsForDiscovery, recordSourceOutcome, recordSourceRuns, upsertSupply, type SourceRunRecord } from "@opportunity-os/db";
+import { healthFor, policyGaps } from "@opportunity-os/intel";
 import { getConfig } from "@opportunity-os/config";
 import { createLogger } from "@opportunity-os/observability";
 import { ingestConnectors, type IngestStats, type ObservationSink } from "./ingest";
@@ -88,9 +89,26 @@ async function cycle(): Promise<void> {
   const queries = queryConnectors.length > 0 ? searchQueries(await listActiveMissionsForDiscovery(), config.connectors.seedQuery) : [];
   const sources: Record<string, unknown> = {};
   for (const connector of queryConnectors) {
+    // The source registry decides whether a connector runs (PRD v2 FR-01):
+    // a paused row, or one whose terms review has lapsed, stops it.
+    const entry = await getConnectorSource(connector.id);
+    const blocked = !entry ? "not_registered" : entry.status !== "active" ? `status_${entry.status}` : (policyGaps(entry)[0] ?? null);
+    if (blocked) {
+      sources[connector.id] = { skipped: blocked };
+      log.warn({ connector: connector.id, reason: blocked }, "ingest.connector.skipped_by_registry");
+      continue;
+    }
     // Sequential, to stay well inside each source's rate limits.
     const results = [];
-    for (const q of queries) results.push({ q, ...(await ingestOne(connector, q, sink)) });
+    const runs: SourceRunRecord[] = [];
+    for (const q of queries) {
+      const outcome = await ingestOne(connector, q, sink);
+      results.push({ q, ...outcome });
+      const failed = "error" in outcome;
+      runs.push({ sourceId: entry!.id, intelRunId: null, query: q, results: failed ? 0 : outcome.fetched, newResults: failed ? 0 : outcome.kept, leads: 0, costUsd: 0, error: failed ? outcome.error.slice(0, 500) : null });
+      await recordSourceOutcome(entry!.id, !failed, healthFor);
+    }
+    await recordSourceRuns(runs);
     sources[connector.id] = results;
   }
   log.info({ fixtures, queries, sources, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");

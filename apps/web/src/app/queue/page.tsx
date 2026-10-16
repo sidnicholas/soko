@@ -5,7 +5,7 @@ import { Badge, Button, Card, EmptyState, PageHeader, StatCard, tokens, type Ton
 import { api, type IntelCandidate, type IntelOutcomeInput, type IntelQueue } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
-import { IntelSources } from "../../components/IntelSources";
+import Link from "next/link";
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
 const range = (r: [number, number] | null | undefined) => (r ? `${usd(r[0])}–${usd(r[1])}` : "unknown");
@@ -362,7 +362,11 @@ export default function QueuePage() {
                 ))
               )}
             </Card>
-            <IntelSources />
+            <Card title="Sources" subtitle="Where these searches run is managed in the Source Registry: review new sources, pause or resume, and see each one's cost and yield.">
+              <Link href="/sources" className="oos-link">
+                Open the Source Registry
+              </Link>
+            </Card>
             <Card title="Query yield" subtitle="What each discovery search produced. Prune queries that never yield leads; add variety where they do.">
               {q.queries.length === 0 ? (
                 <EmptyState compact title="No runs yet" description="Each scheduled run records results, new pages, leads and actionable candidates per query." />

@@ -13,7 +13,17 @@ import {
   type ContactPath,
   type ScoreInput,
 } from "./rules";
-import { stageOnePool, stageOneQueries } from "./queries";
+import { poolFromSources, stageOneQueries } from "./queries";
+
+/** A pool shaped like the seeded registry: lanes of different sizes. */
+const POOL = poolFromSources([
+  { id: "d1", domain: "tradekey.com", orientation: "demand", topics: ["buy offers", "buying request bulk"] },
+  { id: "d2", domain: "reddit.com", orientation: "demand", topics: ["WTB bulk wholesale", "looking for a supplier", "looking for a manufacturer", "where can I buy in bulk", "need a vendor for my business"] },
+  { id: "s1", domain: "reddit.com", orientation: "supply", topics: ["surplus inventory for sale", "liquidating inventory", "excess stock wholesale lot"] },
+  { id: "s2", domain: "machinio.com", orientation: "supply", topics: ["used equipment for sale"] },
+  { id: "p1", domain: "reddit.com", orientation: "problem", topics: ["need a contractor urgently", "recommend a vendor for my business"] },
+]);
+const stageOnePool = () => POOL;
 import { runAllowanceUsd } from "./run";
 
 const NOW = new Date("2026-10-03T00:00:00Z");
@@ -123,8 +133,8 @@ describe("score and bucket", () => {
 
 describe("stage-one queries", () => {
   it("samples every orientation each run and rotates across runs", () => {
-    const run0 = stageOneQueries(0, 6);
-    const run1 = stageOneQueries(1, 6);
+    const run0 = stageOneQueries(0, 6, POOL);
+    const run1 = stageOneQueries(1, 6, POOL);
     expect(run0).toHaveLength(6);
     // Every lane that has queries is sampled each run.
     const nonEmpty = new Set(stageOnePool().map((q) => q.orientation));
@@ -135,17 +145,25 @@ describe("stage-one queries", () => {
   it("cycles through every query in every lane, whatever the lane sizes", () => {
     const pool = stageOnePool();
     const seen = new Set<string>();
-    for (let run = 0; run < 12; run++) for (const q of stageOneQueries(run, 8)) seen.add(q.query);
+    for (let run = 0; run < 12; run++) for (const q of stageOneQueries(run, 8, POOL)) seen.add(q.query);
     expect(seen.size).toBe(pool.length);
     // Consecutive runs don't repeat the same demand queries (regression: lane size == count).
-    const demand = (run: number) => stageOneQueries(run, 8).filter((q) => q.orientation === "demand").map((q) => q.query);
+    const demand = (run: number) => stageOneQueries(run, 8, POOL).filter((q) => q.orientation === "demand").map((q) => q.query);
     expect(demand(0)).not.toEqual(demand(1));
   });
   it("pins every query to a venue with a host-level site filter", () => {
     for (const q of stageOnePool()) expect(q.query).toMatch(/^site:[a-z0-9.-]+\s/);
   });
+  it("tags each query with its source and keeps a query two sources share once", () => {
+    const pool = poolFromSources([
+      { id: "a", domain: "x.com", orientation: "demand", topics: ["wanted", "wanted"] },
+      { id: "b", domain: "x.com", orientation: "demand", topics: ["wanted"] },
+      { id: "c", domain: "y.com", orientation: "news", topics: ["ignored"] },
+    ]);
+    expect(pool).toEqual([{ query: "site:x.com wanted", orientation: "demand", freshness: "month", sourceId: "a" }]);
+  });
   it("never asks for more queries than the pool holds", () => {
-    expect(stageOneQueries(0, 999)).toHaveLength(stageOnePool().length);
+    expect(stageOneQueries(0, 999, POOL)).toHaveLength(stageOnePool().length);
   });
 });
 
