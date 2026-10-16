@@ -21,6 +21,7 @@
     "@opportunity-os/db": "workspace:*",
     "@opportunity-os/llm-gateway": "workspace:*",
     "@opportunity-os/observability": "workspace:*",
-    "@opportunity-os/risk": "workspace:*"
+    "@opportunity-os/risk": "workspace:*",
+    "@opportunity-os/scoring": "workspace:*"
   }
 }

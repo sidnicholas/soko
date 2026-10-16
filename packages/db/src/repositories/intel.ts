@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { getDb } from "../pool";
 import { enqueueEvent } from "../outbox";
+import { factEvidence, insertEvidence } from "./economics";
 
 /** AIOOS opportunity intelligence persistence (migration 0019). jsonb writes are JSON.stringify'd (repo convention). */
 
@@ -91,6 +92,9 @@ export interface NewIntelLead {
   evidenceLevel?: "observed" | "inferred";
   supplyTerms?: Record<string, unknown>;
   titleUnverified?: boolean;
+  /** The search result's own title and snippet, kept as evidence. */
+  evidenceTitle?: string | null;
+  evidenceExcerpt?: string | null;
 }
 
 /** Inserts a lead; returns its id, or null when the page is already a lead. */
@@ -138,6 +142,13 @@ export async function insertIntelLead(l: NewIntelLead): Promise<string | null> {
     .onConflict((oc) => oc.column("url_hash").doNothing())
     .returning("id")
     .executeTakeFirst();
+  // What the lead rests on, as captured (PRD v2 FR-04): the page and its stated facts.
+  if (row) {
+    await insertEvidence(tx, "intel_lead", row.id, [
+      { kind: "source_page", url: l.url, title: l.evidenceTitle ?? l.title, excerpt: l.evidenceExcerpt ?? l.summary, label: "source_fact", observedAt: l.publishedAt },
+      ...factEvidence(l.facts),
+    ]);
+  }
   if (row && l.kind === "supply") {
     await enqueueEvent(tx, {
       eventName: "surplus.detected.v1",
@@ -207,8 +218,9 @@ export interface NewIntelCandidate {
   rejectReason: string | null;
 }
 
-export async function upsertIntelCandidate(c: NewIntelCandidate): Promise<string> {
-  const values = {
+/** Column values for a candidate row (shared by the plain upsert and the assessed one). */
+export function candidateValues(c: NewIntelCandidate) {
+  return {
     run_id: c.runId,
     lead_id: c.leadId,
     counter_url: c.counterUrl,
@@ -233,6 +245,10 @@ export async function upsertIntelCandidate(c: NewIntelCandidate): Promise<string
     bucket: c.bucket,
     reject_reason: c.rejectReason,
   };
+}
+
+export async function upsertIntelCandidate(c: NewIntelCandidate): Promise<string> {
+  const values = candidateValues(c);
   const row = await getDb()
     .insertInto("intel_candidates")
     .values(values)

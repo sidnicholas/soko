@@ -35,7 +35,11 @@ export type RejectReason =
   /** WATCH cap: the need was deduced, not stated (PRD v2 FR-03: evidence before outbound claims). */
   | "intent_inferred"
   /** WATCH cap: surplus deduced, not a verified listing (PRD v2 FR-02). */
-  | "surplus_inferred";
+  | "surplus_inferred"
+  /** Delivered costs exceed what the user is paid (PRD v2 FR-04). */
+  | "negative_net_economics"
+  /** WATCH cap: needs more capital than the per-deal exposure limit (PRD v2 FR-04). */
+  | "capital_exposure";
 
 export const RAPID_MODE = {
   /** Experimental revenue target (AIOOS §1) — a yardstick, never a scoring input. */

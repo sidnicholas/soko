@@ -16,6 +16,8 @@ import {
   setLeadCounterparts,
   touchIntelLeadsSeen,
   type HypothesisCheck,
+  recordAssessedCandidate,
+  type EvidenceInput,
   type StoredCounterpart,
   listSources,
   listUnassessedIntelLeads,
@@ -49,7 +51,8 @@ import {
 } from "./prompts";
 import { poolFromSources, stageOneQueries, type StageOneQuery } from "./queries";
 import { SOURCE_POLICY_VERSION, healthFor, isUnproductive, policyGaps, skipReason } from "./source-policy";
-import { capForEvidence, counterpartOutcome, hypothesisSchedule, laneKinds, laneOrientations, routeSignal, titleFlags, type Lane } from "./intelligence";
+import { capForEvidence, counterpartOutcome, gateByEconomics, hypothesisSchedule, laneKinds, laneOrientations, routeSignal, titleFlags, type Lane } from "./intelligence";
+import { DEAL_ECONOMICS_VERSION, dealEconomics, type DealEconomicsInput, type DealMode } from "@opportunity-os/scoring";
 import {
   bucketFor,
   confidenceFor,
@@ -86,6 +89,8 @@ export interface IntelRunOptions {
   counterpartSearches?: number;
   /** Watchlist hypotheses revisited per run (demand lane). */
   hypothesisChecks?: number;
+  /** Per-deal capital exposure the operator accepts (PRD v2 FR-04); above it a deal is held at WATCH. */
+  maxCapitalUsd?: number;
 }
 
 export interface IntelRunResult extends IntelRunTotals {
@@ -94,6 +99,8 @@ export interface IntelRunResult extends IntelRunTotals {
 
 const DEFAULT_ESTIMATES = { detectionUsd: 0.02, assessmentUsd: 0.08 };
 const DEFAULT_COUNTERPART_SEARCHES = 4;
+/** Until the operator sets exposure caps (PRD v2 §17). */
+const DEFAULT_MAX_CAPITAL_USD = 1000;
 const DEFAULT_HYPOTHESIS_CHECKS = 2;
 const MIN_HYPOTHESIS_CONFIDENCE = 0.3;
 const MIN_CREDIBILITY = 0.4;
@@ -261,6 +268,8 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
           oppositeQueries: lead.opposite_queries,
           signalType: lead.signal_type,
           evidenceLevel: lead.evidence_level,
+          evidenceTitle: result.title,
+          evidenceExcerpt: result.snippet,
           supplyTerms: lead.kind === "supply" ? lead.supply_terms : {},
           titleUnverified: lead.title_unverified,
         });
@@ -396,7 +405,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         continue;
       }
 
-      const bucket = await persistCandidate(runId, lead, counter, a);
+      const bucket = await persistCandidate(runId, lead, counter, a, opts.maxCapitalUsd ?? DEFAULT_MAX_CAPITAL_USD);
       await setIntelLeadStatus(lead.leadId, "assessed");
       if (bucket === "act_now" || bucket === "verify_next") await touchIntelSource(lead.hostname, lead.kind, { actionable: 1 });
       candidates++;
@@ -596,6 +605,8 @@ async function revisitHypotheses(
           oppositeQueries: observed.opposite_queries,
           signalType: observed.signal_type,
           evidenceLevel: "observed",
+          evidenceTitle: result.title,
+          evidenceExcerpt: result.snippet,
           titleUnverified: false,
         });
         if (leadId) {
@@ -645,7 +656,15 @@ async function pauseUnproductiveSources(): Promise<void> {
 }
 
 /** Applies the deterministic decision layer to one assessment and stores the candidate. */
-async function persistCandidate(runId: string, lead: AssessableLead, counter: WebSearchResult[], a: Assessment) {
+/** The deal mode when the model gave none: from how it said the user gets paid. */
+function modeFor(a: Assessment, service: boolean): DealMode {
+  if (a.economics.mode) return a.economics.mode;
+  if (service || ["fixed_service_fee", "consulting_fee", "project_fee", "retainer", "deposit_plus_completion"].includes(a.monetization.mechanism ?? "")) return "service";
+  if (a.monetization.mechanism === "reseller_margin") return "principal";
+  return "brokerage";
+}
+
+async function persistCandidate(runId: string, lead: AssessableLead, counter: WebSearchResult[], a: Assessment, maxCapitalUsd: number) {
   const service = lead.kind === "problem" ? serviceByKey(a.service_key) : undefined;
   const counterResult = a.counter_index !== null ? counter[a.counter_index] : undefined;
   const counterpartyFound = a.counterparty_found && (lead.kind === "problem" ? service !== undefined : counterResult !== undefined);
@@ -659,7 +678,20 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
   const monetization = { payer: a.monetization.payer, mechanism: a.monetization.mechanism, timing: a.monetization.timing, valueAdded: a.monetization.value_added };
   const resolved = monetizationResolved(monetization);
   const verification = verificationStatus({ evidence: a.evidence, publishedAt: lead.publishedAt, freshness, contact, counterpartyFound });
-  const ev = expectedValue({ compensationUsd: a.economics.user_compensation_usd, probability: a.probability, freshness, resolved, fraud: fraud.length > 0 });
+  // Delivered-cost economics (PRD v2 FR-04): value is net profit after every cost, never the headline amount.
+  const economicsInput: DealEconomicsInput = {
+    mode: modeFor(a, service !== undefined),
+    grossRevenueUsd: a.economics.gross_transaction_usd,
+    userRevenueUsd: a.economics.user_compensation_usd,
+    costLines: a.economics.cost_lines.map((c) => ({ kind: c.kind, usd: c.usd, label: c.label, ...(c.note ? { note: c.note } : {}) })),
+    capitalRequiredUsd: a.economics.capital_required_usd,
+    probability: a.probability,
+    daysToCash: a.economics.days_to_cash,
+    crossCurrency: a.economics.cross_currency,
+  };
+  const deal = dealEconomics(economicsInput, { maxCapitalUsd });
+  const netForValue: [number, number] = [Math.max(0, deal.netProfitUsd[0]), Math.max(0, deal.netProfitUsd[1])];
+  const ev = expectedValue({ compensationUsd: netForValue, probability: a.probability, freshness, resolved, fraud: fraud.length > 0 });
   const scoreInput = {
     ev,
     verification,
@@ -676,15 +708,23 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
   const { bucket, rejectReason, suppressOutreach } = capForEvidence(
     lead.kind,
     lead.evidenceLevel,
-    bucketFor({
-      ...scoreInput,
-      compensationHighUsd: Math.max(...a.economics.user_compensation_usd),
-      competitorOffer: a.lead_is_competitor_offer,
-    }),
+    gateByEconomics(
+      bucketFor({
+        ...scoreInput,
+        compensationHighUsd: Math.max(...a.economics.user_compensation_usd),
+        competitorOffer: a.lead_is_competitor_offer,
+      }),
+      deal.gates,
+    ),
   );
   const matchKind = lead.kind === "problem" ? "problem_to_service" : lead.kind === "demand" ? "demand_to_supply" : "supply_to_demand";
 
-  await upsertIntelCandidate({
+  // What this candidate rests on beyond the lead's own page (already stored with the lead).
+  const evidence: EvidenceInput[] = [
+    ...(counterResult ? [{ kind: "counterpart" as const, url: counterResult.url, title: counterResult.title, excerpt: counterResult.snippet, label: "source_fact" as const, observedAt: counterResult.publishedAt }] : []),
+    ...(contact && contact.channel !== "unknown" ? [{ kind: "contact" as const, url: lead.url, title: contact.channel, excerpt: contact.value, label: contact.label === "source_fact" ? ("source_fact" as const) : ("inference" as const) }] : []),
+  ];
+  await recordAssessedCandidate({
     runId,
     leadId: lead.leadId,
     counterUrl: counterResult?.url ?? null,
@@ -695,7 +735,7 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
     matchRationale: a.match_rationale,
     verificationStatus: verification,
     freshness,
-    economics: { ...a.economics, label: "estimate" },
+    economics: { ...a.economics, label: "estimate", deal },
     monetization: { ...monetization, resolved, label: resolved ? "inference" : "unknown", note: resolved ? null : "Potential match — monetization unresolved" },
     regulatoryFlags: regulatory,
     fraudFlags: fraud,
@@ -704,13 +744,22 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
     evHighUsd: ev[1],
     confidence: confidenceFor(verification, a.probability),
     score,
-    explanation: { factors, modelFactors: a.factors, invalidators: a.invalidators, probability: a.probability },
+    explanation: { factors, modelFactors: a.factors, invalidators: a.invalidators, probability: a.probability, economics: { version: DEAL_ECONOMICS_VERSION, tier: deal.tier, gates: deal.gates } },
     outreach: suppressOutreach
       ? { primary: null, secondary: null, requiresApproval: true, note: "Inferred, not stated by the party: confirm the signal before any outreach." }
       : { primary: a.outreach.primary, secondary: a.outreach.secondary, requiresApproval: true },
     bucket,
     rejectReason: rejectReason ?? (counterpartyFound ? null : "no_counterparty_found"),
-  });
+  }, {
+    modelVersion: DEAL_ECONOMICS_VERSION,
+    mode: deal.mode,
+    inputs: economicsInput,
+    outputs: deal,
+    netProfitUsd: deal.netProfitUsd,
+    expectedProfitUsd: deal.expectedProfitUsd,
+    tier: deal.tier,
+    gates: deal.gates,
+  }, evidence);
   return bucket;
 }
 

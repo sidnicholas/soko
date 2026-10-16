@@ -1,7 +1,8 @@
-import { Controller, Get, Headers, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Req } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Headers, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
-import { getIntelCandidate, intelStats, listIntelQueryYield, listIntelQueue, listIntelSources, updateIntelCandidateStatus } from "@opportunity-os/db";
+import { getIntelCandidate, intelStats, listEconomicsVersions, listEvidence, listIntelQueryYield, listIntelQueue, listIntelSources, updateIntelCandidateStatus } from "@opportunity-os/db";
+import { RANKING_PROFILES, rankDeals, type DealEconomics, type RankingProfile } from "@opportunity-os/scoring";
 import { RAPID_MODE, SourceSubmissionSchema } from "@opportunity-os/intel";
 import type { AuthenticatedRequest } from "../common/auth.guard";
 import { CurrentUser, requirePermission, type Principal } from "../common/current-user";
@@ -9,6 +10,12 @@ import { ZodBody } from "../common/zod-validation.pipe";
 import { SourcesService } from "../sources/sources.service";
 import { SourceStatusSchema } from "../sources/sources.dto";
 import { submitter } from "../sources/sources.controller";
+
+/** The delivered-cost economics stored on a candidate, when it has them. */
+function dealOf(c: { economics: unknown }): DealEconomics | null {
+  const deal = (c.economics as { deal?: DealEconomics } | null)?.deal;
+  return deal && Array.isArray(deal.netProfitUsd) ? deal : null;
+}
 
 /** AIOOS §26 queue sizes: a handful to act on, a short list to check. */
 const ACT_NOW_LIMIT = 3;
@@ -82,10 +89,15 @@ export class IntelController {
   }
 
   @Get("queue")
-  @ApiOperation({ summary: "AIOOS action queue: ACT NOW / VERIFY NEXT / WATCH / REJECTED, with spend and yield stats" })
-  async queue(@CurrentUser() user: Principal) {
+  @ApiOperation({ summary: "AIOOS action queue: ACT NOW / VERIFY NEXT / WATCH / REJECTED, each bucket ordered by a ranking profile (default profit_first)" })
+  async queue(@CurrentUser() user: Principal, @Query("rank") rankParam?: string) {
     requirePermission(user, "opportunity:reverify");
-    const [{ open, rejected }, stats, sources, queries] = await Promise.all([listIntelQueue(), intelStats(), listIntelSources(), listIntelQueryYield()]);
+    const rank = (rankParam ?? "profit_first") as RankingProfile;
+    if (!RANKING_PROFILES.includes(rank)) throw new BadRequestException(`rank must be one of ${RANKING_PROFILES.join(", ")}`);
+    const [{ open: byScore, rejected }, stats, sources, queries] = await Promise.all([listIntelQueue(), intelStats(), listIntelSources(), listIntelQueryYield()]);
+    // PRD v2 §2: profit, then probability of close, then time to cash; candidates assessed before
+    // delivered-cost economics existed have none and keep their score order after the rest.
+    const open = rankDeals(byScore, dealOf, rank);
     const actNowAll = open.filter((c) => c.bucket === "act_now");
     const actNow = actNowAll.slice(0, ACT_NOW_LIMIT);
     // Over-limit ACT NOW items wait at the top of VERIFY NEXT rather than disappearing.
@@ -99,7 +111,7 @@ export class IntelController {
       evHighUsd: actionable.reduce((s, c) => s + Number(c.ev_high_usd), 0),
       realizedUsd: stats.realizedUsd,
     };
-    return { act_now: actNow, verify_next: verifyNext, watch, rejected, stats, portfolio, sources: sources.slice(0, 20), queries };
+    return { rank, act_now: actNow, verify_next: verifyNext, watch, rejected, stats, portfolio, sources: sources.slice(0, 20), queries };
   }
 
   @Get("candidates/:id")
@@ -108,7 +120,9 @@ export class IntelController {
     requirePermission(user, "opportunity:reverify");
     const c = await getIntelCandidate(id);
     if (!c) throw new NotFoundException(`Candidate ${id} not found`);
-    return c;
+    // PRD v2 FR-04: what it rests on (the lead's page and facts, the counterpart used, the contact) and every economics version.
+    const [leadEvidence, candidateEvidence, economicsVersions] = await Promise.all([listEvidence("intel_lead", c.lead_id), listEvidence("intel_candidate", c.id), listEconomicsVersions("intel_candidate", c.id)]);
+    return { ...c, evidence: [...leadEvidence, ...candidateEvidence], economics_versions: economicsVersions };
   }
 
   @Post("candidates/:id/status")

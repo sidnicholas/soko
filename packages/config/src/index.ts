@@ -171,6 +171,9 @@ const EnvSchema = z.object({
   // for demand, buyers for supply), and watchlist hypotheses revisited per run.
   INTEL_COUNTERPART_SEARCHES: z.coerce.number().int().nonnegative().default(4),
   INTEL_HYPOTHESIS_CHECKS: z.coerce.number().int().nonnegative().default(2),
+  // PRD v2 FR-04: per-deal capital exposure accepted before a deal is held at
+  // WATCH. A placeholder until the operator sets exposure caps (PRD v2 §17).
+  DEAL_MAX_CAPITAL_USD: z.coerce.number().nonnegative().default(1000),
   // Shared secret an external agent sends (x-intel-sources-token) to submit
   // new search sources to POST /intel/sources without a user sign-in. Absent =
   // only signed-in staff can submit.
@@ -302,6 +305,7 @@ export interface AppConfig {
     dailyBudgetUsd: number; runsPerDay: number; queriesPerRun: number; maxAssessments: number;
     counterpartSearches: number;
     hypothesisChecks: number;
+    maxCapitalUsd: number;
     sourcesToken?: string;
   };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
@@ -417,6 +421,7 @@ function toConfig(env: Env): AppConfig {
       maxAssessments: env.INTEL_MAX_ASSESSMENTS,
       counterpartSearches: env.INTEL_COUNTERPART_SEARCHES,
       hypothesisChecks: env.INTEL_HYPOTHESIS_CHECKS,
+      maxCapitalUsd: env.DEAL_MAX_CAPITAL_USD,
       sourcesToken: env.INTEL_SOURCES_TOKEN,
     },
     security: {

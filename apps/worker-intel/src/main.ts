@@ -46,6 +46,7 @@ async function main(): Promise<number> {
     lane: laneArg(),
     counterpartSearches: cfg.intel.counterpartSearches,
     hypothesisChecks: cfg.intel.hypothesisChecks,
+    maxCapitalUsd: cfg.intel.maxCapitalUsd,
   });
   log.info({ runId: result.runId, lane: laneArg(), status: result.status, leads: result.leadsFound, candidates: result.candidates, spentUsd: result.searchUsd + result.llmUsd }, "intel.once.complete");
   return 0;

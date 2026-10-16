@@ -455,6 +455,39 @@ export interface IntelLeadsTable {
   counterparts: JsonDefault;
 }
 
+/** Migration 0027: what a lead or candidate rests on, as captured (PRD v2 FR-04). */
+export interface OpportunityEvidenceTable {
+  id: Generated<string>;
+  subject_type: string;
+  subject_id: string;
+  kind: string;
+  url: string | null;
+  title: string | null;
+  excerpt: string | null;
+  label: string;
+  observed_at: Timestamp | null;
+  captured_at: Generated<Timestamp>;
+  content_hash: string;
+}
+
+/** Migration 0027: every economics calculation, append-only (PRD v2 FR-04). */
+export interface OpportunityEconomicsVersionsTable {
+  id: Generated<string>;
+  subject_type: string;
+  subject_id: string;
+  version: number;
+  model_version: string;
+  mode: string;
+  inputs: Json;
+  outputs: Json;
+  net_low_usd: Numeric;
+  net_high_usd: Numeric;
+  expected_mid_usd: Numeric;
+  tier: string;
+  gates: JsonDefault;
+  created_at: Generated<Timestamp>;
+}
+
 /** Migration 0026: inferred demand on a watchlist (PRD v2 FR-03). */
 export interface DemandHypothesesTable {
   id: Generated<string>;
@@ -632,6 +665,8 @@ export interface Database {
   offnetwork_matches: OffnetworkMatchesTable;
   source_registry: SourceRegistryTable;
   demand_hypotheses: DemandHypothesesTable;
+  opportunity_evidence: OpportunityEvidenceTable;
+  opportunity_economics_versions: OpportunityEconomicsVersionsTable;
   source_policy_reviews: SourcePolicyReviewsTable;
   source_runs: SourceRunsTable;
 }

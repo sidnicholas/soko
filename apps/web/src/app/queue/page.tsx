@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { Badge, Button, Card, EmptyState, PageHeader, StatCard, tokens, type Tone } from "@opportunity-os/ui";
-import { api, type IntelCandidate, type IntelOutcomeInput, type IntelQueue } from "../../lib/api";
+import { api, type DealEconomics, type IntelCandidate, type IntelOutcomeInput, type IntelQueue, type RankingProfile } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
 import Link from "next/link";
@@ -175,6 +175,9 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
             <span style={{ color: tokens.color.inkMuted }}>{m.note ?? "Monetization unresolved"}</span>
           )}
         </Field>
+        {c.economics.deal ? (
+          <DealBreakdown d={c.economics.deal} />
+        ) : (
         <Field label="Economics (estimates)">
           <div>You earn {range(c.economics.user_compensation_usd)}</div>
           <div style={{ color: tokens.color.inkMuted }}>
@@ -184,6 +187,7 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
             P(paid) {Math.round(c.explanation.probability[0] * 100)}–{Math.round(c.explanation.probability[1] * 100)}% · {c.economics.notes}
           </div>
         </Field>
+        )}
         <Field label="Contact path">
           {c.contact && c.contact.channel !== "unknown" ? (
             <>
@@ -234,6 +238,8 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
         </Field>
       </div>
 
+      <Evidence id={c.id} />
+
       {(c.outreach.primary || c.outreach.secondary) && (
         <div className="oos-stack" style={{ gap: tokens.space.sm }}>
           {c.outreach.primary && <Outreach title="Suggested outreach — review before sending" text={c.outreach.primary} />}
@@ -245,9 +251,96 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
   );
 }
 
+const TIER_TONE: Record<DealEconomics["tier"], Tone> = { high: "success", medium: "success", low: "info", marginal: "warning", negative: "danger" };
+const days = (r: [number, number]) => `${Math.round(r[0])}–${Math.round(r[1])} days`;
+const pct = (r: [number, number]) => `${Math.round(r[0] * 100)}–${Math.round(r[1] * 100)}%`;
+
+/** PRD v2 §2: profit, probability of close and time to cash shown separately, never one blended number. */
+function DealMeasures({ d }: { d: DealEconomics }) {
+  return (
+    <span style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted, fontVariantNumeric: "tabular-nums" }}>
+      <Badge tone={TIER_TONE[d.tier]}>{d.tier} profit</Badge> net {range(d.netProfitUsd)} · P(close) {pct(d.probability)} · cash in {days(d.daysToCash)}
+      {d.gates.length > 0 && <> · {d.gates.map((g) => <Badge key={g} tone="danger">{words(g)}</Badge>)}</>}
+    </span>
+  );
+}
+
+/** Revenue, spread, every cost line and its basis, net, capital, expected profit (PRD v2 FR-04). */
+function DealBreakdown({ d }: { d: DealEconomics }) {
+  return (
+    <Field label={`Deal economics · ${d.mode}`}>
+      <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "2px 12px", fontVariantNumeric: "tabular-nums", fontSize: tokens.fontSize.sm }}>
+        {d.grossRevenueUsd && (
+          <>
+            <span style={{ color: tokens.color.inkMuted }}>Deal size</span>
+            <span>{range(d.grossRevenueUsd)}</span>
+          </>
+        )}
+        <span style={{ color: tokens.color.inkMuted }}>{d.mode === "principal" ? "Gross spread" : "Your fee"}</span>
+        <span>{range(d.grossSpreadUsd)}</span>
+        {d.costs.map((c, i) => (
+          <span key={`${c.kind}-${i}`} style={{ display: "contents" }}>
+            <span style={{ color: tokens.color.inkSubtle }}>
+              − {words(c.kind)} <span style={{ fontSize: tokens.fontSize.xs }}>({c.label === "default_assumption" ? `assumed: ${c.note ?? ""}` : words(c.label)})</span>
+            </span>
+            <span style={{ color: tokens.color.inkMuted }}>{range(c.usd)}</span>
+          </span>
+        ))}
+        <span style={{ fontWeight: 600 }}>Net profit</span>
+        <span style={{ fontWeight: 600, color: d.netProfitUsd[1] <= 0 ? "#b02525" : tokens.color.ink }}>{range(d.netProfitUsd)}</span>
+        <span style={{ color: tokens.color.inkMuted }}>Expected (× P close {pct(d.probability)})</span>
+        <span>{range(d.expectedProfitUsd)}</span>
+        <span style={{ color: tokens.color.inkMuted }}>Capital · cash in</span>
+        <span>
+          {usd(d.capitalRequiredUsd)} · {days(d.daysToCash)}
+        </span>
+      </div>
+    </Field>
+  );
+}
+
+/** What the candidate rests on, as captured, with the content hash for reproducing it. */
+function Evidence({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  const detail = useAsync(() => (open ? api.intelCandidate(id) : Promise.resolve(null)), [open, id]);
+  return (
+    <div>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(!open)}>
+        {open ? "Hide evidence" : "Show evidence and economics history"}
+      </Button>
+      {open && detail.data && (
+        <div style={{ marginTop: tokens.space.sm, fontSize: tokens.fontSize.sm }} className="oos-stack">
+          {detail.data.evidence.map((e) => (
+            <div key={e.id} style={{ borderBottom: `1px solid ${tokens.color.border}`, padding: `${tokens.space.xs}px 0` }}>
+              <Badge tone={e.label === "source_fact" ? "success" : "warning"}>{words(e.kind)}</Badge>{" "}
+              {e.url ? (
+                <a href={e.url} target="_blank" rel="noopener noreferrer nofollow" className="oos-link">
+                  {e.title ?? e.url}
+                </a>
+              ) : (
+                e.title
+              )}
+              {e.excerpt && <div style={{ color: tokens.color.inkMuted }}>{e.excerpt}</div>}
+              <div style={{ color: tokens.color.inkSubtle, fontSize: tokens.fontSize.xs }}>
+                {words(e.label)} · captured {e.captured_at.slice(0, 16).replace("T", " ")} · sha256 {e.content_hash.slice(0, 12)}
+              </div>
+            </div>
+          ))}
+          {detail.data.economics_versions.length > 0 && (
+            <div style={{ color: tokens.color.inkMuted, fontSize: tokens.fontSize.xs }}>
+              Economics versions: {detail.data.economics_versions.map((v) => `v${v.version} ${v.tier}${v.gates.length ? ` (${v.gates.map(words).join(", ")})` : ""} ${v.created_at.slice(0, 10)}`).join(" · ")}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CandidateHeader({ c }: { c: IntelCandidate }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: tokens.space.sm, alignItems: "center" }}>
+      {c.economics.deal && <DealMeasures d={c.economics.deal} />}
       <Badge tone="accent">{MATCH_LABEL[c.match_kind]}</Badge>
       <Badge tone={VERIFICATION_TONE[c.verification_status] ?? "neutral"}>{words(c.verification_status)}</Badge>
       <Badge tone="neutral">{c.confidence} confidence</Badge>
@@ -318,14 +411,30 @@ function Summary({ q }: { q: IntelQueue }) {
   );
 }
 
+const RANKS: { value: RankingProfile; label: string }[] = [
+  { value: "profit_first", label: "Profit first" },
+  { value: "expected_value", label: "Expected value" },
+  { value: "fastest_cash", label: "Fastest cash" },
+];
+
 export default function QueuePage() {
-  const queue = useAsync(() => api.intelQueue(), []);
+  const [rank, setRank] = useState<RankingProfile>("profit_first");
+  const queue = useAsync(() => api.intelQueue(rank), [rank]);
   return (
     <div className="oos-stack" style={{ gap: tokens.space.xl }}>
       <PageHeader
         eyebrow="Opportunity intelligence"
         title="Action Queue"
         subtitle="Signals found across the web, matched to an opposite side, verified, and tested for a real way to get paid. Nothing is sent without you."
+        actions={
+          <div style={{ display: "flex", gap: tokens.space.xs }} role="group" aria-label="Ranking">
+            {RANKS.map((r) => (
+              <Button key={r.value} size="sm" variant={r.value === rank ? "primary" : "secondary"} aria-pressed={r.value === rank} onClick={() => setRank(r.value)}>
+                {r.label}
+              </Button>
+            ))}
+          </div>
+        }
       />
       <AsyncView state={queue} loadingLabel="Loading the queue">
         {(q) => (

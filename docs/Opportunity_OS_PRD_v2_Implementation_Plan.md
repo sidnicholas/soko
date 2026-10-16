@@ -20,7 +20,7 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 | D10 | §5/§12: a `messaging` package | Messaging lives in `apps/api/src/messaging` | Keep there until a second host needs it |
 | D11 | FR-10: e-sign adapter | `verifiers-sdk` has a deterministic e-signature reference verifier only | P3: real provider behind the existing verifier interface |
 | D12 | FR-11: keep Stripe/Circle separate from legal escrow | Code and UI call milestone holds "escrow" | P3/P4: relabel to "payment hold" where no licensed escrow is involved |
-| D13 | §8 event names | None of the 24 proposed names exist; `opportunity.economics_updated` overlaps `opportunity.score_changed` | Add per slice; reuse `score_changed` for economics |
+| D13 | §8 event names | None of the 24 proposed names exist; `opportunity.economics_updated` overlaps `opportunity.score_changed` | Added per slice; `opportunity.economics_updated.v1` kept as its own event (slice 3), since intel candidates are not opportunities |
 | D14 | §13: Apify actors | No Apify code | P1, after per-source terms review |
 | D16 | Vision: industry-agnostic brokerage of any product or service | Intel searched only for buyers of the user's own web services (since `1c197db`); missed in the first version of this list | Fixed 2026-10-16: category-agnostic venues and broker framing in the prompts |
 | D15 | Audit: suite 230 pass / 1 skip | Superseded by the run recorded in project memory §7 | — |
@@ -49,7 +49,7 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 | Phase | Scope | Gate (PRD §14) | Status |
 | --- | --- | --- | --- |
 | P0 Stabilize | REST write bypass, webhook validation, graph noise, outbox relay, baseline, ADRs | Unauthorized REST write blocked; events replay without duplication; measurable source yield | Code done; production steps below |
-| P1 Discovery expansion | Unified source registry, Apify, independent supply/demand, hypotheses, provenance, profit economics, watchlist | Vetted sources only; reproducible evidence; budget adherence; better verified leads per dollar | Slice 1 (source registry, ADR-037) and slice 2 (supply and demand intelligence, ADR-038) built 2026-10-16; slice 1 resolves D8; slices 3–4 not started |
+| P1 Discovery expansion | Unified source registry, Apify, independent supply/demand, hypotheses, provenance, profit economics, watchlist | Vetted sources only; reproducible evidence; budget adherence; better verified leads per dollar | Slices 1 (source registry, ADR-037), 2 (supply and demand intelligence, ADR-038) and 3 (deal economics and evidence, ADR-039) built 2026-10-16; slice 1 resolves D8; slice 4 (Apify) not started |
 | P2 Relationship and outreach | CRM, consent, threading, client brief, digest, approval-first outbound | No unauthorized sends; correct threading and opt-outs; memory correction | Blocked on §17: channels, call recording, retention |
 | P3 Broker deal execution | Strategy, fee protection, e-sign, deal rooms, KYB/KYC | Full sandbox deal with signed terms; isolation tests | Blocked on §17: jurisdictions, counterparty accounts; counsel templates |
 | P4 Regulated money and fulfillment | Licensed escrow, stablecoin option, freight, customs, reconciliation, exceptions | Legal signoff; provider sandbox end to end; no premature release | Blocked on §17: providers, freight classes; licensed partner |

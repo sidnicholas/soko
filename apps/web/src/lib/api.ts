@@ -277,6 +277,8 @@ export interface IntelCandidate {
     capital_required_usd: number;
     time_hours: [number, number];
     notes: string;
+    /** Delivered-cost economics (PRD v2 FR-04); absent on candidates assessed before it existed. */
+    deal?: DealEconomics;
   };
   monetization: { payer: string | null; mechanism: string | null; timing: string | null; valueAdded: string | null; resolved: boolean; note: string | null };
   regulatory_flags: IntelFlag[];
@@ -311,7 +313,44 @@ export interface IntelCandidate {
   lead_age_text: string | null;
   lead_discovered_at: string;
 }
+/** packages/scoring deal-economics output. */
+export interface DealEconomics {
+  version: string;
+  mode: "brokerage" | "principal" | "service";
+  grossRevenueUsd: [number, number] | null;
+  grossSpreadUsd: [number, number];
+  costs: { kind: string; usd: [number, number]; label: "source_fact" | "estimate" | "default_assumption"; note?: string }[];
+  totalCostUsd: [number, number];
+  netProfitUsd: [number, number];
+  capitalRequiredUsd: number;
+  probability: [number, number];
+  expectedProfitUsd: [number, number];
+  daysToCash: [number, number];
+  tier: "high" | "medium" | "low" | "marginal" | "negative";
+  gates: string[];
+}
+
+export type RankingProfile = "profit_first" | "expected_value" | "fastest_cash";
+
+export interface CandidateEvidence {
+  id: string;
+  kind: "source_page" | "counterpart" | "fact" | "contact" | "price_observation";
+  url: string | null;
+  title: string | null;
+  excerpt: string | null;
+  label: string;
+  observed_at: string | null;
+  captured_at: string;
+  content_hash: string;
+}
+
+export interface IntelCandidateDetail extends IntelCandidate {
+  evidence: CandidateEvidence[];
+  economics_versions: { version: number; model_version: string; mode: string; tier: string; gates: string[]; created_at: string }[];
+}
+
 export interface IntelQueue {
+  rank: RankingProfile;
   act_now: IntelCandidate[];
   verify_next: IntelCandidate[];
   watch: IntelCandidate[];
@@ -542,7 +581,8 @@ export const api = {
   me: () => request<Me>("/me"),
 
   // Opportunity intelligence (AIOOS action queue)
-  intelQueue: () => request<IntelQueue>("/intel/queue"),
+  intelQueue: (rank: RankingProfile = "profit_first") => request<IntelQueue>(`/intel/queue?rank=${rank}`),
+  intelCandidate: (id: string) => request<IntelCandidateDetail>(`/intel/candidates/${id}`),
   yieldReport: (days: number) => request<YieldReport>(`/analytics/yield?days=${days}`),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
   // Supply and demand intelligence (PRD v2 FR-02/FR-03)

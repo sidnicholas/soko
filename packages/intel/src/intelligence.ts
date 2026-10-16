@@ -60,6 +60,21 @@ export function capForEvidence(
   return { bucket: "watch", rejectReason: kind === "supply" ? "surplus_inferred" : "intent_inferred", suppressOutreach: true };
 }
 
+/**
+ * Economics gates (PRD v2 FR-04) on top of the bucket rules: delivered costs
+ * above what the user is paid reject the deal; capital above the per-deal
+ * exposure limit holds it at WATCH. A more specific earlier rejection stands.
+ */
+export function gateByEconomics(
+  decided: { bucket: Bucket; rejectReason: RejectReason | null },
+  gates: readonly string[],
+): { bucket: Bucket; rejectReason: RejectReason | null } {
+  if (decided.bucket === "rejected") return decided;
+  if (gates.includes("negative_net_economics")) return { bucket: "rejected", rejectReason: "negative_net_economics" };
+  if (gates.includes("capital_exposure") && (decided.bucket === "act_now" || decided.bucket === "verify_next")) return { bucket: "watch", rejectReason: "capital_exposure" };
+  return decided;
+}
+
 /** Days before a counterpart search that found nothing is tried again, and how many tries a lead gets. */
 export const COUNTERPART_RETRY_DAYS = 3;
 export const MAX_COUNTERPART_ATTEMPTS = 2;
