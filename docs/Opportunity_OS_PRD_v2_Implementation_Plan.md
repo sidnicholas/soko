@@ -69,7 +69,7 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 2. **Done 2026-10-15.** Confirm in production that 0022 and 0024 hold: as the `authenticated` role, selecting from `users` returns no rows and inserting into `missions` fails with a row-level security error.
 3. **Done 2026-10-15** (first run published a 1,374-event backlog). Add `worker-outbox` as a Railway cron (`pnpm --filter @opportunity-os/worker-outbox start -- --once`, every 5 minutes), same pattern as the other workers.
 4. Leave `GRAPH_ARBITRAGE_DEALS` unset (auto). The next lifecycle sweep expires the open arbitrage deals. Set `EMBEDDING_PROVIDER` and a key to bring them back.
-5. Verify webhook signatures with real notifications: Stripe and Circle sandbox events, an eBay deletion notification, and Twilio and WhatsApp if those channels are used.
+5. **eBay done 2026-10-15** (204 real notifications verified, 201 each); the rest when each provider is configured. Verify webhook signatures with real notifications: Stripe and Circle sandbox events, an eBay deletion notification, and Twilio and WhatsApp if those channels are used.
 6. Read `GET /v1/analytics/yield` after a week of runs to set the baseline before switching search or model providers.
 
 ## 6. Decisions needed from the product owner (PRD §17)
