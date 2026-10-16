@@ -95,8 +95,8 @@ describe("LlmGateway.default with a compat tier", () => {
       const names = (gw as unknown as { providers: Record<string, unknown> }).providers;
       expect(Object.keys(names).sort()).toEqual(["anthropic-fast", "anthropic-reasoning", "compat-fast", "echo"]);
       const profiles = (gw as unknown as { profiles: Record<string, { providers: string[] }> }).profiles;
-      expect(profiles.extraction!.providers).toEqual(["compat-fast", "anthropic-fast", "echo"]);
-      expect(profiles.research_synthesis!.providers).toEqual(["anthropic-reasoning", "anthropic-fast", "echo"]);
+      expect(profiles.extraction!.providers).toEqual(["compat-fast", "anthropic-fast"]);
+      expect(profiles.research_synthesis!.providers).toEqual(["anthropic-reasoning", "anthropic-fast"]);
     } finally {
       process.env = saved;
       resetConfig();

@@ -116,7 +116,12 @@ export class LlmGateway {
    * reasoning-heavy tasks on the reasoning tier. Each tier is Claude, or an
    * OpenAI-compatible host when LLM_FAST_PROVIDER / LLM_REASONING_PROVIDER is
    * "compat" (cheaper open-weight models). Every chain falls back to Claude
-   * when ANTHROPIC_API_KEY is set, and finally to echo.
+   * when ANTHROPIC_API_KEY is set. Echo is never a fallback behind a real
+   * model: its text is not an answer, and a caller that parses it treats an
+   * outage as an empty result (intel paid for searches and discarded them
+   * for days that way). With a real provider configured, an outage throws,
+   * so callers run their own fallback (heuristic parser, template draft) or
+   * stop.
    */
   static default(): LlmGateway {
     const cfg = getConfig();
@@ -158,8 +163,8 @@ export class LlmGateway {
 
     const claudeFast = key ? ["anthropic-fast"] : [];
     const claudeReasoning = key ? ["anthropic-reasoning", "anthropic-fast"] : [];
-    const fastChain = [...(cfg.llm.fastProvider === "compat" ? ["compat-fast"] : []), ...claudeFast, "echo"];
-    const reasoningChain = [...(cfg.llm.reasoningProvider === "compat" ? ["compat-reasoning"] : []), ...claudeReasoning, "echo"];
+    const fastChain = [...(cfg.llm.fastProvider === "compat" ? ["compat-fast"] : []), ...claudeFast];
+    const reasoningChain = [...(cfg.llm.reasoningProvider === "compat" ? ["compat-reasoning"] : []), ...claudeReasoning];
     return new LlmGateway([...providers, new EchoProvider()], {
       profiles: {
         extraction: { providers: fastChain, maxUsd: 0.05, timeoutMs: 60_000 },

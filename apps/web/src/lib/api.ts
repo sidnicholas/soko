@@ -437,6 +437,23 @@ export interface MarketListings {
   /** Every off-network deal, newest first. */
   off_network: OffNetworkMatch[];
 }
+/** GET /analytics/yield — baseline intel spend and yield, and the opportunity funnel. */
+export interface YieldReport {
+  days: number;
+  intelByDay: {
+    day: string;
+    runs: number;
+    searchUsd: number;
+    llmUsd: number;
+    leads: number;
+    candidates: number;
+    actionable: number;
+    costPerActionableUsd: number | null;
+  }[];
+  intelByProvider: { provider: string; leads: number; actionable: number; contacted: number; won: number; realizedUsd: number }[];
+  opportunityFunnel: { kind: string; status: string; count: number }[];
+}
+
 export interface IntelOutcomeInput {
   status: "open" | "contacted" | "responded" | "won" | "lost" | "dismissed";
   reason?: string | null;
@@ -448,6 +465,7 @@ export const api = {
 
   // Opportunity intelligence (AIOOS action queue)
   intelQueue: () => request<IntelQueue>("/intel/queue"),
+  yieldReport: (days: number) => request<YieldReport>(`/analytics/yield?days=${days}`),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
   intelSources: () => request<IntelQuerySource[]>("/intel/sources"),
   importIntelSources: (document: unknown) => request<IntelSourceImport>("/intel/sources", jsonBody(document)),

@@ -164,6 +164,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       } catch (err) {
         // A reply that never parsed was still billed: keep the ledger honest.
         if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
+        else throw modelUnavailable(err);
         errors.push(`detect "${q.query}": ${String(err).slice(0, 200)}`);
         continue;
       }
@@ -296,6 +297,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         a = res.value;
       } catch (err) {
         if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
+        else throw modelUnavailable(err);
         errors.push(`assess ${lead.url}: ${String(err).slice(0, 200)}`);
         continue;
       }
@@ -337,6 +339,16 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
     await finishIntelRun(runId, totals);
     throw err;
   }
+}
+
+/**
+ * Every model provider failed (outage, revoked key, no credit), as opposed to
+ * a reply that did not parse. Stops the run: the remaining searches would be
+ * paid for and discarded. The run is recorded as failed and the worker exits
+ * non-zero, so the cron shows the failure.
+ */
+function modelUnavailable(err: unknown): Error {
+  return new Error(`model provider unavailable; run stopped before further spend: ${String(err).slice(0, 300)}`);
 }
 
 /**

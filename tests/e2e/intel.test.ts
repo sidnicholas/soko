@@ -124,6 +124,31 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
     expect(Array.isArray(report.opportunityFunnel)).toBe(true);
   });
 
+  it("stops the run when every model provider is down, instead of paying for searches it cannot read", async () => {
+    // Fresh URLs so detection is needed; the provider fails like an outage or an empty credit balance.
+    const fresh: SearchProvider = {
+      id: "stub-down",
+      costPerQueryUsd: 0.005,
+      async search() {
+        return [result(`https://forum.example.com/t/outage-${RUN}-${Math.random()}`, "Need help", "Store checkout broken")];
+      },
+    };
+    const down: LlmProvider = {
+      name: "down",
+      async complete() {
+        throw new Error("400 credit balance is too low");
+      },
+    };
+    const llm = new LlmGateway([down], { profiles: { extraction: { providers: ["down"], maxUsd: 1, timeoutMs: 5000 } } });
+    await expect(runIntelCycle({ search: fresh, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 4, maxAssessments: 0 })).rejects.toThrow(
+      "model provider unavailable",
+    );
+    const run = await getDb().selectFrom("intel_runs").select(["status", "search_calls", "notes"]).orderBy("started_at", "desc").executeTakeFirstOrThrow();
+    expect(run.status).toBe("failed");
+    expect(run.search_calls).toBe(1); // stopped after the first query, not all four
+    expect(String((run.notes as { fatal?: string }).fatal)).toContain("credit balance");
+  });
+
   it("re-surfaced pages cost no model call, and an exhausted budget stops before spending", async () => {
     const llm = new LlmGateway([new StubModel()], { profiles: { extraction: { providers: ["stub"], maxUsd: 1, timeoutMs: 5000 } } });
     const again = await runIntelCycle({ search: stubSearch, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 1, maxAssessments: 0 });
