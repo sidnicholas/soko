@@ -42,6 +42,11 @@ describe("LLM tier and intel search config", () => {
     expect(() => loadConfig({ ...compat, LLM_COMPAT_EXTRA_BODY: "not json" })).toThrow("JSON object");
   });
 
+  it("reads Pipedrive settings, with blank IDs as unset and the domain from a URL", () => {
+    const cfg = loadConfig({ PIPEDRIVE_COMPANY_DOMAIN: "https://acme.pipedrive.com/", PIPEDRIVE_PIPELINE_ID: "", PIPEDRIVE_STAGE_ID: "4" });
+    expect(cfg.crm.pipedrive).toMatchObject({ companyDomain: "acme", pipelineId: undefined, stageId: 4 });
+  });
+
   it("rejects a malformed price", () => {
     expect(() => loadConfig({ ...compat, LLM_COMPAT_FAST_PRICE: "0.14" })).toThrow("input,output");
     expect(() => loadConfig({ ...compat, LLM_COMPAT_FAST_PRICE: "cheap,0.2" })).toThrow("input,output");

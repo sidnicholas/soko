@@ -82,6 +82,43 @@ function Outreach({ title, text }: { title: string; text: string }) {
   );
 }
 
+/** Elevate to Pipedrive, or show where the deal is (ADR-040). */
+function PipedriveAction({ c, onChange }: { c: IntelCandidate; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (c.crm_url) {
+    return (
+      <div style={{ fontSize: tokens.fontSize.sm }}>
+        <Badge tone={c.crm_status === "won" ? "success" : c.crm_status === "lost" || c.crm_status === "deleted" ? "danger" : "info"}>Pipedrive: {c.crm_status}</Badge>{" "}
+        <a href={c.crm_url} target="_blank" rel="noopener noreferrer" className="oos-link">
+          Open the deal
+        </a>
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: tokens.space.sm, alignItems: "center", flexWrap: "wrap" }}>
+      <Button
+        size="sm"
+        variant="secondary"
+        loading={busy}
+        onClick={() => {
+          setBusy(true);
+          setError(null);
+          api
+            .elevateToPipedrive(c.id)
+            .then(onChange)
+            .catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not send to Pipedrive"))
+            .finally(() => setBusy(false));
+        }}
+      >
+        Send to Pipedrive
+      </Button>
+      {error && <span style={{ fontSize: tokens.fontSize.xs, color: "#b02525" }}>{error}</span>}
+    </div>
+  );
+}
+
 /** Reasons offered when dismissing: the codes the API accepts, most common first. */
 const DISMISS_REASONS = ["not_relevant", "demand_not_genuine", "economics_failed", "price_mismatch", "fee_impossible", "supply_unavailable", "stale", "regulatory_barrier", "fraud"];
 
@@ -165,6 +202,7 @@ function StatusActions({ c, onChange }: { c: IntelCandidate; onChange: () => voi
           </div>
         </div>
       )}
+      <PipedriveAction c={c} onChange={onChange} />
       {c.outcome_note && (
         <div style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>
           Note: {c.outcome_note}

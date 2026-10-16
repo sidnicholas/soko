@@ -300,6 +300,10 @@ export interface IntelCandidate {
   user_status: string;
   outcome_reason: string | null;
   outcome_note: string | null;
+  /** Set once elevated to Pipedrive (ADR-040). */
+  crm_url: string | null;
+  crm_status: "creating" | "open" | "won" | "lost" | "deleted" | null;
+  crm_stage_id: number | null;
   counter_url: string | null;
   counter_summary: string | null;
   service_key: string | null;
@@ -592,6 +596,11 @@ export const api = {
   supplyIntelligence: (days: number) => request<{ leads: IntelligenceLead[] }>(`/supply-intelligence?days=${days}`),
   demandIntelligence: (days: number) => request<{ leads: IntelligenceLead[]; hypotheses: DemandHypothesis[] }>(`/demand-intelligence?days=${days}`),
   setHypothesisStatus: (id: string, status: "watching" | "dismissed") => request<{ id: string; status: string }>(`/demand-intelligence/hypotheses/${id}/status`, jsonBody({ status })),
+
+  // Pipedrive (ADR-040)
+  pipedriveStatus: () => request<{ configured: boolean; webhookAuth: boolean; webhookRegistered: boolean | null; companyDomain: string | null }>("/crm/pipedrive/status"),
+  registerPipedriveWebhook: () => request<{ registered: boolean; created: boolean; id: number }>("/crm/pipedrive/webhook", jsonBody({})),
+  elevateToPipedrive: (candidateId: string) => request<{ created: boolean; link: { external_url: string | null; external_status: string } }>(`/crm/pipedrive/candidates/${candidateId}`, jsonBody({})),
 
   // Source registry (PRD v2 FR-01)
   listSources: () => request<RegistrySource[]>("/sources"),

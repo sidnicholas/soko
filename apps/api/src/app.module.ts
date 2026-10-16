@@ -19,6 +19,7 @@ import { MarketplaceModule } from "./marketplace/marketplace.module";
 import { AnalyticsModule } from "./analytics/analytics.module";
 import { SourcesModule } from "./sources/sources.module";
 import { IntelligenceModule } from "./intelligence/intelligence.module";
+import { CrmModule } from "./crm/crm.module";
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { IntelligenceModule } from "./intelligence/intelligence.module";
     AnalyticsModule,
     SourcesModule,
     IntelligenceModule,
+    CrmModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

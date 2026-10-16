@@ -488,6 +488,35 @@ export interface OpportunityEconomicsVersionsTable {
   created_at: Generated<Timestamp>;
 }
 
+/** Migration 0029: a subject elevated to a CRM (ADR-040). */
+export interface CrmLinksTable {
+  id: Generated<string>;
+  provider: string;
+  subject_type: string;
+  subject_id: string;
+  external_id: string | null;
+  external_url: string | null;
+  external_status: Generated<string>;
+  external_stage_id: number | null;
+  value: Numeric | null;
+  currency: string | null;
+  lost_reason: string | null;
+  last_event_id: string | null;
+  last_event_at: Timestamp | null;
+  elevated_by: string | null;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface CrmWebhookEventsTable {
+  provider: string;
+  event_id: string;
+  link_id: string | null;
+  action: string;
+  entity_id: string | null;
+  received_at: Generated<Timestamp>;
+}
+
 /** Migration 0026: inferred demand on a watchlist (PRD v2 FR-03). */
 export interface DemandHypothesesTable {
   id: Generated<string>;
@@ -667,6 +696,8 @@ export interface Database {
   source_registry: SourceRegistryTable;
   demand_hypotheses: DemandHypothesesTable;
   opportunity_evidence: OpportunityEvidenceTable;
+  crm_links: CrmLinksTable;
+  crm_webhook_events: CrmWebhookEventsTable;
   opportunity_economics_versions: OpportunityEconomicsVersionsTable;
   source_policy_reviews: SourcePolicyReviewsTable;
   source_runs: SourceRunsTable;

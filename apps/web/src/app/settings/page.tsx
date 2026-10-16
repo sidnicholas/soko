@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Badge, Button, Card, EmptyState, PageHeader, statusLabel, tokens } from "@opportunity-os/ui";
 import { API_BASE, api } from "../../lib/api";
 import { supabase } from "../../lib/supabase";
@@ -12,6 +13,49 @@ const SECURITY_POSTURE: { title: string; detail: string }[] = [
   { title: "Row Level Security", detail: "User-facing tables enforce Postgres RLS so you only ever see your own missions and transactions (§22)." },
   { title: "Immutable audit trail", detail: "Every consequential action is appended to a hash-chained audit log for tamper evidence (§21)." },
 ];
+
+/** ADR-040: is Pipedrive connected, and is its deal webhook registered? Registering is an admin action. */
+function PipedriveCard() {
+  const status = useAsync(() => api.pipedriveStatus(), []);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const s = status.data;
+  return (
+    <Card title="Pipedrive" subtitle="Deals elevated from the Action Queue; won, lost and stage changes come back by webhook.">
+      {status.error && !s ? (
+        <p style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>Couldn&apos;t load: {status.error}</p>
+      ) : (
+        <>
+          <Row label="Connected" value={s ? (s.configured ? `yes (${s.companyDomain}.pipedrive.com)` : "no — set PIPEDRIVE_COMPANY_DOMAIN and PIPEDRIVE_API_TOKEN on api") : "…"} />
+          <Row label="Webhook credentials" value={s ? (s.webhookAuth ? "set" : "missing — set PIPEDRIVE_WEBHOOK_USER and PIPEDRIVE_WEBHOOK_PASSWORD on api") : "…"} />
+          <Row label="Webhook registered" value={s ? (s.webhookRegistered === null ? "unknown" : s.webhookRegistered ? "yes" : "no") : "…"} />
+          {s?.configured && s.webhookAuth && !s.webhookRegistered && (
+            <div style={{ marginTop: tokens.space.md, display: "flex", gap: tokens.space.sm, alignItems: "center" }}>
+              <Button
+                loading={busy}
+                onClick={() => {
+                  setBusy(true);
+                  setMessage(null);
+                  api
+                    .registerPipedriveWebhook()
+                    .then(() => {
+                      setMessage("Webhook registered.");
+                      status.reload();
+                    })
+                    .catch((err: unknown) => setMessage(err instanceof Error ? err.message : "Registration failed"))
+                    .finally(() => setBusy(false));
+                }}
+              >
+                Register webhook
+              </Button>
+              {message && <span style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>{message}</span>}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -68,6 +112,8 @@ export default function SettingsPage() {
           ))}
         </div>
       </Card>
+
+      <PipedriveCard />
 
       <Card title="Notification channels" subtitle="Where approval requests are delivered (§14).">
         <EmptyState

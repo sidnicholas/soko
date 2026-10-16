@@ -198,6 +198,18 @@ const EnvSchema = z.object({
   FIXTURE_CONNECTORS: z.enum(["true", "false"]).optional(),
   REVERB_API_TOKEN: z.string().optional(),
 
+  // Pipedrive CRM (ADR-040): deals elevated from the Action Queue, status back
+  // by webhook. COMPANY_DOMAIN is the subdomain ("acme" for acme.pipedrive.com).
+  // Pipeline/stage optional (Pipedrive's default pipeline otherwise). The
+  // webhook user/password are chosen here and given to Pipedrive at
+  // registration; Pipedrive sends them as HTTP basic auth on every delivery.
+  PIPEDRIVE_COMPANY_DOMAIN: z.string().optional(),
+  PIPEDRIVE_API_TOKEN: z.string().optional(),
+  // Blank (as copied from .env.example) means unset, not 0.
+  PIPEDRIVE_PIPELINE_ID: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional()),
+  PIPEDRIVE_STAGE_ID: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional()),
+  PIPEDRIVE_WEBHOOK_USER: z.string().optional(),
+  PIPEDRIVE_WEBHOOK_PASSWORD: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -310,6 +322,9 @@ export interface AppConfig {
     reverbEnabled: boolean;
     reverbApiToken?: string;
     fixtures: boolean;
+  };
+  crm: {
+    pipedrive: { companyDomain?: string; apiToken?: string; pipelineId?: number; stageId?: number; webhookUser?: string; webhookPassword?: string };
   };
   intel: {
     searchProvider: "brave" | "serper";
@@ -425,6 +440,16 @@ function toConfig(env: Env): AppConfig {
       reverbEnabled: env.REVERB_ENABLED === "true",
       reverbApiToken: env.REVERB_API_TOKEN,
       fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
+    },
+    crm: {
+      pipedrive: {
+        companyDomain: env.PIPEDRIVE_COMPANY_DOMAIN?.trim().replace(/\.pipedrive\.com.*$/, "").replace(/^https?:\/\//, "") || undefined,
+        apiToken: env.PIPEDRIVE_API_TOKEN || undefined,
+        pipelineId: env.PIPEDRIVE_PIPELINE_ID,
+        stageId: env.PIPEDRIVE_STAGE_ID,
+        webhookUser: env.PIPEDRIVE_WEBHOOK_USER || undefined,
+        webhookPassword: env.PIPEDRIVE_WEBHOOK_PASSWORD || undefined,
+      },
     },
     intel: {
       searchProvider: env.INTEL_SEARCH_PROVIDER,

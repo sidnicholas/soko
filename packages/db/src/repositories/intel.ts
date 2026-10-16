@@ -306,7 +306,9 @@ export async function listIntelQueue(rejectedLimit = 50) {
   const open = await db
     .selectFrom("intel_candidates as c")
     .innerJoin("intel_leads as l", "l.id", "c.lead_id")
+    .leftJoin("crm_links as k", (j) => j.onRef("k.subject_id", "=", "c.id").on("k.subject_type", "=", "intel_candidate").on("k.provider", "=", "pipedrive"))
     .select(CANDIDATE_COLUMNS)
+    .select(["k.external_url as crm_url", "k.external_status as crm_status", "k.external_stage_id as crm_stage_id"])
     .where("c.bucket", "!=", "rejected")
     .where("c.user_status", "not in", ["dismissed", "won", "lost"])
     .orderBy("c.score", "desc")
@@ -315,7 +317,9 @@ export async function listIntelQueue(rejectedLimit = 50) {
   const rejected = await db
     .selectFrom("intel_candidates as c")
     .innerJoin("intel_leads as l", "l.id", "c.lead_id")
+    .leftJoin("crm_links as k", (j) => j.onRef("k.subject_id", "=", "c.id").on("k.subject_type", "=", "intel_candidate").on("k.provider", "=", "pipedrive"))
     .select(CANDIDATE_COLUMNS)
+    .select(["k.external_url as crm_url", "k.external_status as crm_status", "k.external_stage_id as crm_stage_id"])
     .where("c.bucket", "=", "rejected")
     .orderBy("c.created_at", "desc")
     .limit(rejectedLimit)
@@ -327,7 +331,9 @@ export async function getIntelCandidate(id: string) {
   return getDb()
     .selectFrom("intel_candidates as c")
     .innerJoin("intel_leads as l", "l.id", "c.lead_id")
+    .leftJoin("crm_links as k", (j) => j.onRef("k.subject_id", "=", "c.id").on("k.subject_type", "=", "intel_candidate").on("k.provider", "=", "pipedrive"))
     .select(CANDIDATE_COLUMNS)
+    .select(["k.external_url as crm_url", "k.external_status as crm_status", "k.external_stage_id as crm_stage_id"])
     .where("c.id", "=", id)
     .executeTakeFirst();
 }
