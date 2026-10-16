@@ -6,7 +6,7 @@ import {
   MATCH_MIN_TOTAL,
   clamp01,
 } from "@opportunity-os/scoring";
-import { assessRisk, isTransactableInV1 } from "@opportunity-os/risk";
+import { assessRisk, isAdmissible } from "@opportunity-os/risk";
 import { upsertMatch, upsertOpportunity } from "@opportunity-os/db";
 
 export interface ScorerDemand {
@@ -47,7 +47,7 @@ export async function scoreAndPersistOpportunity(
   supply: ScorerSupply,
   seenHashes: string[],
 ): Promise<ScoreAndPersistResult> {
-  if (supply.category && !isTransactableInV1(supply.category)) return { persisted: false, overall: 0 };
+  if (supply.category && !isAdmissible(supply.category)) return { persisted: false, overall: 0 };
 
   const match = matchDemandToSupply(
     { description: demand.description, category: demand.category, targetPriceMinor: demand.targetPriceMinor, maxBudgetMinor: demand.maxBudgetMinor },

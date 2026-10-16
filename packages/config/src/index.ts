@@ -101,6 +101,21 @@ const EnvSchema = z.object({
   // model. Required for a compat tier: spend caps are only as good as this.
   LLM_COMPAT_FAST_PRICE: tokenPrice,
   LLM_COMPAT_REASONING_PRICE: tokenPrice,
+  // JSON object merged into every compat request body (host-specific options).
+  LLM_COMPAT_EXTRA_BODY: z
+    .string()
+    .optional()
+    .transform((v, ctx) => {
+      if (!v?.trim()) return undefined;
+      try {
+        const parsed: unknown = JSON.parse(v);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+      } catch {
+        // fall through to the issue below
+      }
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "expected a JSON object" });
+      return z.NEVER;
+    }),
   VOYAGE_API_KEY: z.string().optional(),
   EMBEDDING_PROVIDER: z.enum(["echo", "openai", "voyage"]).default("echo"),
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
@@ -172,8 +187,8 @@ const EnvSchema = z.object({
   INTEL_COUNTERPART_SEARCHES: z.coerce.number().int().nonnegative().default(4),
   INTEL_HYPOTHESIS_CHECKS: z.coerce.number().int().nonnegative().default(2),
   // PRD v2 FR-04: per-deal capital exposure accepted before a deal is held at
-  // WATCH. A placeholder until the operator sets exposure caps (PRD v2 §17).
-  DEAL_MAX_CAPITAL_USD: z.coerce.number().nonnegative().default(1000),
+  // WATCH. Unset = no cap (product owner decision 2026-10-16, PRD v2 §17).
+  DEAL_MAX_CAPITAL_USD: z.preprocess((v) => (v === "" || v === undefined ? undefined : v), z.coerce.number().nonnegative().optional()),
   // Shared secret an external agent sends (x-intel-sources-token) to submit
   // new search sources to POST /intel/sources without a user sign-in. Absent =
   // only signed-in staff can submit.
@@ -251,6 +266,7 @@ export interface AppConfig {
       reasoningModel?: string;
       fastPrice?: { input: number; output: number };
       reasoningPrice?: { input: number; output: number };
+      extraBody?: Record<string, unknown>;
     };
     voyageKey?: string;
     embeddingProvider: "echo" | "openai" | "voyage";
@@ -305,7 +321,8 @@ export interface AppConfig {
     dailyBudgetUsd: number; runsPerDay: number; queriesPerRun: number; maxAssessments: number;
     counterpartSearches: number;
     hypothesisChecks: number;
-    maxCapitalUsd: number;
+    /** Null = no per-deal capital cap. */
+    maxCapitalUsd: number | null;
     sourcesToken?: string;
   };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
@@ -362,6 +379,7 @@ function toConfig(env: Env): AppConfig {
         reasoningModel: env.LLM_COMPAT_REASONING_MODEL,
         fastPrice: env.LLM_COMPAT_FAST_PRICE,
         reasoningPrice: env.LLM_COMPAT_REASONING_PRICE,
+        extraBody: env.LLM_COMPAT_EXTRA_BODY,
       },
       voyageKey: env.VOYAGE_API_KEY,
       embeddingProvider: env.EMBEDDING_PROVIDER,
@@ -421,7 +439,7 @@ function toConfig(env: Env): AppConfig {
       maxAssessments: env.INTEL_MAX_ASSESSMENTS,
       counterpartSearches: env.INTEL_COUNTERPART_SEARCHES,
       hypothesisChecks: env.INTEL_HYPOTHESIS_CHECKS,
-      maxCapitalUsd: env.DEAL_MAX_CAPITAL_USD,
+      maxCapitalUsd: env.DEAL_MAX_CAPITAL_USD ?? null,
       sourcesToken: env.INTEL_SOURCES_TOKEN,
     },
     security: {

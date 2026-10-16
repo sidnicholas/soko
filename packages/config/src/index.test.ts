@@ -17,6 +17,10 @@ describe("LLM tier and intel search config", () => {
     expect(cfg.intel.searchProvider).toBe("brave");
     expect(cfg.intel.detectionEstimateUsd).toBe(0.006);
     expect(cfg.intel.assessmentEstimateUsd).toBe(0.04);
+    // No per-deal capital cap unless one is set.
+    expect(cfg.intel.maxCapitalUsd).toBeNull();
+    expect(loadConfig({ DEAL_MAX_CAPITAL_USD: "" }).intel.maxCapitalUsd).toBeNull();
+    expect(loadConfig({ DEAL_MAX_CAPITAL_USD: "2500" }).intel.maxCapitalUsd).toBe(2500);
   });
 
   it("parses a compat tier and its price", () => {
@@ -30,6 +34,12 @@ describe("LLM tier and intel search config", () => {
     expect(() => loadConfig({ ...compat, LLM_COMPAT_FAST_PRICE: "" })).toThrow("LLM_COMPAT_FAST_PRICE");
     expect(() => loadConfig({ ...compat, LLM_REASONING_PROVIDER: "compat" })).toThrow("LLM_COMPAT_REASONING_MODEL, LLM_COMPAT_REASONING_PRICE");
     expect(() => loadConfig({ ...compat, LLM_COMPAT_BASE_URL: undefined })).toThrow("LLM_COMPAT_BASE_URL");
+  });
+
+  it("parses host options as a JSON object and refuses anything else", () => {
+    expect(loadConfig({ ...compat, LLM_COMPAT_EXTRA_BODY: '{"usage":{"include":true}}' }).llm.compat.extraBody).toEqual({ usage: { include: true } });
+    expect(() => loadConfig({ ...compat, LLM_COMPAT_EXTRA_BODY: "[1]" })).toThrow("JSON object");
+    expect(() => loadConfig({ ...compat, LLM_COMPAT_EXTRA_BODY: "not json" })).toThrow("JSON object");
   });
 
   it("rejects a malformed price", () => {

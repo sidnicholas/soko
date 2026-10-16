@@ -89,8 +89,8 @@ export interface IntelRunOptions {
   counterpartSearches?: number;
   /** Watchlist hypotheses revisited per run (demand lane). */
   hypothesisChecks?: number;
-  /** Per-deal capital exposure the operator accepts (PRD v2 FR-04); above it a deal is held at WATCH. */
-  maxCapitalUsd?: number;
+  /** Per-deal capital exposure the operator accepts (PRD v2 FR-04); above it a deal is held at WATCH. Null or absent = no cap. */
+  maxCapitalUsd?: number | null;
 }
 
 export interface IntelRunResult extends IntelRunTotals {
@@ -99,8 +99,6 @@ export interface IntelRunResult extends IntelRunTotals {
 
 const DEFAULT_ESTIMATES = { detectionUsd: 0.02, assessmentUsd: 0.08 };
 const DEFAULT_COUNTERPART_SEARCHES = 4;
-/** Until the operator sets exposure caps (PRD v2 §17). */
-const DEFAULT_MAX_CAPITAL_USD = 1000;
 const DEFAULT_HYPOTHESIS_CHECKS = 2;
 const MIN_HYPOTHESIS_CONFIDENCE = 0.3;
 const MIN_CREDIBILITY = 0.4;
@@ -405,7 +403,8 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         continue;
       }
 
-      const bucket = await persistCandidate(runId, lead, counter, a, opts.maxCapitalUsd ?? DEFAULT_MAX_CAPITAL_USD);
+      // No cap unless the operator sets one (PRD v2 §17 decision, 2026-10-16).
+      const bucket = await persistCandidate(runId, lead, counter, a, opts.maxCapitalUsd ?? Number.POSITIVE_INFINITY);
       await setIntelLeadStatus(lead.leadId, "assessed");
       if (bucket === "act_now" || bucket === "verify_next") await touchIntelSource(lead.hostname, lead.kind, { actionable: 1 });
       candidates++;

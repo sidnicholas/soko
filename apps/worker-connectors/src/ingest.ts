@@ -1,7 +1,7 @@
 import type { RawObservation } from "@opportunity-os/contracts";
 import type { SourceConnector } from "@opportunity-os/connectors-sdk";
 import { isAutomationPermitted } from "@opportunity-os/connectors-sdk";
-import { isTransactableInV1, detectInjection } from "@opportunity-os/risk";
+import { isAdmissible, detectInjection } from "@opportunity-os/risk";
 
 export interface IngestStats {
   fetched: number;
@@ -47,7 +47,7 @@ export async function ingestConnectors(
     const observations = await connector.search({ query, max: 25, filters: {} });
     for (const obs of observations) {
       stats.fetched++;
-      if (!isTransactableInV1(categoryOf(obs.content))) {
+      if (!isAdmissible(categoryOf(obs.content))) {
         stats.droppedCategory++;
         continue;
       }

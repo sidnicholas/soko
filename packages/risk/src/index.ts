@@ -18,14 +18,17 @@ const CATEGORY_POLICY: Record<string, CategoryPolicy> = {
   vehicles: "review_required",
   event_tickets: "review_required",
   collectibles: "review_required",
-  firearms: "prohibited_for_v1",
-  ammunition: "prohibited_for_v1",
-  pharmaceuticals: "prohibited_for_v1",
-  alcohol: "prohibited_for_v1",
-  tobacco: "prohibited_for_v1",
-  securities: "prohibited_for_v1",
-  adult: "prohibited_for_v1",
-  hazardous_materials: "prohibited_for_v1",
+  // Licensed categories: surfaced and flagged for a licensing review, never
+  // banned and never transacted automatically. Product owner decision
+  // 2026-10-16 (PRD v2 §17): no banned categories.
+  firearms: "review_required",
+  ammunition: "review_required",
+  pharmaceuticals: "review_required",
+  alcohol: "review_required",
+  tobacco: "review_required",
+  securities: "review_required",
+  adult: "review_required",
+  hazardous_materials: "review_required",
   // §19 crypto-asset expansion — accepted risk (not hard-blocked); tighten
   // per-category as jurisdiction-specific regulation lands, not preemptively.
   nft: "allowed",
@@ -39,8 +42,21 @@ export function classifyCategory(category: string | null | undefined): CategoryP
   return CATEGORY_POLICY[category.toLowerCase()] ?? "review_required";
 }
 
+/** Money may move only in an "allowed" category; anything else needs a person's review first. */
 export function isTransactableInV1(category: string | null | undefined): boolean {
   return classifyCategory(category) === "allowed";
+}
+
+/**
+ * Whether a supply or demand record in this category is ingested and matched
+ * at all: any known category that is not prohibited. A category the policy
+ * does not know stays out (PRD v2 §3.4: default deny for unknown regulatory
+ * categories) until it is mapped to a canonical one.
+ */
+export function isAdmissible(category: string | null | undefined): boolean {
+  if (!category) return false;
+  const policy = CATEGORY_POLICY[category.toLowerCase()];
+  return policy !== undefined && policy !== "prohibited_for_v1";
 }
 
 /** §13.5 Financial safety limits. */

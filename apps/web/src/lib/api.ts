@@ -299,6 +299,7 @@ export interface IntelCandidate {
   reject_reason: string | null;
   user_status: string;
   outcome_reason: string | null;
+  outcome_note: string | null;
   counter_url: string | null;
   counter_summary: string | null;
   service_key: string | null;
@@ -575,6 +576,8 @@ export interface IntelOutcomeInput {
   status: "open" | "contacted" | "responded" | "won" | "lost" | "dismissed";
   reason?: string | null;
   realized_usd?: number | null;
+  /** Why, in the operator's own words. */
+  note?: string | null;
 }
 
 export const api = {

@@ -284,6 +284,7 @@ const CANDIDATE_COLUMNS = [
   "c.reject_reason",
   "c.user_status",
   "c.outcome_reason",
+  "c.outcome_note",
   "c.realized_usd",
   "c.created_at",
   "c.updated_at",
@@ -332,12 +333,14 @@ export async function getIntelCandidate(id: string) {
 }
 
 /** Human outcome feedback (AIOOS §24-§25): status plus a reason code and realized revenue. */
-export async function updateIntelCandidateStatus(id: string, input: { status: string; reason: string | null; realizedUsd: number | null }) {
+export async function updateIntelCandidateStatus(id: string, input: { status: string; reason: string | null; realizedUsd: number | null; note?: string | null }) {
   return getDb()
     .updateTable("intel_candidates")
     .set({
       user_status: input.status,
       outcome_reason: input.reason,
+      // A status change without a note keeps the one already written.
+      ...(input.note !== undefined ? { outcome_note: input.note } : {}),
       realized_usd: input.realizedUsd === null ? null : input.realizedUsd.toFixed(2),
       updated_at: sql`now()`,
     })

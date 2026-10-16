@@ -40,6 +40,21 @@ describe("OpenAiCompatProvider", () => {
     expect(out).toEqual({ text: '{"n": 1}', inputTokens: 1000, outputTokens: 100, usd: compatUsd(price, { prompt_tokens: 1000, completion_tokens: 100 }), model: "deepseek-v4-flash" });
   });
 
+  it("merges host options into the body and uses the billed cost when the host reports it", async () => {
+    let body: Record<string, unknown> = {};
+    const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {
+      body = JSON.parse(String(init!.body)) as Record<string, unknown>;
+      return reply(200, { choices: [{ message: { content: "{}" } }], usage: { prompt_tokens: 1000, completion_tokens: 100, cost: 0.00042 } });
+    }) as unknown as typeof fetch;
+    const provider = new OpenAiCompatProvider({
+      name: "c", baseUrl: "https://openrouter.ai/api/v1", apiKey: "k", model: "deepseek/deepseek-v4-flash", maxTokens: 10, price,
+      extraBody: { provider: { require_parameters: true }, usage: { include: true } }, fetchImpl,
+    });
+    const out = await provider.complete({ prompt: "p", timeoutMs: 1000 });
+    expect(body).toMatchObject({ provider: { require_parameters: true }, usage: { include: true }, model: "deepseek/deepseek-v4-flash" });
+    expect(out.usd).toBe(0.00042);
+  });
+
   it("resends without response_format when the host rejects it", async () => {
     const bodies: Record<string, unknown>[] = [];
     const fetchImpl = (async (_url: string | URL, init?: RequestInit) => {

@@ -82,10 +82,17 @@ function Outreach({ title, text }: { title: string; text: string }) {
   );
 }
 
+/** Reasons offered when dismissing: the codes the API accepts, most common first. */
+const DISMISS_REASONS = ["not_relevant", "demand_not_genuine", "economics_failed", "price_mismatch", "fee_impossible", "supply_unavailable", "stale", "regulatory_barrier", "fraud"];
+
 function StatusActions({ c, onChange }: { c: IntelCandidate; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const [lostReason, setLostReason] = useState(LOST_REASONS[0]!);
   const [revenue, setRevenue] = useState("");
+  // Dismiss and Lost open a short form so the why is written down, not only a code.
+  const [closing, setClosing] = useState<"dismissed" | "lost" | null>(null);
+  const [dismissReason, setDismissReason] = useState(DISMISS_REASONS[0]!);
+  const [note, setNote] = useState("");
   async function set(body: IntelOutcomeInput) {
     setBusy(true);
     try {
@@ -95,44 +102,74 @@ function StatusActions({ c, onChange }: { c: IntelCandidate; onChange: () => voi
       setBusy(false);
     }
   }
+  const control = { padding: "4px 8px", border: `1px solid ${tokens.color.borderStrong}`, borderRadius: tokens.radius.sm, fontSize: tokens.fontSize.sm } as const;
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: tokens.space.sm, alignItems: "center" }}>
-      <Badge tone="neutral">{words(c.user_status)}</Badge>
-      <Button size="sm" disabled={busy} onClick={() => void set({ status: "contacted" })}>
-        Mark contacted
-      </Button>
-      <Button size="sm" disabled={busy} onClick={() => void set({ status: "responded", reason: "meeting" })}>
-        Got a response
-      </Button>
-      <input
-        aria-label="Revenue received (USD)"
-        placeholder="$ received"
-        inputMode="decimal"
-        value={revenue}
-        onChange={(e) => setRevenue(e.target.value)}
-        style={{ width: 96, padding: "4px 8px", border: `1px solid ${tokens.color.borderStrong}`, borderRadius: tokens.radius.sm, fontSize: tokens.fontSize.sm }}
-      />
-      <Button size="sm" variant="primary" disabled={busy} onClick={() => void set({ status: "won", reason: "completed", realized_usd: Number(revenue) || 0 })}>
-        Won
-      </Button>
-      <select
-        aria-label="Reason it fell through"
-        value={lostReason}
-        onChange={(e) => setLostReason(e.target.value)}
-        style={{ padding: "4px 8px", border: `1px solid ${tokens.color.borderStrong}`, borderRadius: tokens.radius.sm, fontSize: tokens.fontSize.sm }}
-      >
-        {LOST_REASONS.map((r) => (
-          <option key={r} value={r}>
-            {words(r)}
-          </option>
-        ))}
-      </select>
-      <Button size="sm" disabled={busy} onClick={() => void set({ status: "lost", reason: lostReason })}>
-        Lost
-      </Button>
-      <Button size="sm" variant="ghost" disabled={busy} onClick={() => void set({ status: "dismissed", reason: "not_relevant" })}>
-        Dismiss
-      </Button>
+    <div className="oos-stack" style={{ gap: tokens.space.sm }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: tokens.space.sm, alignItems: "center" }}>
+        <Badge tone="neutral">{words(c.user_status)}</Badge>
+        <Button size="sm" disabled={busy} onClick={() => void set({ status: "contacted" })}>
+          Mark contacted
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => void set({ status: "responded", reason: "meeting" })}>
+          Got a response
+        </Button>
+        <input aria-label="Revenue received (USD)" placeholder="$ received" inputMode="decimal" value={revenue} onChange={(e) => setRevenue(e.target.value)} style={{ ...control, width: 96 }} />
+        <Button size="sm" variant="primary" disabled={busy} onClick={() => void set({ status: "won", reason: "completed", realized_usd: Number(revenue) || 0 })}>
+          Won
+        </Button>
+        <Button size="sm" disabled={busy} variant={closing === "lost" ? "secondary" : undefined} onClick={() => setClosing(closing === "lost" ? null : "lost")}>
+          Lost…
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setClosing(closing === "dismissed" ? null : "dismissed")}>
+          Dismiss…
+        </Button>
+      </div>
+      {closing && (
+        <div style={{ display: "flex", flexDirection: "column", gap: tokens.space.xs, maxWidth: 560 }}>
+          <label style={{ fontSize: tokens.fontSize.sm, color: tokens.color.ink }}>
+            {closing === "dismissed" ? "Why dismiss it?" : "Why was it lost?"}{" "}
+            <select
+              aria-label={closing === "dismissed" ? "Dismiss reason" : "Reason it fell through"}
+              value={closing === "dismissed" ? dismissReason : lostReason}
+              onChange={(e) => (closing === "dismissed" ? setDismissReason(e.target.value) : setLostReason(e.target.value))}
+              style={control}
+            >
+              {(closing === "dismissed" ? DISMISS_REASONS : LOST_REASONS).map((r) => (
+                <option key={r} value={r}>
+                  {words(r)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <textarea
+            aria-label="Summary"
+            placeholder="Summary: what you found and why it is not worth pursuing (kept for learning)"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            maxLength={2000}
+            style={{ ...control, fontFamily: "inherit", resize: "vertical" }}
+          />
+          <div style={{ display: "flex", gap: tokens.space.sm }}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={busy}
+              onClick={() => void set({ status: closing, reason: closing === "dismissed" ? dismissReason : lostReason, note: note.trim() || null }).then(() => setClosing(null))}
+            >
+              {closing === "dismissed" ? "Dismiss" : "Mark lost"}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setClosing(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {c.outcome_note && (
+        <div style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>
+          Note: {c.outcome_note}
+        </div>
+      )}
     </div>
   );
 }

@@ -543,6 +543,7 @@ export interface IntelCandidatesTable {
   reject_reason: string | null;
   user_status: Generated<string>;
   outcome_reason: string | null;
+  outcome_note: string | null;
   realized_usd: Numeric | null;
   created_at: Timestamp;
   updated_at: Timestamp;

@@ -52,6 +52,8 @@ const OutcomeSchema = z.object({
     .nullable()
     .optional(),
   realized_usd: z.number().nonnegative().nullable().optional(),
+  /** Why, in the operator's own words — what the reason code cannot say. */
+  note: z.string().trim().max(2000).nullable().optional(),
 });
 
 
@@ -129,7 +131,12 @@ export class IntelController {
   @ApiOperation({ summary: "Record what happened (contacted, won, lost + reason) — the learning signal (AIOOS §24-§25)" })
   async status(@CurrentUser() user: Principal, @Param("id", ParseUUIDPipe) id: string, @ZodBody(OutcomeSchema) body: z.infer<typeof OutcomeSchema>) {
     requirePermission(user, "opportunity:reverify");
-    const updated = await updateIntelCandidateStatus(id, { status: body.status, reason: body.reason ?? null, realizedUsd: body.realized_usd ?? null });
+    const updated = await updateIntelCandidateStatus(id, {
+      status: body.status,
+      reason: body.reason ?? null,
+      realizedUsd: body.realized_usd ?? null,
+      ...(body.note !== undefined ? { note: body.note || null } : {}),
+    });
     if (!updated) throw new NotFoundException(`Candidate ${id} not found`);
     return getIntelCandidate(id);
   }

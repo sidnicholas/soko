@@ -144,7 +144,7 @@ export class LlmGateway {
     // config refuses a compat tier without its URL, key, model and price.
     if (cfg.llm.fastProvider === "compat") {
       providers.push(
-        new OpenAiCompatProvider({ name: "compat-fast", baseUrl: compat.baseUrl!, apiKey: compat.apiKey!, model: compat.fastModel!, price: compat.fastPrice!, maxTokens: 4000 }),
+        new OpenAiCompatProvider({ name: "compat-fast", baseUrl: compat.baseUrl!, apiKey: compat.apiKey!, model: compat.fastModel!, price: compat.fastPrice!, maxTokens: 4000, extraBody: compat.extraBody }),
       );
     }
     if (cfg.llm.reasoningProvider === "compat") {
@@ -156,6 +156,7 @@ export class LlmGateway {
           model: compat.reasoningModel!,
           price: compat.reasoningPrice!,
           maxTokens: 8000,
+          extraBody: compat.extraBody,
         }),
       );
     }

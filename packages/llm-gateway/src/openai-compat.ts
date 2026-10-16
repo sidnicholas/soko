@@ -16,6 +16,12 @@ export interface OpenAiCompatProviderOptions {
   model: string;
   maxTokens: number;
   price: TokenPrice;
+  /**
+   * Host-specific request fields merged into every body, e.g. OpenRouter's
+   * `{"provider": {"require_parameters": true}, "usage": {"include": true}}`
+   * (route only to servers that enforce the schema; return the billed cost).
+   */
+  extraBody?: Record<string, unknown>;
   fetchImpl?: typeof fetch;
 }
 
@@ -27,7 +33,8 @@ export function compatUsd(price: TokenPrice, usage: { prompt_tokens?: number; co
 interface ChatCompletion {
   model?: string;
   choices?: { message?: { content?: string | null; refusal?: string | null }; finish_reason?: string }[];
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  /** `cost`: what the host billed, in USD, when it reports it (OpenRouter with usage accounting). */
+  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
 }
 
 /**
@@ -54,6 +61,7 @@ export class OpenAiCompatProvider implements LlmProvider {
 
   private async send(req: { system?: string; prompt: string; timeoutMs: number; outputSchema?: z4.ZodType }, structured: boolean) {
     const body = {
+      ...(this.opts.extraBody ?? {}),
       model: this.opts.model,
       max_tokens: this.opts.maxTokens,
       messages: [...(req.system ? [{ role: "system", content: req.system }] : []), { role: "user", content: req.prompt }],
@@ -98,7 +106,8 @@ export class OpenAiCompatProvider implements LlmProvider {
       text: choice?.message?.content ?? "",
       inputTokens: usage.prompt_tokens ?? 0,
       outputTokens: usage.completion_tokens ?? 0,
-      usd: compatUsd(this.opts.price, usage),
+      // The billed cost when the host reports one (it can route to servers at different prices); else the configured price.
+      usd: typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0 ? usage.cost : compatUsd(this.opts.price, usage),
       model: json.model ?? this.opts.model,
     };
   }

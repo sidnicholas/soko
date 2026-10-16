@@ -73,13 +73,19 @@ PRD v2 is implemented in phases with acceptance gates (PRD §14, §16). This pas
 5. **eBay done 2026-10-15** (204 real notifications verified, 201 each); the rest when each provider is configured. Verify webhook signatures with real notifications: Stripe and Circle sandbox events, an eBay deletion notification, and Twilio and WhatsApp if those channels are used.
 6. Read `GET /v1/analytics/yield` after a week of runs to set the baseline before switching search or model providers.
 
-## 6. Decisions needed from the product owner (PRD §17)
+## 6. Product owner decisions (PRD §17)
 
-- Initial jurisdictions and prohibited or restricted categories.
-- First outreach channels; whether calls are recorded and transcribed with consent.
-- Per-deal and aggregate capital exposure caps; automation spend caps.
-- Counterparty self-service accounts or invitation-only deal rooms.
-- Escrow and insurance providers; commercial onboarding.
-- First freight classes and customs support.
-- Morning briefing channel and time.
-- Retention periods for call and email data, relationship memories and documents.
+Recorded 2026-10-16.
+
+| Decision | Answer | How it is applied |
+| --- | --- | --- |
+| Jurisdictions | None chosen initially | No jurisdiction gate. Regulatory flags (licensing, export, consent) still mark individual deals for review. |
+| Prohibited / restricted categories | No banned categories | The former `prohibited_for_v1` categories (firearms, ammunition, pharmaceuticals, alcohol, tobacco, securities, adult, hazardous materials) are `review_required`: ingested and surfaced, flagged for a licensing review, never transacted automatically (`isTransactableInV1` stays "allowed only"). Unknown, unmapped categories stay out until mapped (PRD §3.4 default deny). |
+| Capital exposure caps | None | `DEAL_MAX_CAPITAL_USD` unset = no per-deal cap. Note for P5: delegated autonomy (ADR-034) still needs an aggregate exposure ceiling and kill switch before any money moves without a person. |
+| Automation spend caps | Unchanged | `INTEL_DAILY_BUDGET_USD` remains the daily ceiling. |
+| First outreach channels | Whichever is most promising first | P2 starts with email (most leads expose an email or contact form; marketplace messaging is the platform's own channel and is not automated). Phone follows once the dedicated number exists. |
+| Calls | Recorded and transcribed | Through RingCentral on a new number for this business (to be provisioned by the owner). Every recorded call must announce recording at the start and keep the consent: many US states and other countries require all-party consent. |
+| Retention | Keep relationship data; archive after 90 days; freshness-check and purge stale data | Records untouched for 90 days move to an archive; a periodic freshness check re-verifies archived facts (contact still valid, business still operating) and purges what has gone stale. A person's deletion request is honoured regardless (PRD §10 DSAR). |
+| Counterparty accounts | Not decided | Invitation-only deal rooms assumed until decided. |
+| Escrow / insurance providers, freight classes | Not decided | Needed before P3/P4 slices that use them. |
+| Model cost | Use comparable open-weight models | Both model tiers move to open-weight models through OpenRouter (detection DeepSeek V4 Flash, assessment DeepSeek V4 Pro), with Claude as the fallback when the host fails. Compare quality on `/yield` and the queue before treating as settled. |

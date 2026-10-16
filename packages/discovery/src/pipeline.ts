@@ -6,7 +6,7 @@ import {
   type NormalizedSupply,
 } from "@opportunity-os/connectors-sdk";
 import { getConfig } from "@opportunity-os/config";
-import { isTransactableInV1 } from "@opportunity-os/risk";
+import { isAdmissible } from "@opportunity-os/risk";
 import { matchesExcludedTerm } from "@opportunity-os/contracts";
 import { upsertMissionDemand, upsertSupply } from "@opportunity-os/db";
 import { createLogger } from "@opportunity-os/observability";
@@ -90,7 +90,7 @@ export async function runDiscoveryCycle(input: DiscoveryInput): Promise<Discover
 
   for (const s of supply) {
     // §13 compliance gate: never persist/score a prohibited category.
-    if (s.category && !isTransactableInV1(s.category)) {
+    if (s.category && !isAdmissible(s.category)) {
       log.debug({ ref: s.external_ref, category: s.category }, "supply.skipped.category_gate");
       continue;
     }
