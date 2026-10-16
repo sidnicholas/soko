@@ -144,7 +144,9 @@ export class LlmGateway {
     // config refuses a compat tier without its URL, key, model and price.
     if (cfg.llm.fastProvider === "compat") {
       providers.push(
-        new OpenAiCompatProvider({ name: "compat-fast", baseUrl: compat.baseUrl!, apiKey: compat.apiKey!, model: compat.fastModel!, price: compat.fastPrice!, maxTokens: 4000, extraBody: compat.extraBody }),
+        // Open-weight models count their reasoning against max_tokens; 4,000 cut a
+        // detection reply off mid-JSON in production (2026-10-16).
+        new OpenAiCompatProvider({ name: "compat-fast", baseUrl: compat.baseUrl!, apiKey: compat.apiKey!, model: compat.fastModel!, price: compat.fastPrice!, maxTokens: 12000, extraBody: compat.extraBody }),
       );
     }
     if (cfg.llm.reasoningProvider === "compat") {
@@ -155,7 +157,7 @@ export class LlmGateway {
           apiKey: compat.apiKey!,
           model: compat.reasoningModel!,
           price: compat.reasoningPrice!,
-          maxTokens: 8000,
+          maxTokens: 16000,
           extraBody: compat.extraBody,
         }),
       );
