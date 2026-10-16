@@ -4,6 +4,8 @@ import type { ColumnType, Generated } from "kysely";
 type Timestamp = ColumnType<string, string | undefined, string>;
 type Json = ColumnType<unknown, unknown, unknown>;
 type JsonNullable = ColumnType<unknown, unknown, unknown> | null;
+/** A jsonb column with a database default: optional on insert. */
+type JsonDefault = ColumnType<unknown, unknown | undefined, unknown>;
 
 export interface UsersTable {
   id: Generated<string>;
@@ -400,6 +402,7 @@ export interface IntelRunsTable {
   leads_found: Generated<number>;
   candidates: Generated<number>;
   notes: Json;
+  lane: Generated<string>;
 }
 
 export interface IntelSourcesTable {
@@ -440,6 +443,44 @@ export interface IntelLeadsTable {
   facts: Json;
   opposite_queries: Json;
   status: Generated<string>;
+  signal_type: string | null;
+  evidence_level: Generated<string>;
+  supply_terms: JsonDefault;
+  title_unverified: Generated<boolean>;
+  last_seen_at: Generated<Timestamp>;
+  seen_count: Generated<number>;
+  counterpart_status: Generated<string>;
+  counterpart_attempts: Generated<number>;
+  counterpart_next_at: Timestamp | null;
+  counterparts: JsonDefault;
+}
+
+/** Migration 0026: inferred demand on a watchlist (PRD v2 FR-03). */
+export interface DemandHypothesesTable {
+  id: Generated<string>;
+  run_id: string | null;
+  signal_type: string;
+  hypothesis: string;
+  basis: string;
+  evidence: JsonDefault;
+  source_url: string;
+  source_url_hash: string;
+  hostname: string;
+  query: string;
+  item: string | null;
+  location: string | null;
+  confidence: Numeric;
+  check_query: string | null;
+  status: Generated<string>;
+  status_reason: string | null;
+  revisit_days: Generated<number>;
+  revisit_at: Timestamp;
+  expires_at: Timestamp;
+  revisit_count: Generated<number>;
+  checks: JsonDefault;
+  confirmed_lead_id: string | null;
+  created_at: Generated<Timestamp>;
+  updated_at: Generated<Timestamp>;
 }
 
 export interface IntelCandidatesTable {
@@ -494,7 +535,7 @@ export interface SourceRegistryTable {
   status_reason: string | null;
   origin: Generated<string>;
   url: string | null;
-  markets: Generated<Json>;
+  markets: JsonDefault;
   api_available: Generated<boolean>;
   apify_actor_id: string | null;
   apify_actor_version: string | null;
@@ -590,6 +631,7 @@ export interface Database {
   intel_candidates: IntelCandidatesTable;
   offnetwork_matches: OffnetworkMatchesTable;
   source_registry: SourceRegistryTable;
+  demand_hypotheses: DemandHypothesesTable;
   source_policy_reviews: SourcePolicyReviewsTable;
   source_runs: SourceRunsTable;
 }

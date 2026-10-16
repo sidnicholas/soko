@@ -167,6 +167,10 @@ const EnvSchema = z.object({
   // Must match the worker-intel cron (every 6h = 4). Paces the daily cap across runs.
   INTEL_RUNS_PER_DAY: z.coerce.number().int().positive().default(4),
   INTEL_MAX_ASSESSMENTS: z.coerce.number().int().nonnegative().default(3),
+  // PRD v2 FR-02/FR-03: targeted searches for the other side per run (suppliers
+  // for demand, buyers for supply), and watchlist hypotheses revisited per run.
+  INTEL_COUNTERPART_SEARCHES: z.coerce.number().int().nonnegative().default(4),
+  INTEL_HYPOTHESIS_CHECKS: z.coerce.number().int().nonnegative().default(2),
   // Shared secret an external agent sends (x-intel-sources-token) to submit
   // new search sources to POST /intel/sources without a user sign-in. Absent =
   // only signed-in staff can submit.
@@ -296,6 +300,8 @@ export interface AppConfig {
     detectionEstimateUsd: number;
     assessmentEstimateUsd: number;
     dailyBudgetUsd: number; runsPerDay: number; queriesPerRun: number; maxAssessments: number;
+    counterpartSearches: number;
+    hypothesisChecks: number;
     sourcesToken?: string;
   };
   security: { approvalTokenSecret: string; auditAnchorEnabled: boolean };
@@ -409,6 +415,8 @@ function toConfig(env: Env): AppConfig {
       runsPerDay: env.INTEL_RUNS_PER_DAY,
       queriesPerRun: env.INTEL_QUERIES_PER_RUN,
       maxAssessments: env.INTEL_MAX_ASSESSMENTS,
+      counterpartSearches: env.INTEL_COUNTERPART_SEARCHES,
+      hypothesisChecks: env.INTEL_HYPOTHESIS_CHECKS,
       sourcesToken: env.INTEL_SOURCES_TOKEN,
     },
     security: {

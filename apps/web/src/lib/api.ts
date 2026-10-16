@@ -392,6 +392,60 @@ export interface SourceReviewInput {
   notes?: string | null;
 }
 
+/** PRD v2 FR-02/FR-03: one lead as /supply-intelligence and /demand-intelligence return it. */
+export interface IntelligenceLead {
+  id: string;
+  kind: "demand" | "supply" | "problem";
+  title: string;
+  summary: string;
+  url: string;
+  hostname: string;
+  item: string | null;
+  category: string | null;
+  quantity: string | null;
+  location: string | null;
+  deadline: string | null;
+  price_minor: number | null;
+  currency: string | null;
+  urgency: string | null;
+  credibility: number;
+  signal_type: string | null;
+  evidence_level: "observed" | "inferred";
+  supply_terms: { moq?: string | null; price_breaks?: string | null; condition?: string | null; shipping_terms?: string | null; expiry?: string | null; capacity?: string | null };
+  title_unverified: boolean;
+  discovered_at: string;
+  published_at: string | null;
+  last_seen_at: string;
+  seen_count: number;
+  status: string;
+  counterpart_status: "pending" | "found" | "none_found" | "not_needed";
+  counterparts: { url: string; title: string; snippet: string; hostname: string }[];
+  bucket: string | null;
+  reject_reason: string | null;
+}
+
+/** Inferred demand on the watchlist: a possible future buyer, never a confirmed one. */
+export interface DemandHypothesis {
+  id: string;
+  signal_type: string;
+  hypothesis: string;
+  basis: string;
+  source_url: string;
+  hostname: string;
+  item: string | null;
+  location: string | null;
+  confidence: number;
+  check_query: string | null;
+  status: "watching" | "confirmed" | "expired" | "dismissed";
+  status_reason: string | null;
+  revisit_at: string;
+  expires_at: string;
+  revisit_count: number;
+  checks: { at: string; query: string; results: number; outcome: string; leadId?: string | null }[];
+  confirmed_lead_id: string | null;
+  created_at: string;
+}
+
 /** What POST /sources did with a submission. */
 export interface SourceImport {
   received: number;
@@ -491,6 +545,11 @@ export const api = {
   intelQueue: () => request<IntelQueue>("/intel/queue"),
   yieldReport: (days: number) => request<YieldReport>(`/analytics/yield?days=${days}`),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
+  // Supply and demand intelligence (PRD v2 FR-02/FR-03)
+  supplyIntelligence: (days: number) => request<{ leads: IntelligenceLead[] }>(`/supply-intelligence?days=${days}`),
+  demandIntelligence: (days: number) => request<{ leads: IntelligenceLead[]; hypotheses: DemandHypothesis[] }>(`/demand-intelligence?days=${days}`),
+  setHypothesisStatus: (id: string, status: "watching" | "dismissed") => request<{ id: string; status: string }>(`/demand-intelligence/hypotheses/${id}/status`, jsonBody({ status })),
+
   // Source registry (PRD v2 FR-01)
   listSources: () => request<RegistrySource[]>("/sources"),
   getSource: (id: string) => request<RegistrySourceDetail>(`/sources/${id}`),

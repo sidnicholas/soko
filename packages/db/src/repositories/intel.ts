@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { getDb } from "../pool";
+import { enqueueEvent } from "../outbox";
 
 /** AIOOS opportunity intelligence persistence (migration 0019). jsonb writes are JSON.stringify'd (repo convention). */
 
@@ -20,8 +22,8 @@ export async function countIntelRuns(): Promise<number> {
   return row?.n ?? 0;
 }
 
-export async function createIntelRun(): Promise<string> {
-  const row = await getDb().insertInto("intel_runs").values({ notes: json({}) }).returning("id").executeTakeFirstOrThrow();
+export async function createIntelRun(lane: "all" | "demand" | "supply" = "all"): Promise<string> {
+  const row = await getDb().insertInto("intel_runs").values({ notes: json({}), lane }).returning("id").executeTakeFirstOrThrow();
   return row.id;
 }
 
@@ -85,11 +87,22 @@ export interface NewIntelLead {
   contact: unknown;
   facts: unknown;
   oppositeQueries: string[];
+  signalType?: string | null;
+  evidenceLevel?: "observed" | "inferred";
+  supplyTerms?: Record<string, unknown>;
+  titleUnverified?: boolean;
 }
 
 /** Inserts a lead; returns its id, or null when the page is already a lead. */
+/**
+ * Stores a detected lead (deduped by URL). A new supply lead emits
+ * surplus.detected.v1 in the same transaction (PRD v2 §8).
+ */
 export async function insertIntelLead(l: NewIntelLead): Promise<string | null> {
-  const row = await getDb()
+  return getDb()
+    .transaction()
+    .execute(async (tx) => {
+  const row = await tx
     .insertInto("intel_leads")
     .values({
       run_id: l.runId,
@@ -115,11 +128,37 @@ export async function insertIntelLead(l: NewIntelLead): Promise<string | null> {
       contact: json(l.contact),
       facts: json(l.facts),
       opposite_queries: json(l.oppositeQueries),
+      signal_type: l.signalType ?? null,
+      evidence_level: l.evidenceLevel ?? "observed",
+      supply_terms: json(l.supplyTerms ?? {}),
+      title_unverified: l.titleUnverified ?? false,
+      // A problem matched to the user's own services needs no search for the other side.
+      counterpart_status: l.oppositeQueries.length === 0 ? "not_needed" : "pending",
     })
     .onConflict((oc) => oc.column("url_hash").doNothing())
     .returning("id")
     .executeTakeFirst();
+  if (row && l.kind === "supply") {
+    await enqueueEvent(tx, {
+      eventName: "surplus.detected.v1",
+      aggregateType: "intel_lead",
+      aggregateId: row.id,
+      idempotencyKey: `surplus.detected:${row.id}:${randomUUID()}`,
+      payload: { leadId: row.id, signalType: l.signalType ?? null, evidenceLevel: l.evidenceLevel ?? "observed", titleUnverified: l.titleUnverified ?? false, hostname: l.hostname },
+    });
+  }
   return row?.id ?? null;
+    });
+}
+
+/** A known page seen again: last_seen_at and seen_count capture that it is still up (FR-02). */
+export async function touchIntelLeadsSeen(urlHashes: string[]): Promise<void> {
+  if (urlHashes.length === 0) return;
+  await getDb()
+    .updateTable("intel_leads")
+    .set({ last_seen_at: sql`now()`, seen_count: sql`seen_count + 1` })
+    .where("url_hash", "in", urlHashes)
+    .execute();
 }
 
 export async function setIntelLeadStatus(id: string, status: "assessed" | "skipped"): Promise<void> {
@@ -356,17 +395,76 @@ export async function intelRunsStartedToday(): Promise<number> {
  * Leads detected in earlier runs but never assessed (status 'new'), most
  * credible first, so a better lead found yesterday isn't lost behind today's.
  */
-export async function listUnassessedIntelLeads(opts: { sinceDays: number; limit: number; excludeIds: string[] }) {
+/**
+ * Unassessed leads ready for assessment: recent, of the lane's kinds, and
+ * past the counterpart search (found, none found, or not needed).
+ */
+export async function listUnassessedIntelLeads(opts: { sinceDays: number; limit: number; excludeIds: string[]; kinds?: string[] }) {
   let q = getDb()
     .selectFrom("intel_leads")
-    .select(["id", "kind", "title", "summary", "url", "hostname", "published_at", "urgency", "credibility", "contact", "facts", "opposite_queries", "discovered_at"])
+    .select([
+      "id",
+      "run_id",
+      "kind",
+      "title",
+      "summary",
+      "url",
+      "hostname",
+      "published_at",
+      "urgency",
+      "credibility",
+      "contact",
+      "facts",
+      "opposite_queries",
+      "discovered_at",
+      "signal_type",
+      "evidence_level",
+      "title_unverified",
+      "counterpart_status",
+      "counterparts",
+    ])
     .where("status", "=", "new")
+    .where("counterpart_status", "<>", "pending")
     .where("discovered_at", ">=", sql<string>`now() - make_interval(days => ${opts.sinceDays})`)
     .orderBy("credibility", "desc")
     .orderBy("discovered_at", "desc")
     .limit(opts.limit);
   if (opts.excludeIds.length > 0) q = q.where("id", "not in", opts.excludeIds);
+  if (opts.kinds && opts.kinds.length > 0) q = q.where("kind", "in", opts.kinds);
   return q.execute();
+}
+
+/** Leads whose search for the other side is due: never searched, or a retry whose time has come. */
+export async function listCounterpartDue(opts: { kinds: string[]; sinceDays: number; limit: number }) {
+  if (opts.kinds.length === 0 || opts.limit <= 0) return [];
+  return getDb()
+    .selectFrom("intel_leads")
+    .select(["id", "kind", "title", "hostname", "opposite_queries", "counterpart_attempts"])
+    .where("status", "=", "new")
+    .where("kind", "in", opts.kinds)
+    .where("discovered_at", ">=", sql<string>`now() - make_interval(days => ${opts.sinceDays})`)
+    .where((eb) => eb.or([eb("counterpart_status", "=", "pending"), eb.and([eb("counterpart_status", "=", "none_found"), eb("counterpart_next_at", "<=", sql<string>`now()`)])]))
+    .orderBy("credibility", "desc")
+    .orderBy("discovered_at", "desc")
+    .limit(opts.limit)
+    .execute();
+}
+
+export interface StoredCounterpart {
+  url: string;
+  title: string;
+  snippet: string;
+  hostname: string;
+  publishedAt: string | null;
+  query: string;
+}
+
+export async function setLeadCounterparts(id: string, r: { status: "found" | "none_found" | "not_needed"; attempts: number; nextAt: string | null; counterparts: StoredCounterpart[] }): Promise<void> {
+  await getDb()
+    .updateTable("intel_leads")
+    .set({ counterpart_status: r.status, counterpart_attempts: r.attempts, counterpart_next_at: r.nextAt, counterparts: json(r.counterparts) })
+    .where("id", "=", id)
+    .execute();
 }
 
 /**

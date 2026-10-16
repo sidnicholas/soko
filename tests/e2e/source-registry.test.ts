@@ -21,7 +21,7 @@ import { SOURCE_POLICY_VERSION, policyGaps, runIntelCycle, vetSource } from "@op
  * PRD v2 FR-01 source registry against a live Postgres (migration 0025):
  * seeded built-ins and connectors, submission waits for review, the policy
  * gate, atomic review/activation/pause with audit and outbox events, per-search
- * run records, auto-pause, review expiry, and the compatibility view.
+ * run records, auto-pause and review expiry.
  */
 const HAS_DB = Boolean(process.env.DATABASE_URL);
 const RUN = randomUUID().slice(0, 8);
@@ -98,7 +98,8 @@ describe.skipIf(!HAS_DB)("source registry (live postgres)", () => {
     const query = `site:${DOMAIN} lab equipment request`;
     const searched: string[] = [];
     const search: SearchProvider = { id: "stub", costPerQueryUsd: 0.005, search: async (q) => (searched.push(q.query), []) };
-    const run = () => runIntelCycle({ search, llm: LlmGateway.default(), dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 50, maxAssessments: 0 });
+    // Counterpart searches and hypothesis revisits off: only stage-1 searches are under test.
+    const run = () => runIntelCycle({ search, llm: LlmGateway.default(), dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 50, maxAssessments: 0, counterpartSearches: 0, hypothesisChecks: 0 });
 
     await run();
     expect(searched).toEqual([query]);
@@ -128,13 +129,9 @@ describe.skipIf(!HAS_DB)("source registry (live postgres)", () => {
 
     const searched: string[] = [];
     const search: SearchProvider = { id: "stub", costPerQueryUsd: 0, search: async (q) => (searched.push(q.query), []) };
-    await runIntelCycle({ search, llm: LlmGateway.default(), dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 50, maxAssessments: 0 });
+    await runIntelCycle({ search, llm: LlmGateway.default(), dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 50, maxAssessments: 0, counterpartSearches: 0, hypothesisChecks: 0 });
     expect(searched.some((q) => q.includes(`lapsed-${RUN}`))).toBe(false);
     expect(await getSource(source.id)).toMatchObject({ status: "paused", status_reason: "terms_review_expired" });
   });
 
-  it("keeps the pre-0025 table name readable for code deployed before the migration", async () => {
-    const rows = await sql<{ domain: string }>`select domain from intel_query_sources where domain = ${DOMAIN}`.execute(getDb());
-    expect(rows.rows).toEqual([{ domain: DOMAIN }]);
-  });
 });

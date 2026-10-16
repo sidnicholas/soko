@@ -3,6 +3,7 @@ export * from "./services";
 export * from "./queries";
 export * from "./sources";
 export * from "./source-policy";
+export * from "./intelligence";
 export * from "./budget";
 export * from "./prompts";
 export * from "./run";

@@ -31,7 +31,11 @@ export type RejectReason =
   /** The "lead" is a broker, sourcing agent or agency offering what the user offers — a competitor, not a buyer or seller. */
   | "competitor_offer"
   /** Government procurement: needs contractor registration/clearances; screened before paid assessment. */
-  | "federal_procurement";
+  | "federal_procurement"
+  /** WATCH cap: the need was deduced, not stated (PRD v2 FR-03: evidence before outbound claims). */
+  | "intent_inferred"
+  /** WATCH cap: surplus deduced, not a verified listing (PRD v2 FR-02). */
+  | "surplus_inferred";
 
 export const RAPID_MODE = {
   /** Experimental revenue target (AIOOS §1) — a yardstick, never a scoring input. */

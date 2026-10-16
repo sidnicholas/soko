@@ -27,3 +27,4 @@ export * from "./repositories/listings";
 export * from "./repositories/users";
 export * from "./repositories/analytics";
 export * from "./repositories/sources";
+export * from "./repositories/hypotheses";

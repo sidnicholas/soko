@@ -8,6 +8,15 @@ import {
   intelRunsStartedToday,
   intelSpentTodayUsd,
   knownIntelLeadHashes,
+  expireDemandHypotheses,
+  insertDemandHypothesis,
+  listCounterpartDue,
+  listDueHypotheses,
+  recordHypothesisCheck,
+  setLeadCounterparts,
+  touchIntelLeadsSeen,
+  type HypothesisCheck,
+  type StoredCounterpart,
   listSources,
   listUnassessedIntelLeads,
   recordSourceOutcome,
@@ -40,6 +49,7 @@ import {
 } from "./prompts";
 import { poolFromSources, stageOneQueries, type StageOneQuery } from "./queries";
 import { SOURCE_POLICY_VERSION, healthFor, isUnproductive, policyGaps, skipReason } from "./source-policy";
+import { capForEvidence, counterpartOutcome, hypothesisSchedule, laneKinds, laneOrientations, routeSignal, titleFlags, type Lane } from "./intelligence";
 import {
   bucketFor,
   confidenceFor,
@@ -70,6 +80,12 @@ export interface IntelRunOptions {
   maxAssessments: number;
   /** Conservative per-call estimates used to stop before overspending. */
   estimates?: { detectionUsd: number; assessmentUsd: number };
+  /** Which side this run serves (PRD v2 FR-02/FR-03): demand (demand + problem), supply, or both. */
+  lane?: Lane;
+  /** Targeted searches for the other side per run: suppliers for demand, buyers for supply. */
+  counterpartSearches?: number;
+  /** Watchlist hypotheses revisited per run (demand lane). */
+  hypothesisChecks?: number;
 }
 
 export interface IntelRunResult extends IntelRunTotals {
@@ -77,6 +93,9 @@ export interface IntelRunResult extends IntelRunTotals {
 }
 
 const DEFAULT_ESTIMATES = { detectionUsd: 0.02, assessmentUsd: 0.08 };
+const DEFAULT_COUNTERPART_SEARCHES = 4;
+const DEFAULT_HYPOTHESIS_CHECKS = 2;
+const MIN_HYPOTHESIS_CONFIDENCE = 0.3;
 const MIN_CREDIBILITY = 0.4;
 /** Unassessed leads older than this aren't worth a paid assessment. */
 const CARRY_OVER_DAYS = 7;
@@ -100,6 +119,11 @@ interface AssessableLead {
   facts: unknown;
   oppositeQueries: string[];
   carriedOver: boolean;
+  signalType: string | null;
+  evidenceLevel: "observed" | "inferred";
+  titleUnverified: boolean;
+  /** Stored results of the counterpart search (other side), reused by assessment. */
+  counterparts: StoredCounterpart[];
 }
 
 /**
@@ -131,17 +155,19 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
   const [spentTodayUsd, runsStartedToday, runIndex] = await Promise.all([intelSpentTodayUsd(), intelRunsStartedToday(), countIntelRuns()]);
   const allowance = runAllowanceUsd({ dailyBudgetUsd: opts.dailyBudgetUsd, runsPerDay: opts.runsPerDay, spentTodayUsd, runsStartedToday });
   const budget = new SpendBudget(allowance);
-  const runId = await createIntelRun();
-  const notes: Record<string, unknown> = { allowanceUsd: allowance, spentTodayAtStartUsd: spentTodayUsd, queries: [] as unknown[], errors: [] as string[] };
+  const lane: Lane = opts.lane ?? "all";
+  const kinds = laneKinds(lane);
+  const runId = await createIntelRun(lane);
+  const notes: Record<string, unknown> = { lane, allowanceUsd: allowance, spentTodayAtStartUsd: spentTodayUsd, queries: [] as unknown[], errors: [] as string[], hypothesesCreated: 0 };
   const errors = notes.errors as string[];
   let exhausted = false;
-  const detected: AssessableLead[] = [];
+  let leadsFound = 0;
   // One record per search, written to source_runs when the run ends (PRD v2 FR-01).
   const sourceRuns: SourceRunRecord[] = [];
 
   try {
     // ---- Stage 1-2: broad discovery + detection, from the sources the registry clears for this run
-    const { pool: queryPool, skipped } = await runnablePool();
+    const { pool: queryPool, skipped } = await runnablePool(lane);
     notes.sources = { runnable: new Set(queryPool.map((q) => q.sourceId)).size, skipped };
     for (const q of stageOneQueries(runIndex, opts.queriesPerRun, queryPool)) {
       if (!budget.canSpend(opts.search.costPerQueryUsd + est.detectionUsd)) {
@@ -165,6 +191,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       budget.recordSearch(opts.search.costPerQueryUsd);
       if (q.sourceId) await recordSourceOutcome(q.sourceId, true, healthFor);
       const known = await knownIntelLeadHashes(results.map((r) => urlHash(r.url)));
+      await touchIntelLeadsSeen([...known]);
       const unseen = results.filter((r) => !known.has(urlHash(r.url)) && detectInjection(`${r.title} ${r.snippet}`).length === 0);
       const fresh = unseen.filter((r) => !isNoLeadHost(r.hostname));
       const queryNote: Record<string, unknown> = { q: q.query, results: results.length, new: fresh.length, noLeadHost: unseen.length - fresh.length, leads: 0, kept: 0, reasons: {} };
@@ -201,6 +228,13 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
           reasons.low_credibility = (reasons.low_credibility ?? 0) + 1;
           continue;
         }
+        // Demand the party did not state itself goes to the watchlist, never the lead table.
+        if (routeSignal(lead.kind, lead.evidence_level) === "hypothesis") {
+          if (await storeHypothesis(runId, q.query, result, { signal_type: lead.signal_type, hypothesis: lead.title, basis: lead.summary, item: lead.item, location: lead.location, confidence: lead.credibility, check_query: lead.opposite_queries[0] ?? null, revisit_days: 14, facts: lead.facts })) {
+            notes.hypothesesCreated = (notes.hypothesesCreated as number) + 1;
+          }
+          continue;
+        }
         const leadId = await insertIntelLead({
           runId,
           kind: lead.kind,
@@ -225,33 +259,77 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
           contact: lead.contact,
           facts: lead.facts,
           oppositeQueries: lead.opposite_queries,
+          signalType: lead.signal_type,
+          evidenceLevel: lead.evidence_level,
+          supplyTerms: lead.kind === "supply" ? lead.supply_terms : {},
+          titleUnverified: lead.title_unverified,
         });
         if (!leadId) continue;
+        leadsFound++;
         queryNote.kept = (queryNote.kept as number) + 1;
         record.leads++;
         await touchIntelSource(result.hostname, lead.kind, { leads: 1 });
-        detected.push({
-          leadId,
-          kind: lead.kind,
-          title: lead.title,
-          summary: lead.summary,
-          url: result.url,
-          hostname: result.hostname,
-          snippet: result.snippet,
-          publishedAt: result.publishedAt,
-          urgency: lead.urgency,
-          credibility: lead.credibility,
-          contact: lead.contact,
-          facts: lead.facts,
-          oppositeQueries: lead.opposite_queries,
-          carriedOver: false,
-        });
+      }
+      // Implied demand the model listed as hypotheses (hiring, a new project, …).
+      for (const h of detection.hypotheses) {
+        const result = fresh[h.index];
+        if (!result || h.confidence < MIN_HYPOTHESIS_CONFIDENCE) continue;
+        if (await storeHypothesis(runId, q.query, result, h)) notes.hypothesesCreated = (notes.hypothesesCreated as number) + 1;
       }
     }
 
-    // ---- Stage 3-6: opposite side, verification, economics, why-paid, contact → candidate
-    // Pool = this run's leads + the best still-unassessed leads from recent runs.
-    const carried = (await listUnassessedIntelLeads({ sinceDays: CARRY_OVER_DAYS, limit: CARRY_OVER_LIMIT, excludeIds: detected.map((d) => d.leadId) })).map(
+    // ---- Counterpart discovery (FR-03): unmet demand → targeted supplier search,
+    // unmatched supply → buyer search. Results are stored on the lead and reused
+    // by assessment, so the other side is searched once, not per assessment.
+    const counterpartDue = await listCounterpartDue({ kinds, sinceDays: CARRY_OVER_DAYS, limit: opts.counterpartSearches ?? DEFAULT_COUNTERPART_SEARCHES });
+    let counterpartSearches = 0;
+    for (const lead of counterpartDue) {
+      const queries = Array.isArray(lead.opposite_queries) ? (lead.opposite_queries as string[]) : [];
+      // Screened before assessment anyway: never pay to search its other side.
+      if (queries.length === 0 || isGovernmentProcurement(lead.hostname)) {
+        await setLeadCounterparts(lead.id, { status: "not_needed", attempts: lead.counterpart_attempts, nextAt: null, counterparts: [] });
+        continue;
+      }
+      if (!budget.canSpend(opts.search.costPerQueryUsd)) {
+        exhausted = true;
+        break;
+      }
+      const query = queries[lead.counterpart_attempts % queries.length]!;
+      const record: SourceRunRecord = { sourceId: null, intelRunId: runId, query, results: 0, newResults: 0, leads: 0, costUsd: opts.search.costPerQueryUsd, error: null };
+      sourceRuns.push(record);
+      let found: WebSearchResult[] = [];
+      try {
+        found = await opts.search.search({ query, count: 5, freshness: "month" });
+      } catch (err) {
+        errors.push(`counterpart "${query}": ${String(err)}`);
+        record.error = String(err).slice(0, 500);
+      }
+      budget.recordSearch(opts.search.costPerQueryUsd);
+      counterpartSearches++;
+      const usable = found.filter((r) => detectInjection(`${r.title} ${r.snippet}`).length === 0 && !isNoLeadHost(r.hostname));
+      record.results = found.length;
+      record.newResults = usable.length;
+      if (record.error) continue;
+      const outcome = counterpartOutcome(usable.length, lead.counterpart_attempts);
+      await setLeadCounterparts(lead.id, {
+        ...outcome,
+        counterparts: usable.map((r) => ({ url: r.url, title: r.title, snippet: r.snippet, hostname: r.hostname, publishedAt: r.publishedAt, query })),
+      });
+    }
+    notes.counterpartSearches = counterpartSearches;
+
+    // ---- Watchlist (FR-03): expire hypotheses past their lifetime, revisit the due ones.
+    if (kinds.includes("demand") && !exhausted) {
+      notes.hypothesesExpired = await expireDemandHypotheses();
+      const confirmed = await revisitHypotheses(runId, opts, est, budget, sourceRuns, errors);
+      notes.hypothesesConfirmed = confirmed.confirmed;
+      leadsFound += confirmed.leads;
+      if (confirmed.exhausted) exhausted = true;
+    }
+
+    // ---- Stage 3-6: verification, economics, why-paid, contact → candidate.
+    // Pool = unassessed leads of this lane, this run's and recent ones, past their counterpart search.
+    const carried = (await listUnassessedIntelLeads({ sinceDays: CARRY_OVER_DAYS, limit: CARRY_OVER_LIMIT, excludeIds: [], kinds })).map(
       (l): AssessableLead => ({
         leadId: l.id,
         kind: l.kind as AssessableLead["kind"],
@@ -266,19 +344,24 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         contact: l.contact,
         facts: l.facts,
         oppositeQueries: Array.isArray(l.opposite_queries) ? (l.opposite_queries as string[]) : [],
-        carriedOver: true,
+        carriedOver: l.run_id !== runId,
+        signalType: l.signal_type,
+        evidenceLevel: l.evidence_level === "inferred" ? "inferred" : "observed",
+        titleUnverified: l.title_unverified,
+        counterparts: Array.isArray(l.counterparts) ? (l.counterparts as StoredCounterpart[]) : [],
       }),
     );
     const urgencyWeight = { high: 1, medium: 0.8, low: 0.6 } as const;
-    const priority = (l: AssessableLead) => l.credibility * urgencyWeight[l.urgency] * freshnessScore(l.publishedAt, l.urgency);
+    // A lead with the other side already found is a two-sided match: assess it first.
+    const priority = (l: AssessableLead) => l.credibility * urgencyWeight[l.urgency] * freshnessScore(l.publishedAt, l.urgency) * (l.counterparts.length > 0 ? 1.5 : 1);
     const pool: AssessableLead[] = [];
-    for (const l of [...detected, ...carried]) {
+    for (const l of carried) {
       // Decayed past usefulness: retire it rather than pay to assess it.
       if (freshnessScore(l.publishedAt, l.urgency) < STALE_FRESHNESS) await setIntelLeadStatus(l.leadId, "skipped");
       else pool.push(l);
     }
     const ranked = pool.sort((a, b) => priority(b) - priority(a));
-    notes.assessmentPool = { thisRun: detected.length, carriedOver: carried.length, eligible: ranked.length };
+    notes.assessmentPool = { thisRun: carried.filter((l) => !l.carriedOver).length, carriedOver: carried.filter((l) => l.carriedOver).length, eligible: ranked.length };
     let candidates = 0;
     let carriedAssessed = 0;
     // Government procurement never needs a paid assessment to reject — screen it
@@ -291,19 +374,8 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
     (notes.assessmentPool as Record<string, number>).screenedFederal = screened.length;
     const assessable = ranked.filter((l) => !isGovernmentProcurement(l.hostname));
     for (const lead of assessable.slice(0, opts.maxAssessments)) {
-      const counter: WebSearchResult[] = [];
-      // Opposite-side search for every kind: a problem lead may be referred to a
-      // third-party provider, not only matched to the user's own services.
-      for (const oq of lead.oppositeQueries.slice(0, 2)) {
-        if (!budget.canSpend(opts.search.costPerQueryUsd + est.assessmentUsd)) break;
-        try {
-          const found = await opts.search.search({ query: oq, count: 5, freshness: "month" });
-          counter.push(...found.filter((r) => detectInjection(`${r.title} ${r.snippet}`).length === 0));
-        } catch (err) {
-          errors.push(`opposite "${oq}": ${String(err)}`);
-        }
-        budget.recordSearch(opts.search.costPerQueryUsd);
-      }
+      // The other side, as the counterpart search stored it.
+      const counter: WebSearchResult[] = lead.counterparts.map((c) => ({ url: c.url, title: c.title, snippet: c.snippet, hostname: c.hostname, publishedAt: c.publishedAt, ageText: null, provider: "counterpart_search" }));
       if (!budget.canSpend(est.assessmentUsd)) {
         exhausted = true;
         break;
@@ -339,7 +411,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       llmCalls: budget.llmCalls,
       searchUsd: budget.searchUsd,
       llmUsd: budget.llmUsd,
-      leadsFound: detected.length,
+      leadsFound,
       candidates,
       notes,
     };
@@ -355,7 +427,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       llmCalls: budget.llmCalls,
       searchUsd: budget.searchUsd,
       llmUsd: budget.llmUsd,
-      leadsFound: detected.length,
+      leadsFound,
       candidates: 0,
       notes: { ...notes, fatal: String(err) },
     };
@@ -384,11 +456,13 @@ const POLICY = { policyGaps: (s: RegistrySource) => policyGaps(s), policyVersion
  * active source whose policy no longer holds (an expired review) is paused,
  * with an event, rather than silently skipped forever.
  */
-async function runnablePool(): Promise<{ pool: StageOneQuery[]; skipped: Record<string, number> }> {
+async function runnablePool(lane: Lane): Promise<{ pool: StageOneQuery[]; skipped: Record<string, number> }> {
+  const orientations = laneOrientations(lane);
   const [active, spend] = await Promise.all([listSources({ kind: "search_venue", status: "active" }), sourceSpendToday()]);
   const runnable: RegistrySource[] = [];
   const skipped: Record<string, number> = {};
   for (const s of active) {
+    if (!orientations.includes(s.orientation)) continue;
     const why = skipReason(s, spend.get(s.id) ?? 0);
     if (why === null) {
       runnable.push(s);
@@ -401,6 +475,142 @@ async function runnablePool(): Promise<{ pool: StageOneQuery[]; skipped: Record<
     }
   }
   return { pool: poolFromSources(runnable), skipped };
+}
+
+interface HypothesisDraft {
+  signal_type: string;
+  hypothesis: string;
+  basis: string;
+  item: string | null;
+  location: string | null;
+  confidence: number;
+  check_query: string | null;
+  revisit_days: number;
+  facts: unknown[];
+}
+
+/** Puts implied demand on the watchlist (deduped by source page). True when it was new. */
+async function storeHypothesis(runId: string, query: string, result: WebSearchResult, h: HypothesisDraft): Promise<boolean> {
+  const { revisitAt, expiresAt } = hypothesisSchedule(h.revisit_days);
+  const id = await insertDemandHypothesis({
+    runId,
+    signalType: h.signal_type,
+    hypothesis: h.hypothesis,
+    basis: h.basis,
+    evidence: [{ url: result.url, title: result.title, snippet: result.snippet, publishedAt: result.publishedAt, facts: h.facts }],
+    sourceUrl: result.url,
+    sourceUrlHash: urlHash(result.url),
+    hostname: result.hostname,
+    query,
+    item: h.item,
+    location: h.location,
+    confidence: h.confidence,
+    checkQuery: h.check_query,
+    revisitDays: Math.min(60, Math.max(3, Math.round(h.revisit_days))),
+    revisitAt,
+    expiresAt,
+  });
+  return id !== null;
+}
+
+/**
+ * Revisits due hypotheses: one search for the demand becoming explicit, and a
+ * detection pass over what is new. An observed demand lead found that way
+ * confirms the hypothesis (and is stored as a lead); otherwise the next
+ * revisit is scheduled.
+ */
+async function revisitHypotheses(
+  runId: string,
+  opts: IntelRunOptions,
+  est: { detectionUsd: number },
+  budget: SpendBudget,
+  sourceRuns: SourceRunRecord[],
+  errors: string[],
+): Promise<{ confirmed: number; leads: number; exhausted: boolean }> {
+  let confirmed = 0;
+  let leads = 0;
+  for (const h of await listDueHypotheses(opts.hypothesisChecks ?? DEFAULT_HYPOTHESIS_CHECKS)) {
+    if (!budget.canSpend(opts.search.costPerQueryUsd + est.detectionUsd)) return { confirmed, leads, exhausted: true };
+    const query = h.check_query!;
+    const spentBefore = budget.spentUsd;
+    const record: SourceRunRecord = { sourceId: null, intelRunId: runId, query, results: 0, newResults: 0, leads: 0, costUsd: 0, error: null };
+    sourceRuns.push(record);
+    const next = new Date(Date.now() + h.revisit_days * 86_400_000).toISOString();
+    const check: HypothesisCheck = { at: new Date().toISOString(), query, results: 0, outcome: "not_yet" };
+    let results: WebSearchResult[] = [];
+    try {
+      results = await opts.search.search({ query, count: 10, freshness: "month" });
+    } catch (err) {
+      errors.push(`hypothesis "${query}": ${String(err)}`);
+      record.error = String(err).slice(0, 500);
+      budget.recordSearch(opts.search.costPerQueryUsd);
+      record.costUsd = budget.spentUsd - spentBefore;
+      await recordHypothesisCheck(h.id, { ...check, outcome: "error", note: record.error }, next);
+      continue;
+    }
+    budget.recordSearch(opts.search.costPerQueryUsd);
+    const known = await knownIntelLeadHashes(results.map((r) => urlHash(r.url)));
+    const fresh = results.filter((r) => !known.has(urlHash(r.url)) && detectInjection(`${r.title} ${r.snippet}`).length === 0 && !isNoLeadHost(r.hostname));
+    record.results = results.length;
+    record.newResults = fresh.length;
+    check.results = results.length;
+    if (fresh.length > 0) {
+      let detection: Detection | null = null;
+      try {
+        const { prompt, untrusted } = detectionPrompt(query, fresh);
+        const res = await opts.llm.runStructured({ taskClass: "extraction", system: DETECTION_SYSTEM, prompt, untrustedContext: untrusted }, DetectionSchema, { outputSchema: DetectionWire });
+        budget.recordLlm(res.telemetry.usd);
+        detection = res.value;
+      } catch (err) {
+        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
+        else throw modelUnavailable(err);
+        errors.push(`hypothesis detect "${query}": ${String(err).slice(0, 200)}`);
+      }
+      // Only demand the party itself states confirms a hypothesis.
+      const observed = (detection?.leads ?? []).find((l) => l.kind !== "supply" && l.evidence_level === "observed" && l.credibility >= MIN_CREDIBILITY && fresh[l.index]);
+      if (observed) {
+        const result = fresh[observed.index]!;
+        const leadId = await insertIntelLead({
+          runId,
+          kind: observed.kind,
+          title: observed.title,
+          summary: observed.summary,
+          url: result.url,
+          urlHash: urlHash(result.url),
+          hostname: result.hostname,
+          query,
+          searchProvider: result.provider,
+          publishedAt: result.publishedAt,
+          ageText: result.ageText,
+          item: observed.item,
+          category: observed.category,
+          quantity: observed.quantity,
+          location: observed.location,
+          deadline: observed.deadline,
+          priceMinor: typeof observed.price_usd === "number" ? Math.round(observed.price_usd * 100) : null,
+          currency: typeof observed.price_usd === "number" ? "USD" : null,
+          urgency: observed.urgency,
+          credibility: observed.credibility,
+          contact: observed.contact,
+          facts: observed.facts,
+          oppositeQueries: observed.opposite_queries,
+          signalType: observed.signal_type,
+          evidenceLevel: "observed",
+          titleUnverified: false,
+        });
+        if (leadId) {
+          check.outcome = "confirmed";
+          check.leadId = leadId;
+          record.leads++;
+          leads++;
+          confirmed++;
+        }
+      }
+    }
+    record.costUsd = budget.spentUsd - spentBefore;
+    await recordHypothesisCheck(h.id, check, next);
+  }
+  return { confirmed, leads, exhausted: false };
 }
 
 /** Writes the run's per-search records. Never fails a run. */
@@ -443,7 +653,8 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
   const freshness = freshnessScore(lead.publishedAt, lead.urgency);
   const contact = (a.contact ?? lead.contact ?? null) as ContactPath | null;
   const screenText = [lead.title, lead.summary, lead.snippet, counterResult?.snippet ?? ""].join(" ");
-  const regulatory = mergeFlags(a.regulatory, regulatoryFlags(screenText));
+  // Liquidation / distressed stock: clear title is never assumed (FR-02).
+  const regulatory = mergeFlags(a.regulatory, regulatoryFlags(screenText), titleFlags({ kind: lead.kind, signalType: lead.signalType, titleUnverified: lead.titleUnverified, text: screenText }));
   const fraud = mergeFlags(a.fraud, fraudFlags(screenText));
   const monetization = { payer: a.monetization.payer, mechanism: a.monetization.mechanism, timing: a.monetization.timing, valueAdded: a.monetization.value_added };
   const resolved = monetizationResolved(monetization);
@@ -461,11 +672,16 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
     fraud,
   };
   const { score, factors } = scoreCandidate(scoreInput);
-  const { bucket, rejectReason } = bucketFor({
-    ...scoreInput,
-    compensationHighUsd: Math.max(...a.economics.user_compensation_usd),
-    competitorOffer: a.lead_is_competitor_offer,
-  });
+  // Inferred signals stop at WATCH with no outreach draft: evidence before outbound claims (FR-03).
+  const { bucket, rejectReason, suppressOutreach } = capForEvidence(
+    lead.kind,
+    lead.evidenceLevel,
+    bucketFor({
+      ...scoreInput,
+      compensationHighUsd: Math.max(...a.economics.user_compensation_usd),
+      competitorOffer: a.lead_is_competitor_offer,
+    }),
+  );
   const matchKind = lead.kind === "problem" ? "problem_to_service" : lead.kind === "demand" ? "demand_to_supply" : "supply_to_demand";
 
   await upsertIntelCandidate({
@@ -489,7 +705,9 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
     confidence: confidenceFor(verification, a.probability),
     score,
     explanation: { factors, modelFactors: a.factors, invalidators: a.invalidators, probability: a.probability },
-    outreach: { primary: a.outreach.primary, secondary: a.outreach.secondary, requiresApproval: true },
+    outreach: suppressOutreach
+      ? { primary: null, secondary: null, requiresApproval: true, note: "Inferred, not stated by the party: confirm the signal before any outreach." }
+      : { primary: a.outreach.primary, secondary: a.outreach.secondary, requiresApproval: true },
     bucket,
     rejectReason: rejectReason ?? (counterpartyFound ? null : "no_counterparty_found"),
   });

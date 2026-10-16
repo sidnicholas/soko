@@ -1,7 +1,7 @@
 import { getConfig } from "@opportunity-os/config";
 import { makeBraveSearch, makeSerperSearch, type SearchProvider } from "@opportunity-os/connectors-sdk";
 import { closeDb } from "@opportunity-os/db";
-import { runIntelCycle } from "@opportunity-os/intel";
+import { runIntelCycle, type Lane } from "@opportunity-os/intel";
 import { LlmGateway } from "@opportunity-os/llm-gateway";
 import { createLogger } from "@opportunity-os/observability";
 
@@ -43,9 +43,24 @@ async function main(): Promise<number> {
     runsPerDay: cfg.intel.runsPerDay,
     queriesPerRun: cfg.intel.queriesPerRun,
     maxAssessments: cfg.intel.maxAssessments,
+    lane: laneArg(),
+    counterpartSearches: cfg.intel.counterpartSearches,
+    hypothesisChecks: cfg.intel.hypothesisChecks,
   });
-  log.info({ runId: result.runId, status: result.status, leads: result.leadsFound, candidates: result.candidates, spentUsd: result.searchUsd + result.llmUsd }, "intel.once.complete");
+  log.info({ runId: result.runId, lane: laneArg(), status: result.status, leads: result.leadsFound, candidates: result.candidates, spentUsd: result.searchUsd + result.llmUsd }, "intel.once.complete");
   return 0;
+}
+
+/**
+ * `--lane=demand` or `--lane=supply` (PRD v2 FR-02/FR-03): each lane is its own
+ * Railway cron, so supply and demand intelligence run on independent schedules.
+ * Without the flag a run serves both.
+ */
+function laneArg(): Lane {
+  const arg = process.argv.find((a) => a.startsWith("--lane="))?.slice("--lane=".length);
+  if (arg === undefined) return "all";
+  if (arg === "demand" || arg === "supply" || arg === "all") return arg;
+  throw new Error(`unknown --lane=${arg}; use demand, supply or all`);
 }
 
 function searchProvider(intel: ReturnType<typeof getConfig>["intel"]): SearchProvider | undefined {

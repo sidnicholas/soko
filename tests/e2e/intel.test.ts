@@ -44,9 +44,10 @@ class StubModel implements LlmProvider {
       text = JSON.stringify({
         skipped: [{ index: 2, reason: "article" }],
         leads: [
-          { index: 0, kind: "problem", title: "Shopify store GA4 not recording purchases", summary: "Owner reports GA4 purchases at zero since Monday while ads run.", item: "GA4 purchase tracking", category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "high", credibility: 0.8, contact: { channel: "profile", value: null, label: "source_fact" }, facts: [{ field: "problem", value: "GA4 zero purchases", label: "source_fact" }], opposite_queries: [] },
-          { index: 1, kind: "demand", title: "Warehouse wants a used 5k lb forklift", summary: "Dayton OH warehouse needs a used 5,000 lb forklift this week.", item: "forklift", category: "industrial equipment", quantity: "1", location: "Dayton, OH", deadline: "this week", price_usd: null, urgency: "high", credibility: 0.7, contact: { channel: "marketplace_message", value: null, label: "source_fact" }, facts: [], opposite_queries: ["forklift for sale near Dayton"] },
+          { index: 0, kind: "problem", title: "Shopify store GA4 not recording purchases", summary: "Owner reports GA4 purchases at zero since Monday while ads run.", item: "GA4 purchase tracking", category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "high", credibility: 0.8, contact: { channel: "profile", value: null, label: "source_fact" }, facts: [{ field: "problem", value: "GA4 zero purchases", label: "source_fact" }], opposite_queries: [], signal_type: "unmet_need", evidence_level: "observed", supply_terms: { moq: null, price_breaks: null, condition: null, shipping_terms: null, expiry: null, capacity: null }, title_unverified: false },
+          { index: 1, kind: "demand", title: "Warehouse wants a used 5k lb forklift", summary: "Dayton OH warehouse needs a used 5,000 lb forklift this week.", item: "forklift", category: "industrial equipment", quantity: "1", location: "Dayton, OH", deadline: "this week", price_usd: null, urgency: "high", credibility: 0.7, contact: { channel: "marketplace_message", value: null, label: "source_fact" }, facts: [], opposite_queries: ["forklift for sale near Dayton"], signal_type: "purchase_request", evidence_level: "observed", supply_terms: { moq: null, price_breaks: null, condition: null, shipping_terms: null, expiry: null, capacity: null }, title_unverified: false },
         ],
+        hypotheses: [],
       });
     } else if (req.prompt.includes("Lead kind: problem")) {
       text = JSON.stringify({
@@ -172,7 +173,7 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
       readonly name = "stub";
       async complete(req: { system?: string; prompt: string }) {
         const text = req.system?.includes("signal-detection")
-          ? JSON.stringify({ leads: [{ index: 0, kind: "problem", title: "Divi site blank after update", summary: "Owner's Divi homepage blank since update.", item: null, category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "high", credibility: 0.9, contact: { channel: "profile", value: null, label: "source_fact" }, facts: [], opposite_queries: [] }] })
+          ? JSON.stringify({ leads: [{ index: 0, kind: "problem", title: "Divi site blank after update", summary: "Owner's Divi homepage blank since update.", item: null, category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "high", credibility: 0.9, contact: { channel: "profile", value: null, label: "source_fact" }, facts: [], opposite_queries: [], evidence_level: "observed" }] })
           : JSON.stringify({
               counterparty_found: true, counter_index: null, service_key: "website_repair", title: "Repair Divi site after update", match_rationale: "Website repair service.", evidence: "strong",
               economics: { gross_transaction_usd: null, costs_usd: null, user_compensation_usd: [200, 600], capital_required_usd: 0, time_hours: [2, 5], notes: "" },
@@ -223,7 +224,7 @@ describe.skipIf(!HAS_DB)("intel vertical slice (live postgres)", () => {
         if (!req.system?.includes("signal-detection")) assessments++;
         const text = JSON.stringify({
           skipped: [],
-          leads: [{ index: 0, kind: "demand", title: "USCG generator maintenance sources sought", summary: "Federal sources sought notice.", item: null, category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "medium", credibility: 0.9, contact: { channel: "procurement_contact", value: null, label: "source_fact" }, facts: [], opposite_queries: ["generator maintenance contractor"] }],
+          leads: [{ index: 0, kind: "demand", title: "USCG generator maintenance sources sought", summary: "Federal sources sought notice.", item: null, category: null, quantity: null, location: null, deadline: null, price_usd: null, urgency: "medium", credibility: 0.9, contact: { channel: "procurement_contact", value: null, label: "source_fact" }, facts: [], opposite_queries: ["generator maintenance contractor"], evidence_level: "observed" }],
         });
         return { text, inputTokens: 100, outputTokens: 50, usd: 0.001, model: "stub-1" };
       }
