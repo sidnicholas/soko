@@ -59,6 +59,9 @@ export const EVENT_NAMES = [
   "crm.deal_elevated.v1",
   "crm.deal_synced.v1",
   "relationship.memory_updated.v1",
+  "outreach.scheduled.v1",
+  "outreach.sent.v1",
+  "outreach.reply_received.v1",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

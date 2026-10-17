@@ -688,6 +688,82 @@ export interface ChannelInput {
   sourceUrl?: string | null;
 }
 
+// Email outreach (PRD v2 FR-07, ADR-045)
+export interface OutreachStatus {
+  configured: boolean;
+  missing: string[];
+  address: string | null;
+  dailyCap: number;
+  sentLast24h: number;
+  minGapHours: number;
+  window: { start: number; end: number; timezone: string; weekends: boolean };
+  inWindow: boolean;
+}
+export interface InboxItem {
+  conversation_id: string;
+  message_id: string | null;
+  party_id: string;
+  party_name: string;
+  their_address: string;
+  subject: string;
+  status: string;
+  classification: string | null;
+  error: string | null;
+  at: string;
+}
+export interface OutreachInbox {
+  drafts: InboxItem[];
+  queued: InboxItem[];
+  needsReview: InboxItem[];
+  awaiting: InboxItem[];
+  exceptions: InboxItem[];
+  sentLast24h: number;
+}
+export interface Conversation {
+  id: string;
+  counterparty_id: string;
+  party_name: string;
+  their_address: string;
+  subject: string;
+  subject_type: LinkSubject | null;
+  subject_id: string | null;
+  status: "open" | "closed";
+  last_outbound_at: string | null;
+  last_inbound_at: string | null;
+  created_at: string;
+}
+export interface ConversationMessage {
+  id: string;
+  conversation_id: string;
+  direction: "outbound" | "inbound";
+  status: "draft" | "queued" | "sending" | "sent" | "failed" | "cancelled" | "received";
+  subject: string;
+  body_text: string;
+  rfc_message_id: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  classification: "reply" | "opt_out" | "bounce" | "auto_reply" | null;
+  injection_flag: boolean;
+  approved_at: string | null;
+  queued_at: string | null;
+  sent_at: string | null;
+  received_at: string | null;
+  reviewed_at: string | null;
+  error: string | null;
+  created_at: string;
+}
+export type ConversationDetail = Conversation & { messages: ConversationMessage[] };
+export type MessageDetail = ConversationMessage & { counterparty_id: string; current_hash: string };
+export interface DraftInput {
+  partyId: string;
+  toAddress?: string;
+  subject?: string;
+  body: string;
+  subjectType?: LinkSubject | null;
+  subjectId?: string | null;
+  conversationId?: string | null;
+}
+
 export interface CreatePartyInput {
   type: PartyType;
   displayName: string;
@@ -836,6 +912,20 @@ export const api = {
   restoreParty: (id: string) => request<PartyDetail>(`/relationships/${id}/restore`, jsonBody({})),
   syncPartyToPipedrive: (id: string) => request<{ kind: "person" | "org"; id: number; url: string }>(`/relationships/${id}/crm`, jsonBody({})),
   deleteParty: (id: string, confirmName: string) => request<{ deleted: boolean; crm: { deleted: boolean; error: string | null } | null }>(`/relationships/${id}/delete`, jsonBody({ confirmName })),
+
+  // Email outreach (ADR-045)
+  outreachStatus: () => request<OutreachStatus>("/outreach/status"),
+  outreachInbox: () => request<OutreachInbox>("/outreach/inbox"),
+  conversation: (id: string) => request<ConversationDetail>(`/outreach/conversations/${id}`),
+  setConversationStatus: (id: string, status: "open" | "closed") => request<{ ok: true }>(`/outreach/conversations/${id}/status`, jsonBody({ status })),
+  partyOutreach: (id: string, address?: string) => request<{ conversations: Conversation[]; blocked: string | null }>(`/outreach/parties/${id}${address ? `?address=${encodeURIComponent(address)}` : ""}`),
+  createDraft: (body: DraftInput) => request<{ conversationId: string; messageId: string }>("/outreach/drafts", jsonBody(body)),
+  outreachMessage: (id: string) => request<MessageDetail>(`/outreach/messages/${id}`),
+  editDraft: (id: string, body: { subject?: string; body?: string }) => request<MessageDetail>(`/outreach/messages/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  approveMessage: (id: string, contentHash: string) => request<MessageDetail>(`/outreach/messages/${id}/approve`, jsonBody({ contentHash })),
+  cancelMessage: (id: string) => request<MessageDetail>(`/outreach/messages/${id}/cancel`, jsonBody({})),
+  reviewMessage: (id: string) => request<{ ok: true }>(`/outreach/messages/${id}/review`, jsonBody({})),
+  resolveMessage: (id: string, outcome: "sent" | "failed" | "seen") => request<{ ok: true }>(`/outreach/messages/${id}/resolve`, jsonBody({ outcome })),
 
   // Apify ingestion (ADR-042)
   apifyStatus: () => request<{ configured: boolean; webhook: boolean; dailyBudgetUsd: number; categories: string[] }>("/ingestion/apify/status"),

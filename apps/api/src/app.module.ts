@@ -21,6 +21,7 @@ import { SourcesModule } from "./sources/sources.module";
 import { IntelligenceModule } from "./intelligence/intelligence.module";
 import { CrmModule } from "./crm/crm.module";
 import { RelationshipsModule } from "./relationships/relationships.module";
+import { OutreachModule } from "./outreach/outreach.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { RelationshipsModule } from "./relationships/relationships.module";
     IntelligenceModule,
     CrmModule,
     RelationshipsModule,
+    OutreachModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

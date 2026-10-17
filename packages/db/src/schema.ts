@@ -202,6 +202,55 @@ export interface ContactConsentsTable {
   expires_at: Timestamp | null;
 }
 
+export interface ConversationsTable {
+  id: Generated<string>;
+  counterparty_id: string;
+  channel: Generated<string>;
+  their_address: string;
+  subject: string;
+  subject_type: string | null;
+  subject_id: string | null;
+  status: Generated<string>;
+  last_outbound_at: Timestamp | null;
+  last_inbound_at: Timestamp | null;
+  created_by: string | null;
+  created_at: Generated<Timestamp>;
+  updated_at: Timestamp;
+}
+
+export interface ConversationMessagesTable {
+  id: Generated<string>;
+  conversation_id: string;
+  direction: string;
+  status: string;
+  subject: string;
+  body_text: string;
+  content_hash: string | null;
+  rfc_message_id: string | null;
+  in_reply_to: string | null;
+  from_address: string | null;
+  to_address: string | null;
+  classification: string | null;
+  injection_flag: Generated<boolean>;
+  approved_by: string | null;
+  approved_at: Timestamp | null;
+  queued_at: Timestamp | null;
+  sent_at: Timestamp | null;
+  received_at: Timestamp | null;
+  reviewed_at: Timestamp | null;
+  reviewed_by: string | null;
+  error: string | null;
+  created_by: string | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface OutreachMailboxStateTable {
+  mailbox: string;
+  uid_validity: string | number;
+  last_uid: string | number;
+  polled_at: Timestamp;
+}
+
 export interface ContactSuppressionsTable {
   identifier_hash: string;
   kind: string;
@@ -846,6 +895,9 @@ export interface Database {
   contact_suppressions: ContactSuppressionsTable;
   relationship_memories: RelationshipMemoriesTable;
   counterparty_links: CounterpartyLinksTable;
+  conversations: ConversationsTable;
+  conversation_messages: ConversationMessagesTable;
+  outreach_mailbox_state: OutreachMailboxStateTable;
   approvals: ApprovalsTable;
   negotiations: NegotiationsTable;
   transactions: TransactionsTable;

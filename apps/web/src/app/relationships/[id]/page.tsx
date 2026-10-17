@@ -20,6 +20,7 @@ import {
 import { useAsync } from "../../../lib/useAsync";
 import { AsyncView } from "../../../components/AsyncView";
 import { CONSENT_TONE, ChannelValue, words } from "../../../components/Contacts";
+import { ContactEmail } from "../../../components/Outreach";
 
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "—");
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
@@ -592,6 +593,7 @@ export default function PartyPage({ params }: { params: { id: string } }) {
           <Details d={d} reload={state.reload} />
           <Channels d={d} reload={state.reload} />
           <Consent d={d} reload={state.reload} />
+          <ContactEmail d={d} />
           <Memories d={d} reload={state.reload} />
           <Links d={d} reload={state.reload} />
           <Pipedrive d={d} reload={state.reload} />

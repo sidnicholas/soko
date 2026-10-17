@@ -220,6 +220,36 @@ const EnvSchema = z.object({
   DEAL_LEADS_PER_RUN: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().nonnegative().default(10)),
   // Buyer requests from actor sources raised as demand leads per sweep (worker-connectors).
   DEMAND_LEADS_PER_RUN: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().nonnegative().default(25)),
+  // Email outreach (ADR-045), api and worker-lifecycle: one real mailbox
+  // (Hostinger by default), SMTP to send, IMAP to read replies. Nothing is
+  // sent until the address, password and postal address are all set.
+  OUTREACH_EMAIL_ADDRESS: z.string().optional(),
+  OUTREACH_EMAIL_PASSWORD: z.string().optional(),
+  OUTREACH_FROM_NAME: z.string().optional(),
+  // CAN-SPAM: a valid physical postal address in every message.
+  OUTREACH_POSTAL_ADDRESS: z.string().optional(),
+  OUTREACH_SMTP_HOST: z.preprocess((v) => (v === "" ? undefined : v), z.string().default("smtp.hostinger.com")),
+  OUTREACH_SMTP_PORT: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().default(465)),
+  OUTREACH_IMAP_HOST: z.preprocess((v) => (v === "" ? undefined : v), z.string().default("imap.hostinger.com")),
+  OUTREACH_IMAP_PORT: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().default(993)),
+  // Messages sent per day across all recipients (raise slowly while the mailbox warms up).
+  OUTREACH_DAILY_CAP: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().nonnegative().default(20)),
+  // Hours between two messages to the same contact without a reply in between.
+  OUTREACH_MIN_GAP_HOURS: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().nonnegative().default(72)),
+  // Sending window, local hours "start-end" in OUTREACH_TIMEZONE, weekdays unless OUTREACH_WEEKENDS=true.
+  OUTREACH_SEND_HOURS: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z
+      .string()
+      .regex(/^\d{1,2}-\d{1,2}$/)
+      .refine((v) => {
+        const [a, b] = v.split("-").map(Number);
+        return a! < b! && b! <= 24;
+      }, "OUTREACH_SEND_HOURS must be start-end with start < end <= 24")
+      .default("8-18"),
+  ),
+  OUTREACH_TIMEZONE: z.preprocess((v) => (v === "" ? undefined : v), z.string().default("America/Detroit")),
+  OUTREACH_WEEKENDS: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["true", "false"]).default("false")),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -334,6 +364,19 @@ export interface AppConfig {
     fixtures: boolean;
     apify: { token?: string; webhookSecret?: string; dailyBudgetUsd: number };
     deals: { minDiscount: number; checksPerRun: number; leadsPerRun: number; demandLeadsPerRun: number };
+  };
+  outreach: {
+    address?: string;
+    password?: string;
+    fromName?: string;
+    postalAddress?: string;
+    smtp: { host: string; port: number };
+    imap: { host: string; port: number };
+    dailyCap: number;
+    minGapHours: number;
+    sendHours: { start: number; end: number };
+    timezone: string;
+    weekends: boolean;
   };
   crm: {
     pipedrive: { companyDomain?: string; apiToken?: string; pipelineId?: number; stageId?: number; webhookUser?: string; webhookPassword?: string };
@@ -454,6 +497,19 @@ function toConfig(env: Env): AppConfig {
       fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
       apify: { token: env.APIFY_API_TOKEN || undefined, webhookSecret: env.APIFY_WEBHOOK_SECRET || undefined, dailyBudgetUsd: env.APIFY_DAILY_BUDGET_USD },
       deals: { minDiscount: env.DEAL_MIN_DISCOUNT, checksPerRun: env.DEAL_CHECKS_PER_RUN, leadsPerRun: env.DEAL_LEADS_PER_RUN, demandLeadsPerRun: env.DEMAND_LEADS_PER_RUN },
+    },
+    outreach: {
+      address: env.OUTREACH_EMAIL_ADDRESS?.trim().toLowerCase() || undefined,
+      password: env.OUTREACH_EMAIL_PASSWORD || undefined,
+      fromName: env.OUTREACH_FROM_NAME?.trim() || undefined,
+      postalAddress: env.OUTREACH_POSTAL_ADDRESS?.trim() || undefined,
+      smtp: { host: env.OUTREACH_SMTP_HOST, port: env.OUTREACH_SMTP_PORT },
+      imap: { host: env.OUTREACH_IMAP_HOST, port: env.OUTREACH_IMAP_PORT },
+      dailyCap: env.OUTREACH_DAILY_CAP,
+      minGapHours: env.OUTREACH_MIN_GAP_HOURS,
+      sendHours: { start: Number(env.OUTREACH_SEND_HOURS.split("-")[0]), end: Number(env.OUTREACH_SEND_HOURS.split("-")[1]) },
+      timezone: env.OUTREACH_TIMEZONE,
+      weekends: env.OUTREACH_WEEKENDS === "true",
     },
     crm: {
       pipedrive: {

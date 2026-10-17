@@ -35,6 +35,8 @@
     "@opportunity-os/llm-gateway": "workspace:*",
     "@opportunity-os/negotiation": "workspace:*",
     "@opportunity-os/observability": "workspace:*",
+    "@opportunity-os/relationship": "workspace:*",
+    "@opportunity-os/outreach": "workspace:*",
     "@opportunity-os/risk": "workspace:*",
     "@opportunity-os/scoring": "workspace:*",
     "@opportunity-os/settlement": "workspace:*",

@@ -33,3 +33,4 @@ export * from "./repositories/crm";
 export * from "./repositories/relationships";
 export * from "./repositories/ingestion";
 export * from "./repositories/deals";
+export * from "./repositories/outreach";
