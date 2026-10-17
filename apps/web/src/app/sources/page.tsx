@@ -147,7 +147,7 @@ function SourceDetail({ id, onChange }: { id: string; onChange: () => void }) {
             )}
             {error && <span style={{ fontSize: tokens.fontSize.sm, color: tonePalette.danger.fg }}>{error}</span>}
           </div>
-          {s.kind === "apify_actor" && <ApifySourcePanel id={s.id} active={s.status === "active"} onChange={() => {
+          {s.kind === "apify_actor" && <ApifySourcePanel id={s.id} active={s.status === "active"} minIntervalMinutes={s.min_interval_minutes} maxDailyUsd={s.max_daily_usd} onChange={() => {
             detail.reload();
             onChange();
           }} />}

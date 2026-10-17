@@ -153,7 +153,7 @@ export function RegisterApifySource({ onDone }: { onDone: () => void }) {
 }
 
 /** An actor source's configuration, runs and quarantine, inside its Source Registry detail. */
-export function ApifySourcePanel({ id, active, onChange }: { id: string; active: boolean; onChange: () => void }) {
+export function ApifySourcePanel({ id, active, onChange, minIntervalMinutes, maxDailyUsd }: { id: string; active: boolean; onChange: () => void; minIntervalMinutes: number | null; maxDailyUsd: number | null }) {
   const detail = useAsync(() => api.apifySource(id), [id]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -161,6 +161,10 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
   const [mapText, setMapText] = useState("");
   const [inputText, setInputText] = useState("");
   const [planText, setPlanText] = useState("");
+  const [itemsText, setItemsText] = useState("");
+  const [chargeText, setChargeText] = useState("");
+  const [intervalText, setIntervalText] = useState("");
+  const [dailyText, setDailyText] = useState("");
 
   async function act(fn: () => Promise<unknown>, done: string) {
     setBusy(true);
@@ -200,6 +204,10 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
                   setMapText(JSON.stringify(d.config.fieldMap, null, 2));
                   setInputText(JSON.stringify(d.config.input ?? {}, null, 2));
                   setPlanText(d.config.searchPlan ? JSON.stringify(d.config.searchPlan, null, 2) : "");
+                  setItemsText(d.config.maxItems ? String(d.config.maxItems) : "");
+                  setChargeText(d.config.maxChargeUsd ? String(d.config.maxChargeUsd) : "");
+                  setIntervalText(minIntervalMinutes ? String(minIntervalMinutes) : "");
+                  setDailyText(maxDailyUsd ? String(maxDailyUsd) : "");
                   setEditing(true);
                 }}
               >
@@ -212,6 +220,20 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
         {message && <div style={{ fontSize: tokens.fontSize.sm, marginBottom: tokens.space.sm }}>{message}</div>}
         {editing ? (
           <div className="oos-stack" style={{ gap: tokens.space.md }}>
+            <div style={{ display: "grid", gap: tokens.space.md, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+              <Field label="Items per run (max 1000)" htmlFor={`mi-${id}`}>
+                <Input id={`mi-${id}`} type="number" min={1} max={1000} value={itemsText} onChange={(e) => setItemsText(e.target.value)} />
+              </Field>
+              <Field label="Cost cap per run (USD)" htmlFor={`mc-${id}`} hint="Also limited by the daily caps.">
+                <Input id={`mc-${id}`} type="number" min={0.01} step={0.01} value={chargeText} onChange={(e) => setChargeText(e.target.value)} />
+              </Field>
+              <Field label="Minutes between runs" htmlFor={`mn-${id}`}>
+                <Input id={`mn-${id}`} type="number" min={1} value={intervalText} onChange={(e) => setIntervalText(e.target.value)} />
+              </Field>
+              <Field label="Daily cap for this source (USD)" htmlFor={`md-${id}`} hint="Every Apify source together stays under APIFY_DAILY_BUDGET_USD.">
+                <Input id={`md-${id}`} type="number" min={0.01} step={0.01} value={dailyText} onChange={(e) => setDailyText(e.target.value)} />
+              </Field>
+            </div>
             <Field label="Actor input (JSON)" htmlFor={`ai-${id}`}>
               <Textarea id={`ai-${id}`} value={inputText} onChange={(e) => setInputText(e.target.value)} style={{ fontFamily: "monospace", minHeight: 90 }} />
             </Field>
@@ -236,6 +258,10 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
                         input: parseJson<Record<string, unknown>>(inputText, "Actor input"),
                         fieldMap: parseJson<ApifyFieldMapInput>(mapText, "Field map"),
                         searchPlan: planText.trim() ? parseJson<Record<string, unknown>>(planText, "Search plan") : null,
+                        maxItems: itemsText ? Number(itemsText) : null,
+                        maxChargeUsd: chargeText ? Number(chargeText) : null,
+                        minIntervalMinutes: intervalText ? Number(intervalText) : null,
+                        maxDailyUsd: dailyText ? Number(dailyText) : null,
                       }),
                     "Saved.",
                   );

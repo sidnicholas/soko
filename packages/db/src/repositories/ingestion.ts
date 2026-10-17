@@ -23,6 +23,12 @@ export interface ApifySourceConfig {
   searchPlan?: unknown;
 }
 
+/** Scheduling and spend limits an actor's configuration may also change. */
+export interface ApifySourceLimits {
+  minIntervalMinutes?: number | null;
+  maxDailyUsd?: number | null;
+}
+
 export interface ApifySource extends RegistrySource {
   apify_input: unknown;
   apify_field_map: unknown;
@@ -101,7 +107,7 @@ export async function registerApifySource(
  * program fetching the site: an active source goes back to `proposed` for a
  * new review.
  */
-export async function updateApifyConfig(sourceId: string, cfg: Partial<ApifySourceConfig>, actor: SourceActor): Promise<ApifySource | undefined> {
+export async function updateApifyConfig(sourceId: string, cfg: Partial<ApifySourceConfig> & ApifySourceLimits, actor: SourceActor): Promise<ApifySource | undefined> {
   const done = await getDb()
     .transaction()
     .execute(async (tx) => {
@@ -119,6 +125,8 @@ export async function updateApifyConfig(sourceId: string, cfg: Partial<ApifySour
           ...(cfg.maxItems !== undefined ? { apify_max_items: cfg.maxItems } : {}),
           ...(cfg.maxChargeUsd !== undefined ? { apify_max_charge_usd: cfg.maxChargeUsd } : {}),
           ...(cfg.searchPlan !== undefined ? { apify_search: cfg.searchPlan ? json(cfg.searchPlan) : null } : {}),
+          ...(cfg.minIntervalMinutes !== undefined ? { min_interval_minutes: cfg.minIntervalMinutes } : {}),
+          ...(cfg.maxDailyUsd !== undefined ? { max_daily_usd: cfg.maxDailyUsd } : {}),
           ...(programChanged && before.status === "active" ? { status: "proposed", status_reason: "apify_actor_changed_needs_review", terms_reviewed_at: null } : {}),
           updated_at: sql`now()`,
         })

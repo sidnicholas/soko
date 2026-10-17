@@ -416,6 +416,8 @@ export interface RegistrySource {
   health: "unknown" | "ok" | "degraded" | "failing";
   consecutive_failures: number;
   last_run_at: string | null;
+  min_interval_minutes: number | null;
+  max_daily_usd: number | null;
   policy_gaps: string[];
   yield: { searches: number; results: number; leads: number; actionable: number; errors: number; costUsd: number; lastRunAt: string | null } | null;
 }
@@ -837,7 +839,7 @@ export const api = {
   apifyStatus: () => request<{ configured: boolean; webhook: boolean; dailyBudgetUsd: number; categories: string[] }>("/ingestion/apify/status"),
   registerApifySource: (body: ApifySourceInput) => request<RegistrySource>("/ingestion/apify/sources", jsonBody(body)),
   apifySource: (id: string) => request<ApifySourceDetail>(`/ingestion/apify/sources/${id}`),
-  configureApifySource: (id: string, body: Partial<Pick<ApifySourceInput, "actorId" | "actorVersion" | "input" | "fieldMap" | "expectedFields" | "maxItems" | "maxChargeUsd" | "searchPlan">>) =>
+  configureApifySource: (id: string, body: Partial<Pick<ApifySourceInput, "actorId" | "actorVersion" | "input" | "fieldMap" | "expectedFields" | "maxItems" | "maxChargeUsd" | "searchPlan" | "minIntervalMinutes" | "maxDailyUsd">>) =>
     request<RegistrySource>(`/ingestion/apify/sources/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   runApifySource: (id: string) => request<ApifyRunRow>(`/ingestion/apify/sources/${id}/run`, jsonBody({})),
   quarantine: () => request<QuarantinedItem[]>("/ingestion/quarantine"),

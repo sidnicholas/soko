@@ -45,6 +45,8 @@ export const ApifyConfigSchema = z.object({
   maxItems: z.number().int().positive().max(1000).nullable().optional(),
   maxChargeUsd: z.number().positive().max(100).nullable().optional(),
   searchPlan: z.record(z.unknown()).nullable().optional(),
+  minIntervalMinutes: z.number().int().positive().max(43_200).nullable().optional(),
+  maxDailyUsd: z.number().positive().max(100).nullable().optional(),
 });
 export type ApifyConfigBody = z.infer<typeof ApifyConfigSchema>;
 
