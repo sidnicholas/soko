@@ -89,4 +89,5 @@ Recorded 2026-10-16.
 | Contact system of record | Opportunity OS (2026-10-17) | Organizations, people, channels, consent, provenance, retention and purge live in Opportunity OS (PRD FR-06); when a deal is elevated, its person and organization are created or updated in Pipedrive and linked (ADR-040). Pipedrive is never the source of contact truth. |
 | Counterparty accounts | Not decided | Invitation-only deal rooms assumed until decided. |
 | Escrow / insurance providers, freight classes | Not decided | Needed before P3/P4 slices that use them. |
+| Sources without permission | Owner may accept the risk (2026-10-17) | `owner_risk_acceptance` basis for Apify actors only, admin-only, a written note, at most 90 days, recorded as such (ADR-043). First use: `apify~facebook-marketplace-scraper`, against Meta's terms; seller identity not stored. |
 | Model cost | Use comparable open-weight models | Both model tiers move to open-weight models through OpenRouter (detection DeepSeek V4 Flash, assessment DeepSeek V4 Pro), with Claude as the fallback when the host fails. Compare quality on `/yield` and the queue before treating as settled. |

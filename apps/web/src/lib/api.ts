@@ -420,7 +420,7 @@ export interface RegistrySource {
   yield: { searches: number; results: number; leads: number; actionable: number; errors: number; costUsd: number; lastRunAt: string | null } | null;
 }
 
-export type PermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract";
+export type PermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract" | "owner_risk_acceptance";
 
 export interface RegistrySourceDetail extends RegistrySource {
   reviews: { id: string; decision: "approved" | "rejected"; permission_basis: string; robots_tos_assessment: string | null; data_use_constraints: string | null; terms_review_due_at: string | null; notes: string | null; reviewer_label: string | null; created_at: string }[];

@@ -55,6 +55,8 @@ export class SourcesController {
   @ApiOperation({ summary: "Record a permission-policy review; approval activates the source when the policy is satisfied" })
   async review(@CurrentUser() user: Principal, @Param("id", ParseUUIDPipe) id: string, @ZodBody(SourceReviewSchema) body: SourceReviewBody) {
     requirePermission(user, "source:review");
+    // Running a source with no permission is the owner's decision to take, not an operator's (ADR-043).
+    if (body.decision === "approved" && body.permission_basis === "owner_risk_acceptance") requirePermission(user, "source:accept_risk");
     return this.sources.review(id, body, { type: "user", id: user.userId });
   }
 

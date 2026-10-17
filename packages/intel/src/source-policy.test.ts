@@ -39,6 +39,11 @@ describe("policyGaps (PRD v2 FR-01: no activation until the permission policy is
     expect(
       policyGaps({ ...reviewed, kind: "apify_actor", permission_basis: "written_permission", data_use_constraints: "listings only", apify_actor_id: "acme/scraper", apify_actor_version: "1.2.3" }, now),
     ).toEqual([]);
+    // No permission, the owner accepting the risk (ADR-043): actors only, at most 90 days.
+    const accepted = { ...reviewed, kind: "apify_actor" as const, permission_basis: "owner_risk_acceptance" as const, data_use_constraints: "listings only", apify_actor_id: "apify~fb", apify_actor_version: "1.0.4" };
+    expect(policyGaps({ ...accepted, terms_reviewed_at: now.toISOString(), terms_review_due_at: new Date(now.getTime() + 90 * 86_400_000).toISOString() }, now)).toEqual([]);
+    expect(policyGaps({ ...accepted, terms_reviewed_at: now.toISOString(), terms_review_due_at: new Date(now.getTime() + 180 * 86_400_000).toISOString() }, now)).toEqual(["risk_acceptance_over_90_days"]);
+    expect(policyGaps({ ...reviewed, kind: "search_venue", permission_basis: "owner_risk_acceptance" }, now)).toContain("permission_basis_not_allowed_for_search_venue");
     // "latest" is a moving tag, not the build that was reviewed.
     expect(
       policyGaps({ ...reviewed, kind: "apify_actor", permission_basis: "written_permission", data_use_constraints: "listings only", apify_actor_id: "acme/scraper", apify_actor_version: "latest" }, now),

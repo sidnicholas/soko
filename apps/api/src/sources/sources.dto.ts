@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const SourceReviewSchema = z.object({
   decision: z.enum(["approved", "rejected"]),
-  permission_basis: z.enum(["none", "public_search_index", "official_api_terms", "written_permission", "provider_contract"]),
+  permission_basis: z.enum(["none", "public_search_index", "official_api_terms", "written_permission", "provider_contract", "owner_risk_acceptance"]),
   robots_tos_assessment: z.string().trim().min(1).max(2000).nullable().optional(),
   data_use_constraints: z.string().trim().min(1).max(2000).nullable().optional(),
   /** When the review lapses; defaults to 180 days from now. */

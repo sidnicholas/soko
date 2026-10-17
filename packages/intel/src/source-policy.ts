@@ -4,10 +4,10 @@
  * (ADR-015): a model may suggest a source, never clear it.
  */
 
-export const SOURCE_POLICY_VERSION = "source-policy-1";
+export const SOURCE_POLICY_VERSION = "source-policy-2";
 
 export type SourceKind = "search_venue" | "connector" | "apify_actor";
-export type PermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract";
+export type PermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract" | "owner_risk_acceptance";
 export type RegistryStatus = "proposed" | "active" | "paused" | "rejected";
 
 /** The registry fields the policy reads. */
@@ -30,8 +30,13 @@ const ALLOWED_BASES: Record<SourceKind, readonly PermissionBasis[]> = {
   connector: ["official_api_terms", "written_permission", "provider_contract"],
   // An actor fetches the site, so the site's terms must allow it explicitly
   // (PRD §3.6: an actor does not transfer scraping compliance responsibility).
-  apify_actor: ["written_permission", "provider_contract", "official_api_terms"],
+  // owner_risk_acceptance (ADR-043): no permission exists and the owner runs
+  // it anyway, accepting the risk. Recorded as that, never as a permission.
+  apify_actor: ["written_permission", "provider_contract", "official_api_terms", "owner_risk_acceptance"],
 };
+
+/** The longest an owner's risk acceptance stays valid before someone must accept it again. */
+export const RISK_ACCEPTANCE_MAX_DAYS = 90;
 
 /** Days a review stays valid when the reviewer gives no due date. */
 export const DEFAULT_REVIEW_DAYS = 180;
@@ -53,6 +58,7 @@ export function policyGaps(s: PolicySource, now: Date = new Date()): string[] {
   const due = time(s.terms_review_due_at);
   if (reviewed === null) gaps.push("terms_not_reviewed");
   else if (due === null || due <= now.getTime()) gaps.push("terms_review_expired");
+  else if (s.permission_basis === "owner_risk_acceptance" && due - reviewed > RISK_ACCEPTANCE_MAX_DAYS * 86_400_000 + 60_000) gaps.push("risk_acceptance_over_90_days");
   if (s.kind === "apify_actor") {
     if (!s.data_use_constraints?.trim()) gaps.push("no_data_use_constraints");
     // "latest" moves under us: the reviewed program must be one fixed build.

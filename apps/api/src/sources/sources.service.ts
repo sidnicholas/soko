@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   getSource,
   listSourceReviews,
@@ -12,7 +12,7 @@ import {
   type RegistrySource,
   type SourceActor,
 } from "@opportunity-os/db";
-import { DEFAULT_REVIEW_DAYS, SOURCE_POLICY_VERSION, policyGaps, vetSource, type SubmittedSource } from "@opportunity-os/intel";
+import { DEFAULT_REVIEW_DAYS, RISK_ACCEPTANCE_MAX_DAYS, SOURCE_POLICY_VERSION, policyGaps, vetSource, type SubmittedSource } from "@opportunity-os/intel";
 import type { SourceReviewBody } from "./sources.dto";
 
 const POLICY = { policyGaps: (s: RegistrySource) => policyGaps(s), policyVersion: SOURCE_POLICY_VERSION };
@@ -77,7 +77,10 @@ export class SourcesService {
 
   /** Records a permission-policy review; approval activates the source only when the policy is then satisfied. */
   async review(id: string, body: SourceReviewBody, reviewer: SourceActor) {
-    const due = body.terms_review_due_at ?? new Date(Date.now() + DEFAULT_REVIEW_DAYS * 86_400_000).toISOString();
+    const risk = body.permission_basis === "owner_risk_acceptance";
+    // An owner accepting the risk says what risk, in their own words (ADR-043).
+    if (risk && body.decision === "approved" && !body.notes?.trim()) throw new BadRequestException("Accepting the risk needs a note saying what risk is accepted and why");
+    const due = body.terms_review_due_at ?? new Date(Date.now() + (risk ? RISK_ACCEPTANCE_MAX_DAYS : DEFAULT_REVIEW_DAYS) * 86_400_000).toISOString();
     const result = await reviewSource({
       sourceId: id,
       decision: body.decision,

@@ -38,7 +38,9 @@ export type Permission =
   /** ADR-040: connect the CRM (register its webhook). Admin only. */
   | "crm:configure"
   /** ADR-041: delete a contact and everything about it (data-subject deletion). Never granted to agents. */
-  | "contact:delete";
+  | "contact:delete"
+  /** ADR-043: run an Apify actor without the site's permission, accepting the legal risk. Admin only, never agents. */
+  | "source:accept_risk";
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   user: ["mission:create", "mission:read", "mission:update", "mission:archive", "opportunity:read", "transaction:read", "signal:submit"],
@@ -91,6 +93,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "source:review",
     "crm:configure",
     "contact:delete",
+    "source:accept_risk",
   ],
   service: ["settlement:execute", "settlement:release", "settlement:dispute", "asset_transfer:execute", "audit:read"],
   // Agents may propose but never approve, send, or move money (§8, §13.5).

@@ -211,6 +211,25 @@ describe.skipIf(!HAS_DB)("Apify ingestion (live postgres, stubbed Apify)", () =>
     expect(source).toMatchObject({ status: "paused", status_reason: "failing", health: "failing" });
   });
 
+  it("activates an actor on the owner's risk acceptance for at most 90 days, recorded as that", async () => {
+    const other = await registerApifySource(
+      {
+        name: `Risky ${RUN}`, domain: `risky-${RUN}.example.com`, orientation: "supply", notes: null, evidenceUrl: null, minIntervalMinutes: null, maxDailyUsd: null,
+        actorId: `apify~risky-${RUN}`, actorVersion: "1.0.4", input: {}, fieldMap: { kind: "supply", externalId: "id", title: "title" }, expectedFields: null, maxItems: 10, maxChargeUsd: 0.1,
+      },
+      STAFF,
+    );
+    const review = (days: number) =>
+      reviewSource({
+        sourceId: other.id, decision: "approved", permissionBasis: "owner_risk_acceptance", robotsTosAssessment: "Site terms prohibit automated collection; no API.",
+        dataUseConstraints: "Listing fields only, no seller identity.", termsReviewDueAt: new Date(Date.now() + days * 86_400_000).toISOString(),
+        notes: "Owner accepts the terms-of-service risk for this source.", reviewer: STAFF, reviewerLabel: null, ...POLICY,
+      });
+    expect((await review(180))!).toMatchObject({ source: { status: "proposed" }, gaps: ["risk_acceptance_over_90_days"] });
+    expect((await review(90))!).toMatchObject({ source: { status: "active", permission_basis: "owner_risk_acceptance" }, gaps: [] });
+    await getDb().deleteFrom("source_registry").where("id", "=", other.id).execute();
+  });
+
   it("refuses to start when today's budget is spent", async () => {
     await getDb().updateTable("source_registry").set({ status: "active", status_reason: null, consecutive_failures: 0 }).where("id", "=", sourceId).execute();
     await getDb().updateTable("apify_runs").set({ retry_after: null }).where("source_id", "=", sourceId).execute();

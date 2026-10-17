@@ -21,6 +21,7 @@ const BASES: { value: PermissionBasis; label: string }[] = [
   { value: "official_api_terms", label: "Official API under its terms" },
   { value: "written_permission", label: "Written permission from the site" },
   { value: "provider_contract", label: "Contract with a data provider" },
+  { value: "owner_risk_acceptance", label: "No permission: owner accepts the risk (admin, max 90 days)" },
   { value: "none", label: "None" },
 ];
 
@@ -64,7 +65,16 @@ function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
   return (
     <div style={{ display: "grid", gap: tokens.space.md, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
       <Field label="Permission basis" htmlFor={`basis-${s.id}`}>
-        <Select id={`basis-${s.id}`} value={basis} onChange={(e) => setBasis(e.target.value as PermissionBasis)}>
+        <Select
+          id={`basis-${s.id}`}
+          value={basis}
+          onChange={(e) => {
+            const next = e.target.value as PermissionBasis;
+            setBasis(next);
+            // A risk acceptance lasts at most 90 days (ADR-043).
+            if (next === "owner_risk_acceptance") setDue(new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10));
+          }}
+        >
           {BASES.map((b) => (
             <option key={b.value} value={b.value}>
               {b.label}
@@ -81,7 +91,11 @@ function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
       <Field label="Data-use constraints" htmlFor={`use-${s.id}`} hint="What may be kept and for how long. Required for Apify actors.">
         <Textarea id={`use-${s.id}`} value={dataUse} onChange={(e) => setDataUse(e.target.value)} />
       </Field>
-      <Field label="Notes" htmlFor={`notes-${s.id}`}>
+      <Field
+        label={basis === "owner_risk_acceptance" ? "Risk accepted (required)" : "Notes"}
+        htmlFor={`notes-${s.id}`}
+        hint={basis === "owner_risk_acceptance" ? "The site does not permit this. Say what risk you accept and why; it is kept in the review history and audit log. Admins only." : undefined}
+      >
         <Input id={`notes-${s.id}`} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Field>
       <div style={{ display: "flex", gap: tokens.space.sm, alignItems: "flex-end", flexWrap: "wrap" }}>

@@ -19,7 +19,7 @@ const json = (v: unknown) => JSON.stringify(v ?? null);
 
 export type RegistryKind = "search_venue" | "connector" | "apify_actor";
 export type RegistryStatus = "proposed" | "active" | "paused" | "rejected";
-export type RegistryPermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract";
+export type RegistryPermissionBasis = "none" | "public_search_index" | "official_api_terms" | "written_permission" | "provider_contract" | "owner_risk_acceptance";
 
 export interface RegistrySource {
   id: string;
