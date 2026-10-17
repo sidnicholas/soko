@@ -36,7 +36,9 @@ export type Permission =
   /** PRD v2 FR-01: record a source's permission-policy review and change its status. Never granted to agents. */
   | "source:review"
   /** ADR-040: connect the CRM (register its webhook). Admin only. */
-  | "crm:configure";
+  | "crm:configure"
+  /** ADR-041: delete a contact and everything about it (data-subject deletion). Never granted to agents. */
+  | "contact:delete";
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   user: ["mission:create", "mission:read", "mission:update", "mission:archive", "opportunity:read", "transaction:read", "signal:submit"],
@@ -59,6 +61,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "signal:submit",
     "outcome:record",
     "source:review",
+    "contact:delete",
   ],
   reviewer: ["mission:read", "opportunity:read", "approval:read", "approval:decide", "audit:read"],
   admin: [
@@ -87,6 +90,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "outcome:record",
     "source:review",
     "crm:configure",
+    "contact:delete",
   ],
   service: ["settlement:execute", "settlement:release", "settlement:dispute", "asset_transfer:execute", "audit:read"],
   // Agents may propose but never approve, send, or move money (§8, §13.5).

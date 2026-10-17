@@ -30,3 +30,4 @@ export * from "./repositories/sources";
 export * from "./repositories/hypotheses";
 export * from "./repositories/economics";
 export * from "./repositories/crm";
+export * from "./repositories/relationships";

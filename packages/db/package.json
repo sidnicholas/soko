@@ -21,6 +21,7 @@
     "@opportunity-os/contracts": "workspace:*",
     "@opportunity-os/audit": "workspace:*",
     "@opportunity-os/domain": "workspace:*",
-    "@opportunity-os/config": "workspace:*"
+    "@opportunity-os/config": "workspace:*",
+    "@opportunity-os/relationship": "workspace:*"
   }
 }

@@ -58,6 +58,7 @@ export const EVENT_NAMES = [
   "opportunity.economics_updated.v1",
   "crm.deal_elevated.v1",
   "crm.deal_synced.v1",
+  "relationship.memory_updated.v1",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

@@ -48,7 +48,7 @@ without a success.
 
 - Pipedrive's basic auth travels over HTTPS only; the credentials are ours to
   rotate (re-register after changing them).
-- Persons and organizations are not created in Pipedrive yet: most leads have
-  no named contact. Add when contacts are resolved (PRD v2 FR-06).
+- Persons and organizations are copied to Pipedrive from Opportunity OS
+  contacts (ADR-041, 2026-10-17).
 - Non-USD deal values are noted on the candidate but not counted as realized
   USD revenue.

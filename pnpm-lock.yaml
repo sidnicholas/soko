@@ -329,6 +329,9 @@ importers:
       '@opportunity-os/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@opportunity-os/relationship':
+        specifier: workspace:*
+        version: link:../../packages/relationship
       '@opportunity-os/scoring':
         specifier: workspace:*
         version: link:../../packages/scoring
@@ -485,6 +488,9 @@ importers:
       '@opportunity-os/domain':
         specifier: workspace:*
         version: link:../domain
+      '@opportunity-os/relationship':
+        specifier: workspace:*
+        version: link:../relationship
       '@types/pg':
         specifier: ^8.11.10
         version: 8.23.1
@@ -614,6 +620,8 @@ importers:
       pino:
         specifier: ^9.5.0
         version: 9.14.0
+
+  packages/relationship: {}
 
   packages/risk:
     dependencies:

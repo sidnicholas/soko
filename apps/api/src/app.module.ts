@@ -20,6 +20,7 @@ import { AnalyticsModule } from "./analytics/analytics.module";
 import { SourcesModule } from "./sources/sources.module";
 import { IntelligenceModule } from "./intelligence/intelligence.module";
 import { CrmModule } from "./crm/crm.module";
+import { RelationshipsModule } from "./relationships/relationships.module";
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { CrmModule } from "./crm/crm.module";
     SourcesModule,
     IntelligenceModule,
     CrmModule,
+    RelationshipsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })

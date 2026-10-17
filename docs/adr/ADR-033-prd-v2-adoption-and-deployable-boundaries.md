@@ -54,3 +54,11 @@ the code (its §1 says so).
   live rails yet, and enabling one requires revisiting this.
 - Product decisions in PRD §17 (jurisdictions, channels, exposure caps,
   providers, retention) gate P1–P4 slices that depend on them.
+
+## Exceptions recorded
+
+- 2026-10-17: the product owner started P2 slice 1 (contacts and consent)
+  before the P1 gate review. P1 slices 1–3 are live and measured; the gate
+  review (verified leads per dollar against the Brave baseline) still runs
+  on the next day's data and its result is recorded in the PRD plan. Outreach
+  (P2 slice 2) does not start until that review passes.

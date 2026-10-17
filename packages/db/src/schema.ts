@@ -158,6 +158,82 @@ export interface CounterpartiesTable {
   risk_flags_json: Json;
   transaction_stats_json: Json;
   created_at: Timestamp;
+  // 0030: relationships (ADR-041).
+  display_name: string | null;
+  organization_id: string | null;
+  role_title: string | null;
+  website: string | null;
+  location: string | null;
+  source_type: string | null;
+  source_url: string | null;
+  status: Generated<string>;
+  last_activity_at: Timestamp;
+  archived_at: Timestamp | null;
+  freshness_checked_at: Timestamp | null;
+  freshness_due_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface ContactChannelsTable {
+  id: Generated<string>;
+  counterparty_id: string;
+  kind: string;
+  value: string;
+  normalized_value: string;
+  label: string | null;
+  is_primary: Generated<boolean>;
+  status: Generated<string>;
+  source_label: Generated<string>;
+  source_url: string | null;
+  verified_at: Timestamp | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface ContactConsentsTable {
+  id: Generated<string>;
+  counterparty_id: string;
+  channel_kind: string;
+  purpose: string;
+  status: string;
+  basis: string;
+  evidence: string | null;
+  recorded_by: string | null;
+  recorded_at: Generated<Timestamp>;
+  expires_at: Timestamp | null;
+}
+
+export interface ContactSuppressionsTable {
+  identifier_hash: string;
+  kind: string;
+  reason: string;
+  created_at: Generated<Timestamp>;
+}
+
+export interface RelationshipMemoriesTable {
+  id: Generated<string>;
+  counterparty_id: string;
+  kind: string;
+  content: string;
+  source_type: string;
+  source_ref: string | null;
+  source_label: string;
+  confidence: Numeric;
+  access: Generated<string>;
+  observed_at: Timestamp | null;
+  expires_at: Timestamp | null;
+  status: Generated<string>;
+  superseded_by: string | null;
+  created_by: string | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface CounterpartyLinksTable {
+  id: Generated<string>;
+  counterparty_id: string;
+  subject_type: string;
+  subject_id: string;
+  role: string;
+  created_at: Generated<Timestamp>;
 }
 
 export interface ApprovalsTable {
@@ -673,6 +749,11 @@ export interface Database {
   matches: MatchesTable;
   opportunities: OpportunitiesTable;
   counterparties: CounterpartiesTable;
+  contact_channels: ContactChannelsTable;
+  contact_consents: ContactConsentsTable;
+  contact_suppressions: ContactSuppressionsTable;
+  relationship_memories: RelationshipMemoriesTable;
+  counterparty_links: CounterpartyLinksTable;
   approvals: ApprovalsTable;
   negotiations: NegotiationsTable;
   transactions: TransactionsTable;

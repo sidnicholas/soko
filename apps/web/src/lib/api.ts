@@ -584,6 +584,140 @@ export interface IntelOutcomeInput {
   note?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Relationships (PRD v2 FR-06, ADR-041)
+
+export type PartyType = "person" | "organization";
+export type ChannelKind = "email" | "phone" | "website" | "marketplace_profile" | "social" | "address" | "other";
+export type ConsentChannel = "email" | "phone" | "sms" | "whatsapp" | "any";
+export type ConsentPurpose = "outreach" | "call_recording" | "marketing";
+export type ConsentStatus = "granted" | "denied" | "opted_out";
+export type ConsentBasis = "explicit" | "public_business_contact" | "existing_relationship" | "none";
+export type MemoryKind = "fact" | "preference" | "commitment" | "objection" | "red_flag" | "buying_cycle" | "outcome" | "note";
+export type MemoryLabel = "source_fact" | "inference" | "estimate" | "unknown";
+export type LinkSubject = "intel_lead" | "intel_candidate" | "opportunity" | "offnetwork_match";
+export type LinkRole = "buyer" | "seller" | "provider" | "decision_maker" | "other";
+
+export interface Party {
+  id: string;
+  type: PartyType;
+  display_name: string;
+  organization_id: string | null;
+  organization_name: string | null;
+  role_title: string | null;
+  website: string | null;
+  location: string | null;
+  source_type: string | null;
+  source_url: string | null;
+  status: "active" | "archived";
+  last_activity_at: string;
+  archived_at: string | null;
+  freshness_checked_at: string | null;
+  freshness_due_at: string | null;
+  created_at: string;
+}
+
+export interface ContactChannel {
+  id: string;
+  kind: ChannelKind;
+  value: string;
+  normalized_value: string;
+  label: string | null;
+  is_primary: boolean;
+  status: "active" | "invalid" | "bounced";
+  source_label: "source_fact" | "inference" | "unknown";
+  source_url: string | null;
+  verified_at: string | null;
+}
+
+export interface ContactConsent {
+  id: string;
+  channel_kind: ConsentChannel;
+  purpose: ConsentPurpose;
+  status: ConsentStatus;
+  basis: ConsentBasis;
+  evidence: string | null;
+  recorded_at: string;
+  expires_at: string | null;
+}
+
+export interface RelationshipMemory {
+  id: string;
+  kind: MemoryKind;
+  content: string;
+  source_type: string;
+  source_ref: string | null;
+  source_label: MemoryLabel;
+  confidence: number;
+  access: "internal" | "restricted";
+  observed_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export interface PartyLink {
+  id: string;
+  subject_type: LinkSubject;
+  subject_id: string;
+  role: LinkRole;
+  created_at: string;
+}
+
+export interface PartyDetail {
+  party: Party;
+  channels: ContactChannel[];
+  consents: ContactConsent[];
+  outreach: { channel_kind: ConsentChannel; status: ConsentStatus | "none"; basis: ConsentBasis | null }[];
+  memories: RelationshipMemory[];
+  links: PartyLink[];
+  members: { id: string; display_name: string; role_title: string | null; status: string }[];
+  crm: { external_id: string | null; external_url: string | null } | null;
+}
+
+export type PartyListItem = Party & { channel_count: number; memory_count: number };
+export type SubjectParty = Party & { role: LinkRole; link_id: string; channels: ContactChannel[] };
+
+export interface ChannelInput {
+  kind: ChannelKind;
+  value: string;
+  label?: string | null;
+  isPrimary?: boolean;
+  sourceLabel?: "source_fact" | "inference" | "unknown";
+  sourceUrl?: string | null;
+}
+
+export interface CreatePartyInput {
+  type: PartyType;
+  displayName: string;
+  organizationId?: string | null;
+  roleTitle?: string | null;
+  website?: string | null;
+  location?: string | null;
+  sourceType?: "operator" | "lead" | "candidate" | "crm";
+  sourceUrl?: string | null;
+  channels?: ChannelInput[];
+  link?: { subjectType: LinkSubject; subjectId: string; role: LinkRole };
+}
+
+export interface ConsentInput {
+  channelKind: ConsentChannel;
+  purpose: ConsentPurpose;
+  status: ConsentStatus;
+  basis: ConsentBasis;
+  evidence?: string | null;
+  expiresAt?: string | null;
+}
+
+export interface MemoryInput {
+  kind: MemoryKind;
+  content: string;
+  sourceType?: "lead" | "candidate" | "operator" | "conversation" | "call" | "crm";
+  sourceRef?: string | null;
+  sourceLabel?: MemoryLabel;
+  confidence?: number;
+  access?: "internal" | "restricted";
+}
+
 export const api = {
   me: () => request<Me>("/me"),
 
@@ -601,6 +735,28 @@ export const api = {
   pipedriveStatus: () => request<{ configured: boolean; webhookAuth: boolean; webhookRegistered: boolean | null; companyDomain: string | null }>("/crm/pipedrive/status"),
   registerPipedriveWebhook: () => request<{ registered: boolean; created: boolean; id: number }>("/crm/pipedrive/webhook", jsonBody({})),
   elevateToPipedrive: (candidateId: string) => request<{ created: boolean; link: { external_url: string | null; external_status: string } }>(`/crm/pipedrive/candidates/${candidateId}`, jsonBody({})),
+
+  // Relationships (PRD v2 FR-06, ADR-041)
+  listParties: (opts: { status?: "active" | "archived"; type?: PartyType; q?: string } = {}) => {
+    const qs = new URLSearchParams(Object.entries(opts).filter((e): e is [string, string] => !!e[1])).toString();
+    return request<PartyListItem[]>(`/relationships${qs ? `?${qs}` : ""}`);
+  },
+  getParty: (id: string) => request<PartyDetail>(`/relationships/${id}`),
+  createParty: (body: CreatePartyInput, allowDuplicate = false) => request<PartyDetail>(`/relationships${allowDuplicate ? "?allowDuplicate=true" : ""}`, jsonBody(body)),
+  updateParty: (id: string, body: Partial<Pick<CreatePartyInput, "displayName" | "organizationId" | "roleTitle" | "website" | "location">>) => request<PartyDetail>(`/relationships/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  subjectParties: (type: LinkSubject, id: string) => request<SubjectParty[]>(`/relationships/subjects/${type}/${id}`),
+  addChannel: (id: string, body: ChannelInput) => request<ContactChannel>(`/relationships/${id}/channels`, jsonBody(body)),
+  setChannelStatus: (id: string, channelId: string, status: ContactChannel["status"]) => request<ContactChannel>(`/relationships/${id}/channels/${channelId}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  removeChannel: (id: string, channelId: string) => request<{ removed: boolean }>(`/relationships/${id}/channels/${channelId}`, { method: "DELETE" }),
+  recordConsent: (id: string, body: ConsentInput) => request<ContactConsent>(`/relationships/${id}/consents`, jsonBody(body)),
+  addMemory: (id: string, body: MemoryInput) => request<RelationshipMemory>(`/relationships/${id}/memories`, jsonBody(body)),
+  correctMemory: (id: string, memoryId: string, body: MemoryInput) => request<RelationshipMemory>(`/relationships/${id}/memories/${memoryId}/correct`, jsonBody(body)),
+  deleteMemory: (id: string, memoryId: string) => request<{ deleted: boolean }>(`/relationships/${id}/memories/${memoryId}`, { method: "DELETE" }),
+  linkParty: (id: string, body: { subjectType: LinkSubject; subjectId: string; role: LinkRole }) => request<PartyDetail>(`/relationships/${id}/links`, jsonBody(body)),
+  unlinkParty: (id: string, linkId: string) => request<{ removed: boolean }>(`/relationships/${id}/links/${linkId}`, { method: "DELETE" }),
+  restoreParty: (id: string) => request<PartyDetail>(`/relationships/${id}/restore`, jsonBody({})),
+  syncPartyToPipedrive: (id: string) => request<{ kind: "person" | "org"; id: number; url: string }>(`/relationships/${id}/crm`, jsonBody({})),
+  deleteParty: (id: string, confirmName: string) => request<{ deleted: boolean; crm: { deleted: boolean; error: string | null } | null }>(`/relationships/${id}/delete`, jsonBody({ confirmName })),
 
   // Source registry (PRD v2 FR-01)
   listSources: () => request<RegistrySource[]>("/sources"),

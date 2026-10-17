@@ -13,7 +13,7 @@ import { appendAuditEvent } from "./audit";
  */
 
 export type CrmProvider = "pipedrive";
-export type CrmSubject = "intel_candidate" | "opportunity" | "offnetwork_match";
+export type CrmSubject = "intel_candidate" | "opportunity" | "offnetwork_match" | "counterparty";
 export type CrmStatus = "creating" | "open" | "won" | "lost" | "deleted";
 
 export interface CrmLink {
@@ -150,7 +150,14 @@ export async function applyCrmDealEvent(e: CrmDealEvent): Promise<CrmEventOutcom
   return getDb()
     .transaction()
     .execute(async (tx) => {
-      const link = await tx.selectFrom("crm_links").select([...COLUMNS]).where("provider", "=", e.provider).where("external_id", "=", e.entityId).forUpdate().executeTakeFirst();
+      const link = await tx
+        .selectFrom("crm_links")
+        .select([...COLUMNS])
+        .where("provider", "=", e.provider)
+        .where("external_id", "=", e.entityId)
+        .where("subject_type", "<>", "counterparty")
+        .forUpdate()
+        .executeTakeFirst();
       if (!link) {
         // The CRM announces a deal we just created before our link to it is
         // saved (seen in production, 2026-10-17). While any elevation is in
@@ -162,6 +169,7 @@ export async function applyCrmDealEvent(e: CrmDealEvent): Promise<CrmEventOutcom
           .select("id")
           .where("provider", "=", e.provider)
           .where("external_id", "is", null)
+          .where("subject_type", "<>", "counterparty")
           .where(sql<boolean>`created_at > now() - interval '2 minutes'`)
           .executeTakeFirst();
         if (pending) {
@@ -233,4 +241,31 @@ export async function applyCrmDealEvent(e: CrmDealEvent): Promise<CrmEventOutcom
       });
       return "applied";
     });
+}
+
+/**
+ * A party's copy in the CRM (ADR-041). external_id is namespaced
+ * ("person:12", "org:7"): CRM ids are unique per entity type only, and the
+ * link table's external ids must not collide with deal ids.
+ */
+export async function saveCrmPartyLink(provider: CrmProvider, partyId: string, remote: { kind: "person" | "org"; id: string | number; url: string }, actorId: string | null): Promise<CrmLink> {
+  return getDb()
+    .transaction()
+    .execute(async (tx) => {
+      const externalId = `${remote.kind}:${remote.id}`;
+      const row = await tx
+        .insertInto("crm_links")
+        .values({ provider, subject_type: "counterparty", subject_id: partyId, external_id: externalId, external_url: remote.url, external_status: "open", elevated_by: actorId })
+        .onConflict((oc) => oc.columns(["provider", "subject_type", "subject_id"]).doUpdateSet({ external_id: externalId, external_url: remote.url, updated_at: sql`now()` }))
+        .returning(COLUMNS)
+        .executeTakeFirstOrThrow();
+      await appendAuditEvent(tx, { actorType: actorId ? "user" : "service", actorId, action: "crm.contact_synced", entityType: "counterparty", entityId: partyId });
+      return toLink(row);
+    });
+}
+
+/** Splits a party link's namespaced external id. */
+export function crmPartyRef(externalId: string | null): { kind: "person" | "org"; id: number } | null {
+  const m = /^(person|org):(\d+)$/.exec(externalId ?? "");
+  return m ? { kind: m[1] as "person" | "org", id: Number(m[2]) } : null;
 }

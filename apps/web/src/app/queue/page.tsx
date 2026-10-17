@@ -5,6 +5,7 @@ import { Badge, Button, Card, EmptyState, PageHeader, StatCard, tokens, type Ton
 import { api, type DealEconomics, type IntelCandidate, type IntelOutcomeInput, type IntelQueue, type RankingProfile } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
+import { SubjectContacts } from "../../components/Contacts";
 import Link from "next/link";
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
@@ -314,6 +315,19 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
       </div>
 
       <Evidence id={c.id} />
+
+      <SubjectContacts
+        subjectType="intel_candidate"
+        subjectId={c.id}
+        defaults={{
+          email: c.contact?.channel === "email" ? (c.contact.value ?? "") : "",
+          phone: c.contact?.channel === "phone" ? (c.contact.value ?? "") : "",
+          // The lead is the side the signal came from: supply is selling; demand and problems are buying.
+          role: c.match_kind === "supply_to_demand" ? "seller" : "buyer",
+          sourceType: "candidate",
+          sourceUrl: c.lead_url,
+        }}
+      />
 
       {(c.outreach.primary || c.outreach.secondary) && (
         <div className="oos-stack" style={{ gap: tokens.space.sm }}>

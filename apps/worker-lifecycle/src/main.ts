@@ -2,6 +2,7 @@ import { getConfig } from "@opportunity-os/config";
 import { closeDb } from "@opportunity-os/db";
 import { createLogger } from "@opportunity-os/observability";
 import { refreshCycle } from "./refresh";
+import { retentionCycle } from "./retention";
 
 const log = createLogger("worker-lifecycle");
 
@@ -23,6 +24,12 @@ async function main(): Promise<void> {
       log.error({ err: String(err) }, "lifecycle.refresh.failed");
       code = 1;
     }
+    try {
+      await retentionCycle();
+    } catch (err) {
+      log.error({ err: String(err) }, "lifecycle.retention.failed");
+      code = 1;
+    }
     await closeDb();
     process.exit(code);
   }
@@ -37,6 +44,11 @@ async function main(): Promise<void> {
       await refreshCycle(cfg.policy.supplyStaleMinutes, { graphArbitrageDeals: cfg.discovery.graphArbitrageDeals });
     } catch (err) {
       log.error({ err: String(err) }, "lifecycle.refresh.failed");
+    }
+    try {
+      await retentionCycle();
+    } catch (err) {
+      log.error({ err: String(err) }, "lifecycle.retention.failed");
     }
     const { promise, resolve } = Promise.withResolvers<void>();
     setTimeout(resolve, intervalMs);

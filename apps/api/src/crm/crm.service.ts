@@ -1,6 +1,19 @@
 import { ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { getConfig } from "@opportunity-os/config";
-import { abandonCrmLink, applyCrmDealEvent, beginCrmLink, completeCrmLink, getIntelCandidate, listEvidence, type CrmEventOutcome } from "@opportunity-os/db";
+import {
+  abandonCrmLink,
+  applyCrmDealEvent,
+  beginCrmLink,
+  completeCrmLink,
+  crmPartyRef,
+  getCrmLink,
+  getIntelCandidate,
+  getPartyDetail,
+  listEvidence,
+  listPartiesForSubject,
+  saveCrmPartyLink,
+  type CrmEventOutcome,
+} from "@opportunity-os/db";
 import { timingSafeStringEqual } from "../common/webhook-signature";
 import { dealNoteHtml, parsePipedriveDealEvent, pipedriveClient } from "./pipedrive";
 
@@ -63,12 +76,74 @@ export class CrmService {
       const [leadEvidence, candidateEvidence] = await Promise.all([listEvidence("intel_lead", c.lead_id), listEvidence("intel_candidate", c.id)]);
       const web = getConfig().auth.webOrigins[0];
       await pd.addNote(deal.id, dealNoteHtml(c as never, [...leadEvidence, ...candidateEvidence], web ? `${web.replace(/\/$/, "")}/queue` : null)).catch((err) => this.logger.warn(`pipedrive note for deal ${deal.id} failed: ${String(err)}`));
+      await this.attachCandidateParties(candidateId, actorId).catch((err) => this.logger.warn(`pipedrive contacts for deal ${deal.id} failed: ${String(err)}`));
       return { link: done, created: true };
     } catch (err) {
       // Only before the link is completed; afterwards abandon is a no-op (external_id is set).
       await abandonCrmLink(link.id);
       throw err;
     }
+  }
+
+  /** Whether Pipedrive is configured, so contact changes can be copied without failing the request. */
+  configured(): boolean {
+    const p = getConfig().crm.pipedrive;
+    return Boolean(p.companyDomain && p.apiToken);
+  }
+
+  /**
+   * Copies a party to Pipedrive (ADR-041): an organization, or a person with
+   * its organization copied first. Opportunity OS stays the record; the copy
+   * is created once and updated after.
+   */
+  async syncParty(partyId: string, actorId: string | null): Promise<{ kind: "person" | "org"; id: number; url: string }> {
+    const { pd } = this.client();
+    const detail = await getPartyDetail(partyId);
+    if (!detail) throw new NotFoundException("Contact not found");
+    const existing = crmPartyRef((await getCrmLink("pipedrive", "counterparty", partyId))?.external_id ?? null);
+    const { party, channels } = detail;
+    let remote: { kind: "person" | "org"; id: number; url: string };
+    if (party.type === "organization") {
+      const org = await pd.upsertOrganization({ name: party.display_name }, existing?.kind === "org" ? existing.id : undefined);
+      remote = { kind: "org", id: org.id, url: pd.organizationUrl(org.id) };
+    } else {
+      const orgId = party.organization_id ? (await this.syncParty(party.organization_id, actorId)).id : null;
+      const live = channels.filter((ch) => ch.status === "active");
+      const person = await pd.upsertPerson(
+        { name: party.display_name, orgId, emails: live.filter((ch) => ch.kind === "email").map((ch) => ch.value), phones: live.filter((ch) => ch.kind === "phone").map((ch) => ch.value) },
+        existing?.kind === "person" ? existing.id : undefined,
+      );
+      remote = { kind: "person", id: person.id, url: pd.personUrl(person.id) };
+    }
+    await saveCrmPartyLink("pipedrive", partyId, remote, actorId);
+    return remote;
+  }
+
+  /**
+   * Puts a candidate's contacts on its Pipedrive deal: each is copied, and the
+   * deal gets the first person and the first organization (or that person's).
+   * A no-op while the candidate has no deal.
+   */
+  async attachCandidateParties(candidateId: string, actorId: string | null): Promise<{ attached: boolean }> {
+    const deal = await getCrmLink("pipedrive", "intel_candidate", candidateId);
+    if (!deal?.external_id || !this.configured()) return { attached: false };
+    const parties = await listPartiesForSubject("intel_candidate", candidateId);
+    if (parties.length === 0) return { attached: false };
+    const synced = [];
+    for (const p of parties) synced.push({ party: p, remote: await this.syncParty(p.id, actorId) });
+    const person = synced.find((x) => x.remote.kind === "person");
+    let orgId = synced.find((x) => x.remote.kind === "org")?.remote.id ?? null;
+    if (!orgId && person?.party.organization_id) orgId = crmPartyRef((await getCrmLink("pipedrive", "counterparty", person.party.organization_id))?.external_id ?? null)?.id ?? null;
+    await this.client().pd.setDealParties(Number(deal.external_id), { personId: person?.remote.id ?? null, orgId });
+    return { attached: true };
+  }
+
+  /** Removes a deleted party's Pipedrive copy (data-subject deletion reaches the CRM too). */
+  async deletePartyCopy(externalId: string | null): Promise<boolean> {
+    const ref = crmPartyRef(externalId);
+    if (!ref || !this.configured()) return false;
+    await this.client().pd.deleteContact(ref.kind, ref.id);
+    return true;
   }
 
   /** Whether Pipedrive is configured and our webhook is registered there. */

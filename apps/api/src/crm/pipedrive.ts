@@ -19,6 +19,13 @@ export interface PipedriveDealInput {
   expectedCloseDate?: string | null;
 }
 
+export interface PipedrivePersonInput {
+  name: string;
+  orgId?: number | null;
+  emails: string[];
+  phones: string[];
+}
+
 export class PipedriveError extends Error {
   constructor(
     message: string,
@@ -55,6 +62,31 @@ export function pipedriveClient(cfg: PipedriveConfig) {
         ...(d.expectedCloseDate ? { expected_close_date: d.expectedCloseDate } : {}),
       });
       return data;
+    },
+    personUrl: (id: string | number) => `${base}/person/${id}`,
+    organizationUrl: (id: string | number) => `${base}/organization/${id}`,
+    /** Creates or updates a person (API v2). Only name, organization, emails and phones: other fields need Pipedrive's contact sync scope. */
+    async upsertPerson(p: PipedrivePersonInput, existingId?: number) {
+      const body = {
+        name: p.name.slice(0, 255),
+        ...(p.orgId !== undefined ? { org_id: p.orgId } : {}),
+        emails: p.emails.map((v, i) => ({ value: v, primary: i === 0, label: "work" })),
+        phones: p.phones.map((v, i) => ({ value: v, primary: i === 0, label: "work" })),
+      };
+      return existingId ? call<{ id: number }>("PATCH", `/api/v2/persons/${existingId}`, body) : call<{ id: number }>("POST", "/api/v2/persons", body);
+    },
+    async upsertOrganization(o: { name: string }, existingId?: number) {
+      const body = { name: o.name.slice(0, 255) };
+      return existingId ? call<{ id: number }>("PATCH", `/api/v2/organizations/${existingId}`, body) : call<{ id: number }>("POST", "/api/v2/organizations", body);
+    },
+    async deleteContact(kind: "person" | "org", id: number) {
+      return call<unknown>("DELETE", kind === "person" ? `/api/v2/persons/${id}` : `/api/v2/organizations/${id}`);
+    },
+    async setDealParties(dealId: number, parties: { personId?: number | null; orgId?: number | null }) {
+      return call<{ id: number }>("PATCH", `/api/v2/deals/${dealId}`, {
+        ...(parties.personId ? { person_id: parties.personId } : {}),
+        ...(parties.orgId ? { org_id: parties.orgId } : {}),
+      });
     },
     async addNote(dealId: number, html: string) {
       return call<{ id: number }>("POST", "/api/v1/notes", { deal_id: dealId, content: html });

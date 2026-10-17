@@ -23,6 +23,7 @@
     "@opportunity-os/db": "workspace:*",
     "@opportunity-os/scoring": "workspace:*",
     "@opportunity-os/discovery": "workspace:*",
-    "@opportunity-os/observability": "workspace:*"
+    "@opportunity-os/observability": "workspace:*",
+    "@opportunity-os/relationship": "workspace:*"
   }
 }

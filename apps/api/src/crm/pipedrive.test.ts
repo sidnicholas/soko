@@ -55,6 +55,25 @@ describe("pipedriveClient", () => {
     expect(pd.dealUrl(77)).toBe("https://acme.pipedrive.com/deal/77");
   });
 
+  it("creates or updates persons and organizations with only the fields the token may write", async () => {
+    const calls: { url: string; method?: string; body: unknown }[] = [];
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), method: init?.method, body: init?.body ? JSON.parse(String(init.body)) : null });
+      return { ok: true, status: 200, json: async () => ({ success: true, data: { id: 9 } }) } as Response;
+    }) as unknown as typeof fetch;
+    const pd = pipedriveClient({ companyDomain: "acme", apiToken: "tok", fetchImpl });
+    await pd.upsertPerson({ name: "Jo", orgId: 4, emails: ["jo@a.com", "j@b.com"], phones: [] });
+    await pd.upsertPerson({ name: "Jo", emails: [], phones: ["+1555"] }, 9);
+    await pd.upsertOrganization({ name: "Acme" });
+    await pd.setDealParties(77, { personId: 9, orgId: null });
+    await pd.deleteContact("org", 4);
+    expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual(["POST /api/v2/persons", "PATCH /api/v2/persons/9", "POST /api/v2/organizations", "PATCH /api/v2/deals/77", "DELETE /api/v2/organizations/4"]);
+    expect(calls[0]!.body).toEqual({ name: "Jo", org_id: 4, emails: [{ value: "jo@a.com", primary: true, label: "work" }, { value: "j@b.com", primary: false, label: "work" }], phones: [] });
+    expect(calls[1]!.body).toEqual({ name: "Jo", emails: [], phones: [{ value: "+1555", primary: true, label: "work" }] });
+    expect(calls[3]!.body).toEqual({ person_id: 9 });
+    expect(pd.personUrl(9)).toBe("https://acme.pipedrive.com/person/9");
+  });
+
   it("throws on a failed call", async () => {
     const fetchImpl = (async () => ({ ok: false, status: 401, json: async () => ({ success: false, error: "unauthorized" }) }) as Response) as unknown as typeof fetch;
     await expect(pipedriveClient({ companyDomain: "acme", apiToken: "bad", fetchImpl }).createDeal({ title: "x", value: null, currency: "USD" })).rejects.toThrow("401");
