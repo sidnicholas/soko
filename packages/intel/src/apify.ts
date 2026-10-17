@@ -22,7 +22,9 @@ import {
   getApifyRunByApifyId,
   getApifySource,
   getQuarantineItem,
+  listQuarantine,
   resolveQuarantine,
+  updateApifyConfig,
   listApifySources,
   listOpenApifyRuns,
   observationState,
@@ -316,7 +318,7 @@ export async function apifyCycle(deps: ApifyDeps) {
 }
 
 export class QuarantineError extends Error {
-  constructor(readonly code: "not_found" | "not_pending" | "not_releasable" | "invalid_field_map") {
+  constructor(readonly code: "not_found" | "not_pending" | "not_releasable" | "invalid_field_map" | "invalid_category") {
     super(code);
   }
 }
@@ -346,4 +348,31 @@ export async function resolveQuarantinedItem(id: string, decision: "release" | "
     source.apify_expected_fields = fields;
   }
   return { status: "released", ingested: await ingestApifyItem(source, parsed.map, q.item, q.apify_run_id, { acceptUnexpected: true }) };
+}
+
+/**
+ * Maps a source category value held in quarantine (say a Facebook category id)
+ * to one of this system's categories: the mapping is saved in the source's
+ * field map, and every pending item of that source held for the same value is
+ * released and ingested.
+ */
+export async function mapQuarantinedCategory(id: string, category: string, actor: SourceActor): Promise<{ mapped: string; released: number; results: (StoreResult["state"] | "quarantined")[] }> {
+  if (!isAdmissible(category)) throw new QuarantineError("invalid_category");
+  const q = await getQuarantineItem(id);
+  if (!q) throw new QuarantineError("not_found");
+  if (q.status !== "pending") throw new QuarantineError("not_pending");
+  if (q.reason !== "category_unmapped" || !q.fields[0] || q.fields[0] === "(none)") throw new QuarantineError("not_releasable");
+  const value = q.fields[0];
+  const source = await getApifySource(q.source_id);
+  const parsed = parseFieldMap(source?.apify_field_map);
+  if (!source || !("map" in parsed)) throw new QuarantineError("invalid_field_map");
+  const map: ApifyFieldMap = { ...parsed.map, categoryMap: { ...(parsed.map.categoryMap ?? {}), [value]: category } };
+  await updateApifyConfig(source.id, { fieldMap: map }, actor);
+  const same = (await listQuarantine({ sourceId: source.id, limit: 500 })).filter((p) => p.reason === "category_unmapped" && p.fields[0] === value);
+  const results: (StoreResult["state"] | "quarantined")[] = [];
+  for (const p of same) {
+    if (!(await resolveQuarantine(p.id, "released", actor))) continue;
+    results.push(await ingestApifyItem(source, map, p.item, p.apify_run_id));
+  }
+  return { mapped: value, released: results.length, results };
 }

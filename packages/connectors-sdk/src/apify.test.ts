@@ -55,6 +55,17 @@ describe("dropFields", () => {
   });
 });
 
+describe("categoryMap", () => {
+  it("maps a source's category ids to ours and passes unknown ones through", () => {
+    const map = { ...MAP, category: "catId", categoryMap: { "476291743038859": "home_goods" } };
+    const known = mapApifyItem("s", { ...ITEM, catId: "476291743038859" }, map, null);
+    expect(known.ok && known.observation.content["category"]).toBe("home_goods");
+    const unknown = mapApifyItem("s", { ...ITEM, catId: 999 }, map, null);
+    expect(unknown.ok && unknown.observation.content["category"]).toBe("999");
+    expect(parseFieldMap({ kind: "supply", externalId: "id", title: "t", categoryMap: { "1": "Home Goods!" } })).toEqual({ errors: ["categoryMap must map source values to category names like home_goods"] });
+  });
+});
+
 describe("canonicalListingKey", () => {
   it("gives an eBay item one key however its URL is written", () => {
     expect(canonicalListingKey("https://www.ebay.com/itm/123456789012?hash=x")).toBe("ebay/itm/123456789012");

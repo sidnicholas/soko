@@ -12,7 +12,8 @@ import {
   updateApifyConfig,
   type SourceActor,
 } from "@opportunity-os/db";
-import { MAX_ITEMS_PER_RUN, QuarantineError, apifyStartDecision, policyGaps, processApifyRun, resolveQuarantinedItem } from "@opportunity-os/intel";
+import { MAX_ITEMS_PER_RUN, QuarantineError, apifyStartDecision, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem } from "@opportunity-os/intel";
+import { admissibleCategories, isAdmissible } from "@opportunity-os/risk";
 import { timingSafeStringEqual } from "../common/webhook-signature";
 import type { ApifyConfigBody, ApifySourceBody, QuarantineDecisionBody } from "./apify.dto";
 
@@ -42,12 +43,14 @@ export class ApifyService {
   private fieldMap(v: unknown) {
     const parsed = parseFieldMap(v);
     if ("errors" in parsed) throw new BadRequestException({ message: "Invalid field map", issues: parsed.errors });
+    const unknown = Object.values(parsed.map.categoryMap ?? {}).filter((c) => !isAdmissible(c));
+    if (unknown.length) throw new BadRequestException({ message: "Invalid field map", issues: [`unknown categories in categoryMap: ${[...new Set(unknown)].join(", ")}`] });
     return parsed.map;
   }
 
   status() {
     const a = getConfig().connectors.apify;
-    return { configured: Boolean(a.token), webhook: Boolean(this.webhook()), dailyBudgetUsd: a.dailyBudgetUsd };
+    return { configured: Boolean(a.token), webhook: Boolean(this.webhook()), dailyBudgetUsd: a.dailyBudgetUsd, categories: admissibleCategories() };
   }
 
   async register(body: ApifySourceBody, actor: SourceActor) {
@@ -115,9 +118,11 @@ export class ApifyService {
 
   async decide(id: string, body: QuarantineDecisionBody, actor: SourceActor) {
     try {
+      if (body.decision === "map_category") return await mapQuarantinedCategory(id, body.category!, actor);
       return await resolveQuarantinedItem(id, body.decision, actor, { acceptFields: body.acceptFields });
     } catch (err) {
       if (err instanceof QuarantineError) {
+        if (err.code === "invalid_category") throw new BadRequestException("Not a known category");
         if (err.code === "not_found") throw new NotFoundException("Quarantined item not found");
         if (err.code === "not_pending") throw new ConflictException("Already decided");
         if (err.code === "not_releasable") throw new BadRequestException("Only items held for unexpected fields can be released; fix the field map or category mapping and run again");

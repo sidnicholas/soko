@@ -120,6 +120,13 @@ export interface ApifyFieldMap {
    * quarantine included: personal data such as a private seller's identity.
    */
   dropFields?: string[];
+  /**
+   * The source's own category values (ids or labels) mapped to this system's
+   * categories, e.g. Facebook's `{"476291743038859": "home_goods"}`. A value
+   * not in the map is passed on as it is (and quarantined when it is not a
+   * known category), so new ones surface for a person to map.
+   */
+  categoryMap?: Record<string, string>;
 }
 
 const MAP_KEYS: (keyof ApifyFieldMap)[] = ["externalId", "title", "description", "url", "price", "currency", "category", "quantity", "condition", "sellerName", "sellerUrl", "location"];
@@ -141,8 +148,14 @@ export function parseFieldMap(v: unknown): { map: ApifyFieldMap } | { errors: st
   }
   const drop = o["dropFields"];
   if (drop !== undefined && (!Array.isArray(drop) || drop.some((d) => typeof d !== "string" || !d || d.length > 100) || drop.length > 100)) errors.push("dropFields must be a list of field names");
+  const cats = o["categoryMap"];
+  if (cats !== undefined) {
+    const entries = cats && typeof cats === "object" && !Array.isArray(cats) ? Object.entries(cats as Record<string, unknown>) : null;
+    if (!entries || entries.length > 500 || entries.some(([k, v]) => !k || k.length > 200 || typeof v !== "string" || !/^[a-z_]{2,40}$/.test(v))) errors.push("categoryMap must map source values to category names like home_goods");
+  }
   if (errors.length) return { errors };
   const map: Record<string, unknown> = { kind: o["kind"] };
+  if (cats && Object.keys(cats as object).length) map["categoryMap"] = cats;
   if (o["priceUnit"]) map["priceUnit"] = o["priceUnit"];
   if (Array.isArray(drop) && drop.length) map["dropFields"] = drop;
   for (const k of MAP_KEYS) if (typeof o[k] === "string" && o[k]) map[k] = o[k];
@@ -214,6 +227,12 @@ export function canonicalListingKey(url: string | null | undefined): string | nu
   }
 }
 
+/** A source category value through the source's category map; unmapped values pass through unchanged. */
+export function mapCategory(value: string | null, categoryMap: Record<string, string> | undefined): string | null {
+  if (value === null || !categoryMap) return value;
+  return Object.prototype.hasOwnProperty.call(categoryMap, value) ? categoryMap[value]! : value;
+}
+
 export type QuarantineReason = "unexpected_fields" | "missing_required" | "invalid_value" | "category_unmapped" | "prompt_injection";
 
 export type MappedApifyItem =
@@ -252,7 +271,7 @@ export function mapApifyItem(sourceId: string, input: unknown, map: ApifyFieldMa
   const content: Record<string, unknown> = {
     title,
     description: text(read(item, map.description), 1000) ?? "",
-    category: text(read(item, map.category), 200),
+    category: mapCategory(text(read(item, map.category), 200), map.categoryMap),
     // Stored in minor units like every other connector.
     price: price === null ? null : Math.round(map.priceUnit === "minor" ? price : price * 100),
     currency: (text(read(item, map.currency), 3) ?? "USD").toUpperCase(),

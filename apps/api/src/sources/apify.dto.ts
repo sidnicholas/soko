@@ -45,9 +45,13 @@ export const ApifyConfigSchema = z.object({
 });
 export type ApifyConfigBody = z.infer<typeof ApifyConfigSchema>;
 
-export const QuarantineDecisionSchema = z.object({
-  decision: z.enum(["release", "discard"]),
-  /** On release of an item held for unexpected fields: expect those fields from now on. */
-  acceptFields: z.boolean().optional(),
-});
+export const QuarantineDecisionSchema = z
+  .object({
+    decision: z.enum(["release", "discard", "map_category"]),
+    /** On release of an item held for unexpected fields: expect those fields from now on. */
+    acceptFields: z.boolean().optional(),
+    /** For map_category: the category the held source value means. */
+    category: z.string().trim().max(40).optional(),
+  })
+  .refine((b) => b.decision !== "map_category" || !!b.category, { message: "category is required to map a category", path: ["category"] });
 export type QuarantineDecisionBody = z.infer<typeof QuarantineDecisionSchema>;

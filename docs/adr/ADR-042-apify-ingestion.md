@@ -50,8 +50,12 @@ no request signature; its guidance is a secret only the receiver knows.
   category that does not map to a known one (PRD §3.4 default deny), text
   that looks like prompt injection. A person (`source:review`) can release
   an item held for new fields — once, or accepting the fields for the source
-  — or discard any item; the others cannot be released because they would
-  fail the same check.
+  — or discard any item. A field map's `categoryMap` turns the source's own
+  category values (Facebook category ids, a site's labels) into ours; a
+  value it does not know is held as `category_unmapped`, and mapping it from
+  the quarantine saves it in the map and releases every item held for that
+  value. Other holds cannot be released because they would fail the same
+  check. `dropFields` removes personal fields before anything is kept.
 - **Observation ledger** (`source_observations`, every source): one row per
   source and item with its content hash, the listing's canonical key
   (host + path; eBay items by item number) and the supply row it fed. A

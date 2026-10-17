@@ -831,7 +831,7 @@ export const api = {
   deleteParty: (id: string, confirmName: string) => request<{ deleted: boolean; crm: { deleted: boolean; error: string | null } | null }>(`/relationships/${id}/delete`, jsonBody({ confirmName })),
 
   // Apify ingestion (ADR-042)
-  apifyStatus: () => request<{ configured: boolean; webhook: boolean; dailyBudgetUsd: number }>("/ingestion/apify/status"),
+  apifyStatus: () => request<{ configured: boolean; webhook: boolean; dailyBudgetUsd: number; categories: string[] }>("/ingestion/apify/status"),
   registerApifySource: (body: ApifySourceInput) => request<RegistrySource>("/ingestion/apify/sources", jsonBody(body)),
   apifySource: (id: string) => request<ApifySourceDetail>(`/ingestion/apify/sources/${id}`),
   configureApifySource: (id: string, body: Partial<Pick<ApifySourceInput, "actorId" | "actorVersion" | "input" | "fieldMap" | "expectedFields" | "maxItems" | "maxChargeUsd">>) =>
@@ -839,6 +839,7 @@ export const api = {
   runApifySource: (id: string) => request<ApifyRunRow>(`/ingestion/apify/sources/${id}/run`, jsonBody({})),
   quarantine: () => request<QuarantinedItem[]>("/ingestion/quarantine"),
   decideQuarantine: (id: string, decision: "release" | "discard", acceptFields = false) => request<{ status: string; ingested?: string }>(`/ingestion/quarantine/${id}`, jsonBody({ decision, acceptFields })),
+  mapQuarantinedCategory: (id: string, category: string) => request<{ mapped: string; released: number }>(`/ingestion/quarantine/${id}`, jsonBody({ decision: "map_category", category })),
 
   // Source registry (PRD v2 FR-01)
   listSources: () => request<RegistrySource[]>("/sources"),

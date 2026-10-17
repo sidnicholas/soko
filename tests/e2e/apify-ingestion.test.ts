@@ -15,7 +15,7 @@ import {
   type RegistrySource,
 } from "@opportunity-os/db";
 import { resetConfig } from "@opportunity-os/config";
-import { SOURCE_POLICY_VERSION, apifyCycle, apifySupplySourceId, policyGaps, processApifyRun, resolveQuarantinedItem, storeObservation } from "@opportunity-os/intel";
+import { SOURCE_POLICY_VERSION, apifyCycle, apifySupplySourceId, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem, storeObservation } from "@opportunity-os/intel";
 import { ApifyService } from "../../apps/api/src/sources/apify.service";
 
 /**
@@ -190,6 +190,17 @@ describe.skipIf(!HAS_DB)("Apify ingestion (live postgres, stubbed Apify)", () =>
     expect((await getApifySource(sourceId))!.apify_expected_fields).toContain("sellerPhone");
     await expect(resolveQuarantinedItem(held.id, "discard", STAFF)).rejects.toThrow("not_pending");
     expect(await resolveQuarantinedItem(injection.id, "discard", STAFF)).toEqual({ status: "discarded" });
+  });
+
+  it("maps a held category value to one of ours, releasing every item held for it and keeping the mapping", async () => {
+    const coins = (await listQuarantine({ sourceId })).find((q) => q.reason === "category_unmapped")!;
+    expect(coins.fields).toEqual(["Rare Coins"]);
+    await expect(mapQuarantinedCategory(coins.id, "spaceships", STAFF)).rejects.toThrow("invalid_category");
+    expect(await mapQuarantinedCategory(coins.id, "collectibles", STAFF)).toEqual({ mapped: "Rare Coins", released: 1, results: ["new"] });
+    expect(((await getApifySource(sourceId))!.apify_field_map as { categoryMap: Record<string, string> }).categoryMap).toEqual({ "Rare Coins": "collectibles" });
+    const stored = await getDb().selectFrom("supply").select("category").where("source_id", "=", apifySupplySourceId(sourceId)).where("external_ref", "=", `${RUN}-5`).executeTakeFirstOrThrow();
+    expect(stored.category).toBe("collectibles");
+    expect((await listQuarantine({ sourceId })).filter((q) => q.reason === "category_unmapped")).toEqual([]);
   });
 
   it("backs off after a failed run and pauses the source after three in a row", async () => {

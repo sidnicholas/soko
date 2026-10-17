@@ -281,6 +281,8 @@ function itemPreview(item: unknown): string {
 /** Items held back from ingestion, across every source. */
 export function QuarantineCard() {
   const items = useAsync(() => api.quarantine(), []);
+  const status = useAsync(() => api.apifyStatus(), []);
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [shown, setShown] = useState<string | null>(null);
@@ -301,7 +303,10 @@ export function QuarantineCard() {
   const rows = items.data ?? [];
   if (rows.length === 0 && !items.error) return null;
   return (
-    <Card title={`Quarantine (${rows.length})`} subtitle="Actor items that did not match what the source is expected to return. Release only items held for new fields; fix the field map or category for the rest.">
+    <Card
+      title={`Quarantine (${rows.length})`}
+      subtitle="Actor items that did not match what the source is expected to return. Items held for new fields can be released; an unknown category value (such as a Facebook category id) can be mapped to one of ours, which releases every item held for it and applies to future runs."
+    >
       {error && <div style={{ color: tonePalette.danger.fg, fontSize: tokens.fontSize.sm }}>{error}</div>}
       {items.error && <div style={{ color: tonePalette.danger.fg, fontSize: tokens.fontSize.sm }}>{items.error}</div>}
       {rows.map((q) => (
@@ -315,6 +320,43 @@ export function QuarantineCard() {
             <Button size="sm" variant="ghost" onClick={() => setShown(shown === q.id ? null : q.id)}>
               {shown === q.id ? "Hide" : "Show item"}
             </Button>
+            {q.reason === "category_unmapped" && q.fields[0] && q.fields[0] !== "(none)" && (
+              <>
+                <Select
+                  aria-label={`Category for ${q.fields[0]}`}
+                  value={chosen[q.id] ?? ""}
+                  onChange={(e) => setChosen({ ...chosen, [q.id]: e.target.value })}
+                  style={{ width: 170 }}
+                >
+                  <option value="">Category…</option>
+                  {(status.data?.categories ?? []).map((c) => (
+                    <option key={c} value={c}>
+                      {words(c)}
+                    </option>
+                  ))}
+                </Select>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={!chosen[q.id]}
+                  loading={busy === q.id}
+                  onClick={async () => {
+                    setBusy(q.id);
+                    setError(null);
+                    try {
+                      await api.mapQuarantinedCategory(q.id, chosen[q.id]!);
+                      items.reload();
+                    } catch (err) {
+                      setError(errorText(err, "Failed"));
+                    } finally {
+                      setBusy(null);
+                    }
+                  }}
+                >
+                  Map and release all
+                </Button>
+              </>
+            )}
             {q.reason === "unexpected_fields" && (
               <>
                 <Button size="sm" variant="secondary" loading={busy === q.id} onClick={() => void decide(q, "release", true)}>

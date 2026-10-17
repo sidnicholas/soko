@@ -59,6 +59,11 @@ export function isAdmissible(category: string | null | undefined): boolean {
   return policy !== undefined && policy !== "prohibited_for_v1";
 }
 
+/** Every category a record can be filed under (admissible ones), for pickers that map a source's own categories. */
+export function admissibleCategories(): string[] {
+  return Object.keys(CATEGORY_POLICY).filter((c) => isAdmissible(c)).sort();
+}
+
 /** §13.5 Financial safety limits. */
 export interface SpendLimits {
   perActionUsd: number;
