@@ -300,6 +300,22 @@ export function ApifySourcePanel({ id, active, onChange, minIntervalMinutes, max
           </div>
         )}
       </Card>
+      {Object.values(d.deals).some((n) => n > 0) && (
+        <Card title="Deal checks, last 7 days" subtitle="Each new listing priced against comparable eBay listings; only good deals become leads for the Action Queue (after a buyer search and economics).">
+          <div style={{ display: "flex", gap: tokens.space.lg, flexWrap: "wrap", fontSize: tokens.fontSize.sm }}>
+            <span>
+              <Badge tone="success">good deals</Badge> <span style={num}>{d.deals.good_deal}</span>
+            </span>
+            <span>
+              leads raised <span style={num}>{d.deals.leads}</span>
+            </span>
+            <span style={{ color: tokens.color.inkMuted }}>
+              fair <span style={num}>{d.deals.fair}</span> · over market <span style={num}>{d.deals.overpriced}</span> · too few comparables <span style={num}>{d.deals.no_comps}</span> · no price{" "}
+              <span style={num}>{d.deals.no_price}</span>
+            </span>
+          </div>
+        </Card>
+      )}
       {d.lastSearches.length > 0 && (
         <Card title="Latest run's searches" flush>
           <DataTable

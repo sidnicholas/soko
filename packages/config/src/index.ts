@@ -214,6 +214,10 @@ const EnvSchema = z.object({
   APIFY_API_TOKEN: z.string().optional(),
   APIFY_WEBHOOK_SECRET: z.string().optional(),
   APIFY_DAILY_BUDGET_USD: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().nonnegative().default(1)),
+  // Good-deal filter (ADR-044), worker-connectors: share under the eBay comparables' median to raise a lead, listings checked and leads raised per sweep.
+  DEAL_MIN_DISCOUNT: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0.05).max(0.95).default(0.3)),
+  DEAL_CHECKS_PER_RUN: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().nonnegative().default(100)),
+  DEAL_LEADS_PER_RUN: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().nonnegative().default(10)),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -327,6 +331,7 @@ export interface AppConfig {
     reverbApiToken?: string;
     fixtures: boolean;
     apify: { token?: string; webhookSecret?: string; dailyBudgetUsd: number };
+    deals: { minDiscount: number; checksPerRun: number; leadsPerRun: number };
   };
   crm: {
     pipedrive: { companyDomain?: string; apiToken?: string; pipelineId?: number; stageId?: number; webhookUser?: string; webhookPassword?: string };
@@ -446,6 +451,7 @@ function toConfig(env: Env): AppConfig {
       reverbApiToken: env.REVERB_API_TOKEN,
       fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
       apify: { token: env.APIFY_API_TOKEN || undefined, webhookSecret: env.APIFY_WEBHOOK_SECRET || undefined, dailyBudgetUsd: env.APIFY_DAILY_BUDGET_USD },
+      deals: { minDiscount: env.DEAL_MIN_DISCOUNT, checksPerRun: env.DEAL_CHECKS_PER_RUN, leadsPerRun: env.DEAL_LEADS_PER_RUN },
     },
     crm: {
       pipedrive: {

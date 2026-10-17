@@ -3,6 +3,7 @@ import { getConfig } from "@opportunity-os/config";
 import { apifyClient, parseFieldMap, parseSearchPlan } from "@opportunity-os/connectors-sdk";
 import {
   apifySpendToday,
+  dealCheckSummary,
   listRunSearches,
   getApifySource,
   listApifyRuns,
@@ -101,12 +102,13 @@ export class ApifyService {
     const source = await getApifySource(id);
     if (!source) throw new NotFoundException(`Apify source ${id} not found`);
     const [runs, quarantine] = await Promise.all([listApifyRuns(id), listQuarantine({ sourceId: id, limit: 50 })]);
-    const searches = runs[0] ? await listRunSearches(runs[0].id) : [];
+    const [searches, deals] = await Promise.all([runs[0] ? listRunSearches(runs[0].id) : Promise.resolve([]), dealCheckSummary(id)]);
     return {
       config: { input: source.apify_input, fieldMap: source.apify_field_map, expectedFields: source.apify_expected_fields, maxItems: source.apify_max_items, maxChargeUsd: source.apify_max_charge_usd, searchPlan: source.apify_search },
       runs,
       quarantine,
       lastSearches: searches,
+      deals,
     };
   }
 

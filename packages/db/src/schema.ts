@@ -750,6 +750,24 @@ export interface ApifyRunSearchesTable {
   created_at: Generated<Timestamp>;
 }
 
+export interface DealChecksTable {
+  id: Generated<string>;
+  observation_id: string;
+  source_id: string;
+  supply_id: string | null;
+  query: string | null;
+  price_minor: ColumnType<string | null, number | null, number | null>;
+  currency: string | null;
+  comps: Generated<number>;
+  comp_median_minor: ColumnType<string | null, number | null, number | null>;
+  discount: Numeric | null;
+  demand_term: string | null;
+  verdict: string;
+  comps_json: JsonDefault;
+  lead_id: string | null;
+  checked_at: Generated<Timestamp>;
+}
+
 export interface SourceObservationsTable {
   id: Generated<string>;
   source_id: string;
@@ -856,6 +874,7 @@ export interface Database {
   source_runs: SourceRunsTable;
   apify_runs: ApifyRunsTable;
   apify_run_searches: ApifyRunSearchesTable;
+  deal_checks: DealChecksTable;
   source_observations: SourceObservationsTable;
   ingestion_quarantine: IngestionQuarantineTable;
 }

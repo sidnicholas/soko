@@ -65,7 +65,8 @@ export async function knownIntelLeadHashes(hashes: string[]): Promise<Set<string
 }
 
 export interface NewIntelLead {
-  runId: string;
+  /** Null for a lead raised outside a search run (a deal check, ADR-044). */
+  runId: string | null;
   kind: "demand" | "supply" | "problem";
   title: string;
   summary: string;

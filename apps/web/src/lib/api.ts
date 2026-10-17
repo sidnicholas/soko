@@ -793,6 +793,8 @@ export interface ApifySourceDetail {
   quarantine: QuarantinedItem[];
   /** The searches of the latest run, with what each found. */
   lastSearches: { term: string; city: string | null; url: string; origin: "demand" | "list"; items: number; items_new: number }[];
+  /** Good-deal checks of this source's listings, last 7 days (ADR-044). */
+  deals: { good_deal: number; fair: number; overpriced: number; no_comps: number; no_price: number; leads: number };
 }
 
 export const api = {

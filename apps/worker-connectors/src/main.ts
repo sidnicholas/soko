@@ -12,7 +12,7 @@ import {
   type SourceConnector,
 } from "@opportunity-os/connectors-sdk";
 import { closeDb, getConnectorSource, listActiveMissionsForDiscovery, recordSourceOutcome, recordSourceRuns, upsertSupply, type SourceRunRecord } from "@opportunity-os/db";
-import { apifyCycle, healthFor, policyGaps, storeObservation } from "@opportunity-os/intel";
+import { apifyCycle, checkDeals, healthFor, policyGaps, storeObservation, type CompsProvider } from "@opportunity-os/intel";
 import { getConfig } from "@opportunity-os/config";
 import { createLogger } from "@opportunity-os/observability";
 import { ingestConnectors, type IngestStats, type ObservationSink } from "./ingest";
@@ -96,6 +96,22 @@ async function apify(): Promise<unknown> {
   });
 }
 
+/**
+ * Good-deal filter (ADR-044): prices new actor listings against active eBay
+ * listings and raises supply leads for the ones well under market. Needs the
+ * eBay credentials; without them listings stay unchecked.
+ */
+async function deals(): Promise<unknown> {
+  const { ebayClientId, ebayClientSecret, ebayMarketplaceId, deals: cfg } = config.connectors;
+  if (!ebayClientId || !ebayClientSecret) return "no_ebay_credentials";
+  const ebay = makeEbayConnector({ clientId: ebayClientId, clientSecret: ebayClientSecret, marketplaceId: ebayMarketplaceId });
+  const comps: CompsProvider = async (query) =>
+    (await ebay.search({ query, max: 25, filters: {} }))
+      .map((o) => ({ title: String(o.content["title"] ?? ""), url: o.ref.uri ?? null, priceMinor: typeof o.content["price"] === "number" ? o.content["price"] : 0, currency: String(o.content["currency"] ?? "USD") }))
+      .filter((c) => c.priceMinor > 0);
+  return checkDeals({ comps, limit: cfg.checksPerRun, leadLimit: cfg.leadsPerRun, minDiscount: cfg.minDiscount });
+}
+
 async function cycle(): Promise<void> {
   const supplyCount = { n: 0 };
   const sink: ObservationSink = async (obs: RawObservation) => {
@@ -141,7 +157,14 @@ async function cycle(): Promise<void> {
     apifyResult = { error: String(err) };
     log.error({ err: String(err) }, "ingest.apify.failed");
   }
-  log.info({ fixtures, queries, sources, apify: apifyResult, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
+  let dealResult: unknown;
+  try {
+    dealResult = await deals();
+  } catch (err) {
+    dealResult = { error: String(err) };
+    log.error({ err: String(err) }, "ingest.deals.failed");
+  }
+  log.info({ fixtures, queries, sources, apify: apifyResult, deals: dealResult, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
 }
 
 async function main(): Promise<void> {

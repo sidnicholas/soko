@@ -32,3 +32,4 @@ export * from "./repositories/economics";
 export * from "./repositories/crm";
 export * from "./repositories/relationships";
 export * from "./repositories/ingestion";
+export * from "./repositories/deals";

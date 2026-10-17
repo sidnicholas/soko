@@ -18,7 +18,7 @@ import {
   type RegistrySource,
 } from "@opportunity-os/db";
 import { resetConfig } from "@opportunity-os/config";
-import { SOURCE_POLICY_VERSION, apifyCycle, apifySupplySourceId, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem, storeObservation } from "@opportunity-os/intel";
+import { SOURCE_POLICY_VERSION, apifyCycle, checkDeals, apifySupplySourceId, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem, storeObservation } from "@opportunity-os/intel";
 import { ApifyService } from "../../apps/api/src/sources/apify.service";
 
 /**
@@ -105,6 +105,7 @@ describe.skipIf(!HAS_DB)("Apify ingestion (live postgres, stubbed Apify)", () =>
     await getDb().deleteFrom("supply").where("source_id", "=", apifySupplySourceId(sourceId)).execute();
     await getDb().deleteFrom("supply").where("external_ref", "=", EBAY_ITEM).execute();
     await getDb().deleteFrom("source_observations").where("external_id", "=", EBAY_ITEM).execute();
+    await getDb().deleteFrom("intel_leads").where("hostname", "=", `lots-${RUN}.example.com`).execute();
     await getDb().deleteFrom("source_registry").where("id", "=", sourceId).execute();
     await closeDb();
   });
@@ -253,6 +254,33 @@ describe.skipIf(!HAS_DB)("Apify ingestion (live postgres, stubbed Apify)", () =>
     } else expect(again).toBe("skipped:no_searches_due");
     await updateApifyConfig(sourceId, { searchPlan: null }, STAFF);
     await getDb().deleteFrom("intel_leads").where("url_hash", "=", `want-${RUN}`).execute();
+  });
+
+  it("raises a lead only for a listing well under comparable prices, and records every check", async () => {
+    const queries: string[] = [];
+    // Comparable office-chair pallets at about $200 (plus a junk outlier each side).
+    const comps = async (q: string) => {
+      queries.push(q);
+      return [1, 190, 195, 200, 200, 205, 210, 9999].map((d, i) => ({ title: `comp ${i}`, url: `https://www.ebay.com/itm/${i}`, priceMinor: d * 100, currency: "USD" }));
+    };
+    const out = await checkDeals({ comps, limit: 50, leadLimit: 10, minDiscount: 0.45 });
+    expect(out.checked).toBeGreaterThanOrEqual(5);
+    expect(queries[0]).toBe("pallet office chairs");
+
+    const checks = await getDb().selectFrom("deal_checks").select(["verdict", "discount", "comps", "comp_median_minor", "lead_id", "supply_id"]).where("source_id", "=", sourceId).execute();
+    const chair2 = await getDb().selectFrom("supply").select("id").where("source_id", "=", apifySupplySourceId(sourceId)).where("external_ref", "=", `${RUN}-2`).executeTakeFirstOrThrow();
+    const good = checks.find((c) => c.supply_id === chair2.id)!;
+    // Listed at $99 against a $200 median of 6 comparables (outliers trimmed).
+    expect(good).toMatchObject({ verdict: "good_deal", comps: 6, comp_median_minor: "20000" });
+    expect(Number(good.discount)).toBeCloseTo(0.505, 3);
+    expect(checks.every((c) => c.verdict !== "no_comps")).toBe(true);
+
+    const lead = await getDb().selectFrom("intel_leads").select(["kind", "title", "summary", "status", "counterpart_status", "opposite_queries", "price_minor", "facts"]).where("id", "=", good.lead_id!).executeTakeFirstOrThrow();
+    expect(lead).toMatchObject({ kind: "supply", status: "new", counterpart_status: "pending", price_minor: 9900, opposite_queries: ["wanted pallet office chairs", "buying pallet office chairs in bulk"] });
+    expect(lead.summary).toContain("about 51% under the median of 6 comparable eBay listings ($200)");
+
+    // Checked once: a second sweep has nothing new to price.
+    expect((await checkDeals({ comps, limit: 50, leadLimit: 10, minDiscount: 0.45 })).checked).toBe(0);
   });
 
   it("backs off after a failed run and pauses the source after three in a row", async () => {

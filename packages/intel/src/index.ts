@@ -8,3 +8,4 @@ export * from "./budget";
 export * from "./prompts";
 export * from "./run";
 export * from "./apify";
+export * from "./deals";
