@@ -137,7 +137,8 @@ export interface CrmDealEvent {
   lostReason: string | null;
 }
 
-export type CrmEventOutcome = "applied" | "duplicate" | "unknown_deal" | "stale";
+/** retry_later: a deal of ours is still being created; the caller asks the CRM to redeliver. */
+export type CrmEventOutcome = "applied" | "duplicate" | "unknown_deal" | "stale" | "retry_later";
 
 /**
  * Applies one CRM webhook event. Each event id is processed once (the CRM
@@ -150,6 +151,24 @@ export async function applyCrmDealEvent(e: CrmDealEvent): Promise<CrmEventOutcom
     .transaction()
     .execute(async (tx) => {
       const link = await tx.selectFrom("crm_links").select([...COLUMNS]).where("provider", "=", e.provider).where("external_id", "=", e.entityId).forUpdate().executeTakeFirst();
+      if (!link) {
+        // The CRM announces a deal we just created before our link to it is
+        // saved (seen in production, 2026-10-17). While any elevation is in
+        // flight, leave the event unrecorded and have it redelivered.
+        // Only a recent reservation: one left behind by a crash must not keep
+        // every unknown deal failing, which would get the webhook banned.
+        const pending = await tx
+          .selectFrom("crm_links")
+          .select("id")
+          .where("provider", "=", e.provider)
+          .where("external_id", "is", null)
+          .where(sql<boolean>`created_at > now() - interval '2 minutes'`)
+          .executeTakeFirst();
+        if (pending) {
+          const seen = await tx.selectFrom("crm_webhook_events").select("event_id").where("provider", "=", e.provider).where("event_id", "=", e.eventId).executeTakeFirst();
+          if (!seen) return "retry_later";
+        }
+      }
       const recorded = await tx
         .insertInto("crm_webhook_events")
         .values({ provider: e.provider, event_id: e.eventId, link_id: link?.id ?? null, action: e.action, entity_id: e.entityId })

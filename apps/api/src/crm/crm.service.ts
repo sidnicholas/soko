@@ -53,17 +53,19 @@ export class CrmService {
         ...(cfg.stageId ? { stageId: cfg.stageId } : {}),
         expectedCloseDate: expectedClose(c.economics),
       });
-      const [leadEvidence, candidateEvidence] = await Promise.all([listEvidence("intel_lead", c.lead_id), listEvidence("intel_candidate", c.id)]);
-      const web = getConfig().auth.webOrigins[0];
-      // A note failing must not lose the deal: it is created, linked, and the note is best-effort.
-      await pd.addNote(deal.id, dealNoteHtml(c as never, [...leadEvidence, ...candidateEvidence], web ? `${web.replace(/\/$/, "")}/queue` : null)).catch((err) => this.logger.warn(`pipedrive note for deal ${deal.id} failed: ${String(err)}`));
+      // Link first, so the deal's own webhook events (which follow within a
+      // second) find it; then the note, which is best-effort.
       const done = await completeCrmLink(
         link.id,
         { externalId: String(deal.id), externalUrl: pd.dealUrl(deal.id), status: deal.status === "won" || deal.status === "lost" ? deal.status : "open", stageId: deal.stage_id ?? null, value: deal.value ?? null, currency: deal.currency ?? "USD" },
         actorId,
       );
+      const [leadEvidence, candidateEvidence] = await Promise.all([listEvidence("intel_lead", c.lead_id), listEvidence("intel_candidate", c.id)]);
+      const web = getConfig().auth.webOrigins[0];
+      await pd.addNote(deal.id, dealNoteHtml(c as never, [...leadEvidence, ...candidateEvidence], web ? `${web.replace(/\/$/, "")}/queue` : null)).catch((err) => this.logger.warn(`pipedrive note for deal ${deal.id} failed: ${String(err)}`));
       return { link: done, created: true };
     } catch (err) {
+      // Only before the link is completed; afterwards abandon is a no-op (external_id is set).
       await abandonCrmLink(link.id);
       throw err;
     }
@@ -109,6 +111,8 @@ export class CrmService {
     if (!event) return { received: true, outcome: "ignored" };
     const outcome = await applyCrmDealEvent(event);
     this.logger.log(`pipedrive ${event.action} deal ${event.entityId} (event ${event.eventId}): ${outcome}`);
+    // Pipedrive redelivers after 3, 30 and 150 s; by then the link is saved.
+    if (outcome === "retry_later") throw new ServiceUnavailableException("Deal is still being linked; redeliver");
     return { received: true, outcome };
   }
 }

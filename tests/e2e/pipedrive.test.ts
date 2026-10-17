@@ -69,6 +69,19 @@ describe.skipIf(!HAS_DB)("Pipedrive (live postgres, stubbed API)", () => {
     expect(events).toHaveLength(1);
   });
 
+  it("asks for redelivery of an event for a deal still being elevated, then applies it", async () => {
+    // A second candidate whose elevation is in flight (link reserved, no deal id yet).
+    const { beginCrmLink, completeCrmLink } = await import("@opportunity-os/db");
+    const otherId = randomUUID();
+    const { link } = await beginCrmLink("pipedrive", "intel_candidate", otherId, null);
+    const early = { meta: { action: "create", entity: "deal", entity_id: 9100, id: `early-${RUN}`, timestamp: "2026-10-17T00:00:00Z" }, data: { status: "open", stage_id: 1 } };
+    await expect(crm.handleWebhook(auth("pd", "secret"), early)).rejects.toThrow("redeliver");
+    // Not recorded, so the redelivery is processed once the link exists.
+    await completeCrmLink(link.id, { externalId: "9100", externalUrl: "https://acme.pipedrive.com/deal/9100", status: "open", stageId: 1, value: 10, currency: "USD" }, null);
+    expect((await crm.handleWebhook(auth("pd", "secret"), early)).outcome).toBe("applied");
+    await getDb().deleteFrom("crm_links").where("id", "=", link.id).execute();
+  });
+
   it("refuses a webhook without the right basic auth", async () => {
     await expect(crm.handleWebhook(undefined, {})).rejects.toThrow("Invalid Pipedrive webhook credentials");
     await expect(crm.handleWebhook(auth("pd", "wrong"), {})).rejects.toThrow("Invalid Pipedrive webhook credentials");
