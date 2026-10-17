@@ -39,6 +39,10 @@ describe("policyGaps (PRD v2 FR-01: no activation until the permission policy is
     expect(
       policyGaps({ ...reviewed, kind: "apify_actor", permission_basis: "written_permission", data_use_constraints: "listings only", apify_actor_id: "acme/scraper", apify_actor_version: "1.2.3" }, now),
     ).toEqual([]);
+    // "latest" is a moving tag, not the build that was reviewed.
+    expect(
+      policyGaps({ ...reviewed, kind: "apify_actor", permission_basis: "written_permission", data_use_constraints: "listings only", apify_actor_id: "acme/scraper", apify_actor_version: "latest" }, now),
+    ).toEqual(["apify_actor_not_pinned"]);
   });
 });
 

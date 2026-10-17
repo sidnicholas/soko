@@ -17,6 +17,7 @@
   "dependencies": {
     "zod": "^3.23.8",
     "@opportunity-os/config": "workspace:*",
+    "@opportunity-os/contracts": "workspace:*",
     "@opportunity-os/connectors-sdk": "workspace:*",
     "@opportunity-os/db": "workspace:*",
     "@opportunity-os/llm-gateway": "workspace:*",

@@ -210,6 +210,10 @@ const EnvSchema = z.object({
   PIPEDRIVE_STAGE_ID: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().positive().optional()),
   PIPEDRIVE_WEBHOOK_USER: z.string().optional(),
   PIPEDRIVE_WEBHOOK_PASSWORD: z.string().optional(),
+  // Apify actors (ADR-042): token on worker-connectors and api; the webhook secret on api (and worker-connectors, which sends it).
+  APIFY_API_TOKEN: z.string().optional(),
+  APIFY_WEBHOOK_SECRET: z.string().optional(),
+  APIFY_DAILY_BUDGET_USD: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().nonnegative().default(1)),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -322,6 +326,7 @@ export interface AppConfig {
     reverbEnabled: boolean;
     reverbApiToken?: string;
     fixtures: boolean;
+    apify: { token?: string; webhookSecret?: string; dailyBudgetUsd: number };
   };
   crm: {
     pipedrive: { companyDomain?: string; apiToken?: string; pipelineId?: number; stageId?: number; webhookUser?: string; webhookPassword?: string };
@@ -440,6 +445,7 @@ function toConfig(env: Env): AppConfig {
       reverbEnabled: env.REVERB_ENABLED === "true",
       reverbApiToken: env.REVERB_API_TOKEN,
       fixtures: env.FIXTURE_CONNECTORS ? env.FIXTURE_CONNECTORS === "true" : env.NODE_ENV !== "production",
+      apify: { token: env.APIFY_API_TOKEN || undefined, webhookSecret: env.APIFY_WEBHOOK_SECRET || undefined, dailyBudgetUsd: env.APIFY_DAILY_BUDGET_USD },
     },
     crm: {
       pipedrive: {

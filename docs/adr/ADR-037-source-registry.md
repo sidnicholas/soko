@@ -53,8 +53,8 @@ connector list in `worker-connectors`. PRD §7 forbids duplicate truth tables.
   ("migration 0025") with a 180-day due date; an operator re-reviews them in
   the Source Registry before then.
 - Submissions no longer run on arrival; someone must review them.
-- Apify ingestion, `source_observations` and `ingestion_quarantine` are
-  added with the Apify slice (P1 slice 4), not before.
+- Apify ingestion, `source_observations` and `ingestion_quarantine` were
+  added with the Apify slice (P1 slice 4, ADR-042).
 - A later migration drops the compatibility view once the code using
   `source_registry` is deployed.
 - `intel_sources` remains the yield of hosts leads came from; per-source

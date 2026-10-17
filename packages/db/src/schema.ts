@@ -678,6 +678,12 @@ export interface SourceRegistryTable {
   api_available: Generated<boolean>;
   apify_actor_id: string | null;
   apify_actor_version: string | null;
+  // 0031: Apify run configuration (ADR-042).
+  apify_input: JsonNullable;
+  apify_field_map: JsonNullable;
+  apify_expected_fields: JsonNullable;
+  apify_max_items: number | null;
+  apify_max_charge_usd: Numeric | null;
   permission_basis: Generated<string>;
   robots_tos_assessment: string | null;
   data_use_constraints: string | null;
@@ -705,6 +711,58 @@ export interface SourcePolicyReviewsTable {
   notes: string | null;
   reviewed_by: string | null;
   reviewer_label: string | null;
+  created_at: Generated<Timestamp>;
+}
+
+export interface ApifyRunsTable {
+  id: Generated<string>;
+  source_id: string;
+  apify_run_id: string;
+  dataset_id: string | null;
+  status: Generated<string>;
+  apify_status: string | null;
+  max_charge_usd: Numeric | null;
+  usage_usd: Numeric | null;
+  items_total: Generated<number>;
+  items_new: Generated<number>;
+  items_changed: Generated<number>;
+  items_duplicate: Generated<number>;
+  items_merged: Generated<number>;
+  items_quarantined: Generated<number>;
+  error: string | null;
+  retry_after: Timestamp | null;
+  started_at: Generated<Timestamp>;
+  finished_at: Timestamp | null;
+  updated_at: Generated<Timestamp>;
+}
+
+export interface SourceObservationsTable {
+  id: Generated<string>;
+  source_id: string;
+  apify_run_id: string | null;
+  kind: string;
+  external_id: string;
+  canonical_key: string | null;
+  content_hash: string;
+  content: Json;
+  supply_id: string | null;
+  merged: Generated<boolean>;
+  first_seen_at: Generated<Timestamp>;
+  last_seen_at: Generated<Timestamp>;
+  seen_count: Generated<number>;
+}
+
+export interface IngestionQuarantineTable {
+  id: Generated<string>;
+  source_id: string;
+  apify_run_id: string | null;
+  external_id: string | null;
+  reason: string;
+  fields: JsonDefault;
+  item: Json;
+  status: Generated<string>;
+  resolved_by: string | null;
+  resolved_at: Timestamp | null;
   created_at: Generated<Timestamp>;
 }
 
@@ -782,4 +840,7 @@ export interface Database {
   opportunity_economics_versions: OpportunityEconomicsVersionsTable;
   source_policy_reviews: SourcePolicyReviewsTable;
   source_runs: SourceRunsTable;
+  apify_runs: ApifyRunsTable;
+  source_observations: SourceObservationsTable;
+  ingestion_quarantine: IngestionQuarantineTable;
 }

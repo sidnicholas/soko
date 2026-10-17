@@ -718,6 +718,78 @@ export interface MemoryInput {
   access?: "internal" | "restricted";
 }
 
+// Apify ingestion (ADR-042)
+export interface ApifyFieldMapInput {
+  kind: "supply" | "demand";
+  externalId: string;
+  title: string;
+  description?: string;
+  url?: string;
+  price?: string;
+  priceUnit?: "major" | "minor";
+  currency?: string;
+  category?: string;
+  quantity?: string;
+  condition?: string;
+  sellerName?: string;
+  sellerUrl?: string;
+  location?: string;
+}
+
+export interface ApifySourceInput {
+  name: string;
+  domain: string;
+  orientation: "demand" | "supply";
+  actorId: string;
+  actorVersion: string;
+  input: Record<string, unknown>;
+  fieldMap: ApifyFieldMapInput;
+  expectedFields?: string[] | null;
+  maxItems?: number | null;
+  maxChargeUsd?: number | null;
+  minIntervalMinutes?: number | null;
+  maxDailyUsd?: number | null;
+  notes?: string | null;
+  evidenceUrl?: string | null;
+}
+
+export interface ApifyRunRow {
+  id: string;
+  apify_run_id: string;
+  status: "running" | "ingesting" | "succeeded" | "failed";
+  apify_status: string | null;
+  max_charge_usd: number | null;
+  usage_usd: number | null;
+  items_total: number;
+  items_new: number;
+  items_changed: number;
+  items_duplicate: number;
+  items_merged: number;
+  items_quarantined: number;
+  error: string | null;
+  retry_after: string | null;
+  started_at: string;
+  finished_at: string | null;
+}
+
+export interface QuarantinedItem {
+  id: string;
+  source_id: string;
+  source_name: string;
+  external_id: string | null;
+  reason: "unexpected_fields" | "missing_required" | "invalid_value" | "category_unmapped" | "prompt_injection";
+  fields: string[];
+  item: unknown;
+  status: "pending" | "released" | "discarded";
+  created_at: string;
+}
+
+export interface ApifySourceDetail {
+  config: { input: unknown; fieldMap: ApifyFieldMapInput | null; expectedFields: string[] | null; maxItems: number | null; maxChargeUsd: number | null };
+  runs: ApifyRunRow[];
+  quarantine: QuarantinedItem[];
+}
+
 export const api = {
   me: () => request<Me>("/me"),
 
@@ -757,6 +829,16 @@ export const api = {
   restoreParty: (id: string) => request<PartyDetail>(`/relationships/${id}/restore`, jsonBody({})),
   syncPartyToPipedrive: (id: string) => request<{ kind: "person" | "org"; id: number; url: string }>(`/relationships/${id}/crm`, jsonBody({})),
   deleteParty: (id: string, confirmName: string) => request<{ deleted: boolean; crm: { deleted: boolean; error: string | null } | null }>(`/relationships/${id}/delete`, jsonBody({ confirmName })),
+
+  // Apify ingestion (ADR-042)
+  apifyStatus: () => request<{ configured: boolean; webhook: boolean; dailyBudgetUsd: number }>("/ingestion/apify/status"),
+  registerApifySource: (body: ApifySourceInput) => request<RegistrySource>("/ingestion/apify/sources", jsonBody(body)),
+  apifySource: (id: string) => request<ApifySourceDetail>(`/ingestion/apify/sources/${id}`),
+  configureApifySource: (id: string, body: Partial<Pick<ApifySourceInput, "actorId" | "actorVersion" | "input" | "fieldMap" | "expectedFields" | "maxItems" | "maxChargeUsd">>) =>
+    request<RegistrySource>(`/ingestion/apify/sources/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  runApifySource: (id: string) => request<ApifyRunRow>(`/ingestion/apify/sources/${id}/run`, jsonBody({})),
+  quarantine: () => request<QuarantinedItem[]>("/ingestion/quarantine"),
+  decideQuarantine: (id: string, decision: "release" | "discard", acceptFields = false) => request<{ status: string; ingested?: string }>(`/ingestion/quarantine/${id}`, jsonBody({ decision, acceptFields })),
 
   // Source registry (PRD v2 FR-01)
   listSources: () => request<RegistrySource[]>("/sources"),

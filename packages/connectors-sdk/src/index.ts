@@ -15,6 +15,7 @@ export * from "./ebay";
 export * from "./reverb";
 export * from "./category";
 export * from "./search";
+export * from "./apify";
 
 /** §17 — every source adapter implements this interface. */
 export interface SourceConnector {

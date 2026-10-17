@@ -560,6 +560,9 @@ importers:
       '@opportunity-os/connectors-sdk':
         specifier: workspace:*
         version: link:../connectors-sdk
+      '@opportunity-os/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@opportunity-os/db':
         specifier: workspace:*
         version: link:../db

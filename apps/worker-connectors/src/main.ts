@@ -1,5 +1,7 @@
 import type { RawObservation } from "@opportunity-os/contracts";
 import {
+  apifyClient,
+  canonicalListingKey,
   ConnectorRegistry,
   FixtureDemandConnector,
   FixtureSupplyConnector,
@@ -10,7 +12,7 @@ import {
   type SourceConnector,
 } from "@opportunity-os/connectors-sdk";
 import { closeDb, getConnectorSource, listActiveMissionsForDiscovery, recordSourceOutcome, recordSourceRuns, upsertSupply, type SourceRunRecord } from "@opportunity-os/db";
-import { healthFor, policyGaps } from "@opportunity-os/intel";
+import { apifyCycle, healthFor, policyGaps, storeObservation } from "@opportunity-os/intel";
 import { getConfig } from "@opportunity-os/config";
 import { createLogger } from "@opportunity-os/observability";
 import { ingestConnectors, type IngestStats, type ObservationSink } from "./ingest";
@@ -79,11 +81,32 @@ async function ingestOne(connector: SourceConnector, query: string, sink: Observ
   }
 }
 
+/**
+ * Apify actors (ADR-042): finish runs that ended (the webhook's fallback),
+ * then start those due. Off without APIFY_API_TOKEN.
+ */
+async function apify(): Promise<unknown> {
+  const { token, webhookSecret, dailyBudgetUsd } = config.connectors.apify;
+  if (!token) return "not_configured";
+  const base = config.notifications.publicApiBaseUrl;
+  return apifyCycle({
+    client: apifyClient({ token }),
+    webhook: base && webhookSecret ? { url: `${base.replace(/\/$/, "")}/v1/webhooks/apify`, secret: webhookSecret } : null,
+    dailyBudgetUsd,
+  });
+}
+
 async function cycle(): Promise<void> {
   const supplyCount = { n: 0 };
   const sink: ObservationSink = async (obs: RawObservation) => {
     const normalized = normalizeObservation(obs);
     if (normalized.kind === "supply") await persist(supplyCount, normalized);
+  };
+  /** A registered connector's sink: through the observation ledger, so the same listing from an Apify actor merges into it. */
+  const ledgerSink = (registryId: string): ObservationSink => async (obs: RawObservation) => {
+    if (obs.kind !== "supply") return;
+    await storeObservation(registryId, obs, canonicalListingKey(obs.ref.uri), null);
+    supplyCount.n++;
   };
   const fixtures = await ingestConnectors(registry.all(), "", sink);
   const queries = queryConnectors.length > 0 ? searchQueries(await listActiveMissionsForDiscovery(), config.connectors.seedQuery) : [];
@@ -102,7 +125,7 @@ async function cycle(): Promise<void> {
     const results = [];
     const runs: SourceRunRecord[] = [];
     for (const q of queries) {
-      const outcome = await ingestOne(connector, q, sink);
+      const outcome = await ingestOne(connector, q, ledgerSink(entry!.id));
       results.push({ q, ...outcome });
       const failed = "error" in outcome;
       runs.push({ sourceId: entry!.id, intelRunId: null, query: q, results: failed ? 0 : outcome.fetched, newResults: failed ? 0 : outcome.kept, leads: 0, costUsd: 0, error: failed ? outcome.error.slice(0, 500) : null });
@@ -111,7 +134,14 @@ async function cycle(): Promise<void> {
     await recordSourceRuns(runs);
     sources[connector.id] = results;
   }
-  log.info({ fixtures, queries, sources, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
+  let apifyResult: unknown;
+  try {
+    apifyResult = await apify();
+  } catch (err) {
+    apifyResult = { error: String(err) };
+    log.error({ err: String(err) }, "ingest.apify.failed");
+  }
+  log.info({ fixtures, queries, sources, apify: apifyResult, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
 }
 
 async function main(): Promise<void> {

@@ -55,7 +55,8 @@ export function policyGaps(s: PolicySource, now: Date = new Date()): string[] {
   else if (due === null || due <= now.getTime()) gaps.push("terms_review_expired");
   if (s.kind === "apify_actor") {
     if (!s.data_use_constraints?.trim()) gaps.push("no_data_use_constraints");
-    if (!s.apify_actor_id || !s.apify_actor_version) gaps.push("apify_actor_not_pinned");
+    // "latest" moves under us: the reviewed program must be one fixed build.
+    if (!s.apify_actor_id || !s.apify_actor_version || /^latest$/i.test(s.apify_actor_version.trim())) gaps.push("apify_actor_not_pinned");
   }
   return gaps;
 }

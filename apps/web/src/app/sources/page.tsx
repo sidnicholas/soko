@@ -5,6 +5,7 @@ import { Badge, Button, Card, DataTable, EmptyState, Field, Input, PageHeader, S
 import { api, ApiError, type PermissionBasis, type RegistrySource, type SourceImport } from "../../lib/api";
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
+import { ApifySourcePanel, QuarantineCard, RegisterApifySource } from "../../components/ApifySources";
 
 const words = (s: string) => s.replaceAll("_", " ");
 const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "—");
@@ -31,8 +32,8 @@ function matches(s: RegistrySource, f: Filter): boolean {
 
 /** Permission-policy review for one source (PRD v2 FR-01). Approval activates it only if every gap is closed. */
 function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
-  const [basis, setBasis] = useState<PermissionBasis>(s.permission_basis === "none" ? (s.kind === "connector" ? "official_api_terms" : "public_search_index") : s.permission_basis);
-  const [tos, setTos] = useState(s.robots_tos_assessment ?? (s.kind === "search_venue" ? "Queried only through the search provider's index with a site: filter; no page on the site is fetched." : ""));
+  const [basis, setBasis] = useState<PermissionBasis>(s.permission_basis === "none" ? (s.kind === "connector" ? "official_api_terms" : s.kind === "apify_actor" ? "written_permission" : "public_search_index") : s.permission_basis);
+  const [tos, setTos] = useState(s.robots_tos_assessment ?? (s.kind === "search_venue" ? "Queried only through the search provider's index with a site: filter; no page on the site is fetched." : s.kind === "apify_actor" ? "The actor fetches the site's pages. Permission: (who granted it, when, what it covers)." : ""));
   const [dataUse, setDataUse] = useState(s.data_use_constraints ?? "");
   const [due, setDue] = useState(new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
@@ -132,6 +133,10 @@ function SourceDetail({ id, onChange }: { id: string; onChange: () => void }) {
             )}
             {error && <span style={{ fontSize: tokens.fontSize.sm, color: tonePalette.danger.fg }}>{error}</span>}
           </div>
+          {s.kind === "apify_actor" && <ApifySourcePanel id={s.id} active={s.status === "active"} onChange={() => {
+            detail.reload();
+            onChange();
+          }} />}
           {s.status !== "rejected" && (
             <Card title={s.status === "proposed" ? "Review this source" : "Re-review"} subtitle="A source runs only with a permission basis, a robots/terms assessment and an unexpired review.">
               <ReviewForm s={s} onDone={() => {
@@ -290,9 +295,11 @@ export default function SourcesPage() {
       <PageHeader
         eyebrow="Opportunity intelligence"
         title="Source Registry"
-        subtitle="Every place discovery reads from: search venues, official-API connectors and, later, Apify actors. A source runs only once its permission policy is reviewed, and pauses itself when it fails or never yields."
+        subtitle="Every place discovery reads from: search venues, official-API connectors and Apify actors. A source runs only once its permission policy is reviewed, and pauses itself when it fails or never yields."
       />
       <ImportCard onDone={sources.reload} />
+      <RegisterApifySource onDone={sources.reload} />
+      <QuarantineCard />
       <AsyncView state={sources} loadingLabel="Loading sources">
         {(rows) => {
           const counts = Object.fromEntries(FILTERS.map((f) => [f, rows.filter((s) => matches(s, f)).length]));
