@@ -7,6 +7,9 @@ import {
   getApifySource,
   getConnectorSource,
   getDb,
+  insertIntelLead,
+  listRunSearches,
+  updateApifyConfig,
   listApifyRuns,
   listObservationsForSupply,
   listQuarantine,
@@ -37,11 +40,11 @@ const EBAY_ITEM = String(100_000_000_000 + Math.floor(Math.random() * 1e9));
 class StubApify {
   runs = new Map<string, ApifyRun>();
   datasets = new Map<string, unknown[]>();
-  started: { maxTotalChargeUsd?: number | null; build: string; webhook: unknown }[] = [];
+  started: { maxTotalChargeUsd?: number | null; build: string; webhook: unknown; input: unknown }[] = [];
   next: Array<unknown[] | "fail"> = [];
   client: ApifyClient = {
     startRun: async (r) => {
-      this.started.push({ maxTotalChargeUsd: r.maxTotalChargeUsd, build: r.build, webhook: r.webhook });
+      this.started.push({ maxTotalChargeUsd: r.maxTotalChargeUsd, build: r.build, webhook: r.webhook, input: r.input });
       const id = `run-${RUN}-${this.started.length}`;
       const run: ApifyRun = { id, status: "RUNNING", defaultDatasetId: `ds-${id}`, usageTotalUsd: null };
       this.runs.set(id, run);
@@ -201,6 +204,55 @@ describe.skipIf(!HAS_DB)("Apify ingestion (live postgres, stubbed Apify)", () =>
     const stored = await getDb().selectFrom("supply").select("category").where("source_id", "=", apifySupplySourceId(sourceId)).where("external_ref", "=", `${RUN}-5`).executeTakeFirstOrThrow();
     expect(stored.category).toBe("collectibles");
     expect((await listQuarantine({ sourceId })).filter((q) => q.reason === "category_unmapped")).toEqual([]);
+  });
+
+  it("builds each run's searches from buyer demand first, then the list, and credits what each found", async () => {
+    const runRow = (await getDb().insertInto("intel_runs").values({ notes: "{}" }).returning("id").executeTakeFirstOrThrow()).id;
+    const want = `standing desks ${RUN}`;
+    await insertIntelLead({
+      runId: runRow, kind: "demand", title: "Need 40 standing desks", summary: "Office fit-out", url: `https://buyers-${RUN}.example.com/desks`, urlHash: `want-${RUN}`,
+      hostname: `buyers-${RUN}.example.com`, query: "q", searchProvider: "stub", publishedAt: null, ageText: null, item: want, category: null, quantity: "40",
+      location: null, deadline: null, priceMinor: null, currency: null, urgency: "high", credibility: 0.9, contact: null, facts: [], oppositeQueries: [],
+    });
+    await getDb().updateTable("intel_leads").set({ evidence_level: "observed" }).where("url_hash", "=", `want-${RUN}`).execute();
+    const source = (await getApifySource(sourceId))!;
+    await updateApifyConfig(
+      sourceId,
+      {
+        expectedFields: [...(source.apify_expected_fields ?? []), "searchUrl"],
+        searchPlan: { urlTemplate: `https://lots-${RUN}.example.com/{city}/search?query={query}`, cities: ["detroit"], queries: ["pallet tools"], fromDemand: true, perRun: 3, searchUrlField: "searchUrl" },
+      },
+      STAFF,
+    );
+
+    expect((await apifyCycle(deps())).started[sourceId]).toMatch(/^started:/);
+    const urls = ((apify.started.at(-1)!.input as { startUrls: { url: string }[] }).startUrls).map((u) => u.url);
+    const demandUrl = `https://lots-${RUN}.example.com/detroit/search?query=${encodeURIComponent(want)}`;
+    const listUrl = `https://lots-${RUN}.example.com/detroit/search?query=pallet%20tools`;
+    expect(urls[0]).toBe(demandUrl);
+    expect(urls).toContain(listUrl);
+    // The base input is kept around the planned URLs.
+    expect(apify.started.at(-1)!.input).toMatchObject({ maxItems: 50 });
+
+    apify.next.push([item(20, { searchUrl: demandUrl }), item(21, { searchUrl: `${demandUrl}/` }), item(1, { searchUrl: listUrl })]);
+    const runId = apify.finishLatest(0.01);
+    expect((await processApifyRun(runId, apify.client)).outcome).toBe("ingested");
+    const [latest] = await listApifyRuns(sourceId);
+    const searches = await listRunSearches(latest!.id);
+    expect(searches.find((s) => s.url === demandUrl)).toMatchObject({ origin: "demand", items: 2, items_new: 2 });
+    expect(searches.find((s) => s.url === listUrl)).toMatchObject({ origin: "list", items: 1, items_new: 0 });
+
+    // The same searches are not repeated within a day.
+    const again = (await apifyCycle(deps())).started[sourceId]!;
+    if (again.startsWith("started:")) {
+      const next = ((apify.started.at(-1)!.input as { startUrls: { url: string }[] }).startUrls).map((u) => u.url);
+      expect(next).not.toContain(demandUrl);
+      expect(next).not.toContain(listUrl);
+      apify.next.push([]);
+      await processApifyRun(apify.finishLatest(0), apify.client);
+    } else expect(again).toBe("skipped:no_searches_due");
+    await updateApifyConfig(sourceId, { searchPlan: null }, STAFF);
+    await getDb().deleteFrom("intel_leads").where("url_hash", "=", `want-${RUN}`).execute();
   });
 
   it("backs off after a failed run and pauses the source after three in a row", async () => {

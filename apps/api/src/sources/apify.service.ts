@@ -1,9 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException, UnauthorizedException } from "@nestjs/common";
 import { getConfig } from "@opportunity-os/config";
-import { apifyClient, parseFieldMap } from "@opportunity-os/connectors-sdk";
+import { apifyClient, parseFieldMap, parseSearchPlan } from "@opportunity-os/connectors-sdk";
 import {
   apifySpendToday,
-  createApifyRun,
+  listRunSearches,
   getApifySource,
   listApifyRuns,
   listQuarantine,
@@ -12,7 +12,7 @@ import {
   updateApifyConfig,
   type SourceActor,
 } from "@opportunity-os/db";
-import { MAX_ITEMS_PER_RUN, QuarantineError, apifyStartDecision, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem } from "@opportunity-os/intel";
+import { QuarantineError, apifyStartDecision, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem, startApifyRun } from "@opportunity-os/intel";
 import { admissibleCategories, isAdmissible } from "@opportunity-os/risk";
 import { timingSafeStringEqual } from "../common/webhook-signature";
 import type { ApifyConfigBody, ApifySourceBody, QuarantineDecisionBody } from "./apify.dto";
@@ -48,6 +48,13 @@ export class ApifyService {
     return parsed.map;
   }
 
+  private searchPlan(v: unknown) {
+    if (v === null || v === undefined) return v;
+    const parsed = parseSearchPlan(v);
+    if ("errors" in parsed) throw new BadRequestException({ message: "Invalid search plan", issues: parsed.errors });
+    return parsed.plan;
+  }
+
   status() {
     const a = getConfig().connectors.apify;
     return { configured: Boolean(a.token), webhook: Boolean(this.webhook()), dailyBudgetUsd: a.dailyBudgetUsd, categories: admissibleCategories() };
@@ -70,6 +77,7 @@ export class ApifyService {
         expectedFields: body.expectedFields ?? null,
         maxItems: body.maxItems ?? null,
         maxChargeUsd: body.maxChargeUsd ?? null,
+        searchPlan: this.searchPlan(body.searchPlan) ?? null,
       },
       actor,
     ).catch((err: unknown) => {
@@ -80,7 +88,11 @@ export class ApifyService {
   }
 
   async configure(id: string, body: ApifyConfigBody, actor: SourceActor) {
-    const updated = await updateApifyConfig(id, { ...body, ...(body.fieldMap !== undefined ? { fieldMap: this.fieldMap(body.fieldMap) } : {}) }, actor);
+    const updated = await updateApifyConfig(
+      id,
+      { ...body, ...(body.fieldMap !== undefined ? { fieldMap: this.fieldMap(body.fieldMap) } : {}), ...(body.searchPlan !== undefined ? { searchPlan: this.searchPlan(body.searchPlan) } : {}) },
+      actor,
+    );
     if (!updated) throw new NotFoundException(`Apify source ${id} not found`);
     return { ...updated, policy_gaps: policyGaps(updated) };
   }
@@ -89,7 +101,13 @@ export class ApifyService {
     const source = await getApifySource(id);
     if (!source) throw new NotFoundException(`Apify source ${id} not found`);
     const [runs, quarantine] = await Promise.all([listApifyRuns(id), listQuarantine({ sourceId: id, limit: 50 })]);
-    return { config: { input: source.apify_input, fieldMap: source.apify_field_map, expectedFields: source.apify_expected_fields, maxItems: source.apify_max_items, maxChargeUsd: source.apify_max_charge_usd }, runs, quarantine };
+    const searches = runs[0] ? await listRunSearches(runs[0].id) : [];
+    return {
+      config: { input: source.apify_input, fieldMap: source.apify_field_map, expectedFields: source.apify_expected_fields, maxItems: source.apify_max_items, maxChargeUsd: source.apify_max_charge_usd, searchPlan: source.apify_search },
+      runs,
+      quarantine,
+      lastSearches: searches,
+    };
   }
 
   /** Starts a run now: every rule applies except the minimum interval. */
@@ -100,16 +118,9 @@ export class ApifyService {
     const spent = { source: (await sourceSpendToday()).get(id) ?? 0, all: await apifySpendToday() };
     const decision = await apifyStartDecision({ ...source, last_run_at: null }, { client, webhook: this.webhook(), dailyBudgetUsd: getConfig().connectors.apify.dailyBudgetUsd }, spent);
     if ("skip" in decision) throw new ConflictException({ message: `Cannot run now: ${decision.skip.replaceAll("_", " ")}`, reason: decision.skip });
-    const run = await client.startRun({
-      actorId: source.apify_actor_id!,
-      build: source.apify_actor_version!,
-      input: source.apify_input ?? {},
-      maxItems: Math.min(source.apify_max_items ?? MAX_ITEMS_PER_RUN, MAX_ITEMS_PER_RUN),
-      maxTotalChargeUsd: decision.maxChargeUsd,
-      timeoutSecs: 3600,
-      webhook: this.webhook(),
-    });
-    return createApifyRun(id, { apifyRunId: run.id, datasetId: run.defaultDatasetId ?? null, apifyStatus: run.status, maxChargeUsd: decision.maxChargeUsd });
+    const started = await startApifyRun(source, { client, webhook: this.webhook(), dailyBudgetUsd: getConfig().connectors.apify.dailyBudgetUsd }, decision.maxChargeUsd);
+    if ("skip" in started) throw new ConflictException({ message: `Cannot run now: ${started.skip.replaceAll("_", " ")}`, reason: started.skip });
+    return started.run;
   }
 
   quarantine(status?: "pending" | "released" | "discarded") {

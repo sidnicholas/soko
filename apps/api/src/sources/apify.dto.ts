@@ -29,6 +29,8 @@ export const ApifySourceSchema = z.object({
   maxChargeUsd: z.number().positive().max(100).nullish(),
   minIntervalMinutes: z.number().int().positive().max(43_200).nullish(),
   maxDailyUsd: z.number().positive().max(100).nullish(),
+  /** Build search URLs each run from demand and a keyword × city list (validated by the service). */
+  searchPlan: z.record(z.unknown()).nullish(),
   notes: z.string().trim().max(2000).nullish(),
   evidenceUrl: z.string().url().max(2000).nullish(),
 });
@@ -42,6 +44,7 @@ export const ApifyConfigSchema = z.object({
   expectedFields: fieldNames.nullable().optional(),
   maxItems: z.number().int().positive().max(1000).nullable().optional(),
   maxChargeUsd: z.number().positive().max(100).nullable().optional(),
+  searchPlan: z.record(z.unknown()).nullable().optional(),
 });
 export type ApifyConfigBody = z.infer<typeof ApifyConfigSchema>;
 

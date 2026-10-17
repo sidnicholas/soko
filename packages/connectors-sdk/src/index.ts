@@ -55,3 +55,4 @@ export class ConnectorRegistry {
     return this.all().filter((c) => c.capabilities.includes(capability));
   }
 }
+export * from "./apify-search";

@@ -2,13 +2,26 @@
 
 import { useState } from "react";
 import { Badge, Button, Card, DataTable, EmptyState, Field, Input, Select, Textarea, tokens, tonePalette, type Tone } from "@opportunity-os/ui";
-import { api, type ApifyFieldMapInput, type ApifyRunRow, type QuarantinedItem } from "../lib/api";
+import { api, type ApifyFieldMapInput, type ApifyRunRow, type ApifySourceDetail, type QuarantinedItem } from "../lib/api";
 import { useAsync } from "../lib/useAsync";
 
 const words = (s: string) => s.replaceAll("_", " ");
 const errorText = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
 const num = { fontVariantNumeric: "tabular-nums" } as const;
 const RUN_TONE: Record<ApifyRunRow["status"], Tone> = { running: "progress", ingesting: "progress", succeeded: "success", failed: "danger" };
+
+const SEARCH_PLAN_EXAMPLE = JSON.stringify(
+  {
+    urlTemplate: "https://www.facebook.com/marketplace/{city}/search/?query={query}",
+    cities: ["detroit"],
+    queries: ["pallet tools", "contractor surplus", "lot of appliances"],
+    fromDemand: true,
+    perRun: 5,
+    searchUrlField: "facebookUrl",
+  },
+  null,
+  2,
+);
 
 const EXAMPLE_MAP: ApifyFieldMapInput = { kind: "supply", externalId: "id", title: "title", description: "description", url: "url", price: "price", currency: "const:USD", category: "category" };
 
@@ -147,6 +160,7 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
   const [editing, setEditing] = useState(false);
   const [mapText, setMapText] = useState("");
   const [inputText, setInputText] = useState("");
+  const [planText, setPlanText] = useState("");
 
   async function act(fn: () => Promise<unknown>, done: string) {
     setBusy(true);
@@ -185,6 +199,7 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
                 onClick={() => {
                   setMapText(JSON.stringify(d.config.fieldMap, null, 2));
                   setInputText(JSON.stringify(d.config.input ?? {}, null, 2));
+                  setPlanText(d.config.searchPlan ? JSON.stringify(d.config.searchPlan, null, 2) : "");
                   setEditing(true);
                 }}
               >
@@ -203,13 +218,25 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
             <Field label="Field map (JSON)" htmlFor={`am-${id}`}>
               <Textarea id={`am-${id}`} value={mapText} onChange={(e) => setMapText(e.target.value)} style={{ fontFamily: "monospace", minHeight: 180 }} />
             </Field>
+            <Field
+              label="Search plan (JSON, optional)"
+              htmlFor={`ap-${id}`}
+              hint='Builds the search URLs each run: what buyers asked for lately first (fromDemand), then queries × cities in rotation; searches that keep finding nothing new drop down. Empty keeps the input fixed.'
+            >
+              <Textarea id={`ap-${id}`} value={planText} onChange={(e) => setPlanText(e.target.value)} placeholder={SEARCH_PLAN_EXAMPLE} style={{ fontFamily: "monospace", minHeight: 160 }} />
+            </Field>
             <div style={{ display: "flex", gap: tokens.space.sm }}>
               <Button
                 size="sm"
                 loading={busy}
                 onClick={async () => {
                   const ok = await act(
-                    () => api.configureApifySource(id, { input: parseJson<Record<string, unknown>>(inputText, "Actor input"), fieldMap: parseJson<ApifyFieldMapInput>(mapText, "Field map") }),
+                    () =>
+                      api.configureApifySource(id, {
+                        input: parseJson<Record<string, unknown>>(inputText, "Actor input"),
+                        fieldMap: parseJson<ApifyFieldMapInput>(mapText, "Field map"),
+                        searchPlan: planText.trim() ? parseJson<Record<string, unknown>>(planText, "Search plan") : null,
+                      }),
                     "Saved.",
                   );
                   if (ok) setEditing(false);
@@ -237,10 +264,31 @@ export function ApifySourcePanel({ id, active, onChange }: { id: string; active:
               <div style={{ color: tokens.color.inkSubtle, marginTop: tokens.space.sm }}>
                 Expected fields: {d.config.expectedFields ? d.config.expectedFields.join(", ") : "learnt from the first run"}
               </div>
+              {d.config.searchPlan && (
+                <>
+                  <div style={{ color: tokens.color.inkSubtle, marginTop: tokens.space.sm }}>Search plan</div>
+                  <pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{JSON.stringify(d.config.searchPlan, null, 2)}</pre>
+                </>
+              )}
             </div>
           </div>
         )}
       </Card>
+      {d.lastSearches.length > 0 && (
+        <Card title="Latest run's searches" flush>
+          <DataTable
+            columns={[
+              { key: "term", header: "Search", render: (s: ApifySourceDetail["lastSearches"][number]) => <a href={s.url} target="_blank" rel="noopener noreferrer nofollow" className="oos-link">{s.term}</a> },
+              { key: "city", header: "City", render: (s: ApifySourceDetail["lastSearches"][number]) => s.city ?? "—" },
+              { key: "origin", header: "From", render: (s: ApifySourceDetail["lastSearches"][number]) => <Badge tone={s.origin === "demand" ? "accent" : "neutral"}>{s.origin === "demand" ? "buyer demand" : "list"}</Badge> },
+              { key: "items", header: "Items", align: "right", render: (s: ApifySourceDetail["lastSearches"][number]) => <span style={num}>{s.items}</span> },
+              { key: "new", header: "New", align: "right", render: (s: ApifySourceDetail["lastSearches"][number]) => <span style={num}>{s.items_new}</span> },
+            ]}
+            rows={d.lastSearches}
+            getRowKey={(s) => s.url}
+          />
+        </Card>
+      )}
       <Card title="Actor runs" flush>
         <DataTable
           columns={[

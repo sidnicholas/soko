@@ -684,6 +684,7 @@ export interface SourceRegistryTable {
   apify_expected_fields: JsonNullable;
   apify_max_items: number | null;
   apify_max_charge_usd: Numeric | null;
+  apify_search: JsonNullable;
   permission_basis: Generated<string>;
   robots_tos_assessment: string | null;
   data_use_constraints: string | null;
@@ -734,6 +735,19 @@ export interface ApifyRunsTable {
   started_at: Generated<Timestamp>;
   finished_at: Timestamp | null;
   updated_at: Generated<Timestamp>;
+}
+
+export interface ApifyRunSearchesTable {
+  id: Generated<string>;
+  apify_run_id: string;
+  source_id: string;
+  term: string;
+  city: string | null;
+  url: string;
+  origin: string;
+  items: Generated<number>;
+  items_new: Generated<number>;
+  created_at: Generated<Timestamp>;
 }
 
 export interface SourceObservationsTable {
@@ -841,6 +855,7 @@ export interface Database {
   source_policy_reviews: SourcePolicyReviewsTable;
   source_runs: SourceRunsTable;
   apify_runs: ApifyRunsTable;
+  apify_run_searches: ApifyRunSearchesTable;
   source_observations: SourceObservationsTable;
   ingestion_quarantine: IngestionQuarantineTable;
 }

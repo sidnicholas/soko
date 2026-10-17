@@ -19,6 +19,8 @@ export interface ApifySourceConfig {
   expectedFields: string[] | null;
   maxItems: number | null;
   maxChargeUsd: number | null;
+  /** Build the search URLs each run (ADR-042 addendum); null keeps the input fixed. */
+  searchPlan?: unknown;
 }
 
 export interface ApifySource extends RegistrySource {
@@ -27,6 +29,7 @@ export interface ApifySource extends RegistrySource {
   apify_expected_fields: string[] | null;
   apify_max_items: number | null;
   apify_max_charge_usd: number | null;
+  apify_search: unknown;
 }
 
 /** A source with its Apify configuration. */
@@ -35,7 +38,7 @@ export async function getApifySource(id: string): Promise<ApifySource | undefine
   if (!source || source.kind !== "apify_actor") return undefined;
   const cfg = await getDb()
     .selectFrom("source_registry")
-    .select(["apify_input", "apify_field_map", "apify_expected_fields", "apify_max_items", sql<number | null>`apify_max_charge_usd::float`.as("apify_max_charge_usd")])
+    .select(["apify_input", "apify_field_map", "apify_expected_fields", "apify_max_items", sql<number | null>`apify_max_charge_usd::float`.as("apify_max_charge_usd"), "apify_search"])
     .where("id", "=", id)
     .executeTakeFirstOrThrow();
   return { ...source, ...cfg, apify_expected_fields: Array.isArray(cfg.apify_expected_fields) ? (cfg.apify_expected_fields as string[]) : null };
@@ -81,6 +84,7 @@ export async function registerApifySource(
           apify_expected_fields: input.expectedFields ? json(input.expectedFields) : null,
           apify_max_items: input.maxItems,
           apify_max_charge_usd: input.maxChargeUsd,
+          apify_search: input.searchPlan ? json(input.searchPlan) : null,
           min_interval_minutes: input.minIntervalMinutes,
           max_daily_usd: input.maxDailyUsd,
         })
@@ -114,6 +118,7 @@ export async function updateApifyConfig(sourceId: string, cfg: Partial<ApifySour
           ...(cfg.expectedFields !== undefined ? { apify_expected_fields: cfg.expectedFields ? json(cfg.expectedFields) : null } : {}),
           ...(cfg.maxItems !== undefined ? { apify_max_items: cfg.maxItems } : {}),
           ...(cfg.maxChargeUsd !== undefined ? { apify_max_charge_usd: cfg.maxChargeUsd } : {}),
+          ...(cfg.searchPlan !== undefined ? { apify_search: cfg.searchPlan ? json(cfg.searchPlan) : null } : {}),
           ...(programChanged && before.status === "active" ? { status: "proposed", status_reason: "apify_actor_changed_needs_review", terms_reviewed_at: null } : {}),
           updated_at: sql`now()`,
         })
@@ -447,4 +452,54 @@ export async function resolveQuarantine(id: string, status: "released" | "discar
 export async function quarantineCounts(): Promise<Map<string, number>> {
   const rows = await getDb().selectFrom("ingestion_quarantine").select(["source_id", sql<number>`count(*)::int`.as("n")]).where("status", "=", "pending").groupBy("source_id").execute();
   return new Map(rows.map((r) => [r.source_id, r.n]));
+}
+
+// ---------------------------------------------------------------------------
+// Search plans: what each run searched, and how each search did
+
+export async function recordRunSearches(runId: string, sourceId: string, searches: { term: string; city: string | null; url: string; origin: "demand" | "list" }[]): Promise<void> {
+  if (searches.length === 0) return;
+  await getDb()
+    .insertInto("apify_run_searches")
+    .values(searches.map((s) => ({ apify_run_id: runId, source_id: sourceId, term: s.term, city: s.city, url: s.url, origin: s.origin })))
+    .execute();
+}
+
+/** Each (term, city) a source searched: when last, and new items of its last few searches, newest first. */
+export async function searchHistory(sourceId: string): Promise<Map<string, { lastAt: string; recentNew: number[] }>> {
+  const rows = await sql<{ term: string; city: string | null; last_at: string; recent: number[] }>`
+    select term, city, max(created_at)::text as last_at,
+           (array_agg(items_new order by created_at desc))[1:5] as recent
+    from apify_run_searches s
+    where source_id = ${sourceId}
+      and exists (select 1 from apify_runs r where r.id = s.apify_run_id and r.status in ('succeeded', 'running', 'ingesting'))
+    group by term, city
+  `.execute(getDb());
+  return new Map(rows.rows.map((r) => [`${r.term}\u0000${r.city ?? ""}`, { lastAt: r.last_at, recentNew: r.recent.map(Number) }]));
+}
+
+/** What buyers asked for lately: the item of each observed demand lead, newest first. */
+export async function recentDemandTerms(days = 7, limit = 50): Promise<string[]> {
+  const rows = await getDb()
+    .selectFrom("intel_leads")
+    .select(["item"])
+    .where("kind", "=", "demand")
+    .where("evidence_level", "=", "observed")
+    .where("item", "is not", null)
+    .where(sql<boolean>`discovered_at >= now() - make_interval(days => ${days})`)
+    .orderBy("discovered_at", "desc")
+    .limit(limit)
+    .execute();
+  return rows.map((r) => r.item!).filter(Boolean);
+}
+
+export async function listRunSearches(runId: string) {
+  return getDb().selectFrom("apify_run_searches").select(["term", "city", "url", "origin", "items", "items_new"]).where("apify_run_id", "=", runId).orderBy("created_at").execute();
+}
+
+/** Credits items to the search that found them (by its URL). */
+export async function creditRunSearches(runId: string, byUrl: Map<string, { items: number; itemsNew: number }>): Promise<void> {
+  for (const [url, c] of byUrl) {
+    await getDb().updateTable("apify_run_searches").set({ items: c.items, items_new: c.itemsNew }).where("apify_run_id", "=", runId).where("url", "=", url).execute();
+  }
 }

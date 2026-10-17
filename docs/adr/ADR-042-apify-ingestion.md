@@ -74,6 +74,19 @@ no request signature; its guidance is a secret only the receiver knows.
 - **UI**: Source Registry gains "Register an actor", the actor's
   configuration and runs in its detail, "Run now", and a Quarantine card.
 
+## Addendum: search plans (2026-10-17, migration 0033)
+
+A source may carry a search plan instead of a fixed input: a URL template
+with `{city}` and `{query}`, cities, a keyword list, `fromDemand`, searches
+per run (≤ 20) and the item field naming the search that found it
+(Facebook: `facebookUrl`). Each run builds its URLs: the `item` of observed
+demand leads from the last 7 days first (up to 60% of the run when a list
+exists), then keyword × city in rotation, never-searched first, then
+longest ago. A search run in the last 24 hours is skipped; one that found
+nothing new three times running waits 7 days and then goes last. Each run's
+searches are stored (`apify_run_searches`) and credited with the items and
+new items they found. With nothing due, no run starts (`no_searches_due`).
+
 ## Consequences
 
 - No actor is registered: each needs the owner to choose a site, obtain its

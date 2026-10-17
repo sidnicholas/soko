@@ -749,6 +749,7 @@ export interface ApifySourceInput {
   maxChargeUsd?: number | null;
   minIntervalMinutes?: number | null;
   maxDailyUsd?: number | null;
+  searchPlan?: Record<string, unknown> | null;
   notes?: string | null;
   evidenceUrl?: string | null;
 }
@@ -785,9 +786,11 @@ export interface QuarantinedItem {
 }
 
 export interface ApifySourceDetail {
-  config: { input: unknown; fieldMap: ApifyFieldMapInput | null; expectedFields: string[] | null; maxItems: number | null; maxChargeUsd: number | null };
+  config: { input: unknown; fieldMap: ApifyFieldMapInput | null; expectedFields: string[] | null; maxItems: number | null; maxChargeUsd: number | null; searchPlan: Record<string, unknown> | null };
   runs: ApifyRunRow[];
   quarantine: QuarantinedItem[];
+  /** The searches of the latest run, with what each found. */
+  lastSearches: { term: string; city: string | null; url: string; origin: "demand" | "list"; items: number; items_new: number }[];
 }
 
 export const api = {
@@ -834,7 +837,7 @@ export const api = {
   apifyStatus: () => request<{ configured: boolean; webhook: boolean; dailyBudgetUsd: number; categories: string[] }>("/ingestion/apify/status"),
   registerApifySource: (body: ApifySourceInput) => request<RegistrySource>("/ingestion/apify/sources", jsonBody(body)),
   apifySource: (id: string) => request<ApifySourceDetail>(`/ingestion/apify/sources/${id}`),
-  configureApifySource: (id: string, body: Partial<Pick<ApifySourceInput, "actorId" | "actorVersion" | "input" | "fieldMap" | "expectedFields" | "maxItems" | "maxChargeUsd">>) =>
+  configureApifySource: (id: string, body: Partial<Pick<ApifySourceInput, "actorId" | "actorVersion" | "input" | "fieldMap" | "expectedFields" | "maxItems" | "maxChargeUsd" | "searchPlan">>) =>
     request<RegistrySource>(`/ingestion/apify/sources/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   runApifySource: (id: string) => request<ApifyRunRow>(`/ingestion/apify/sources/${id}/run`, jsonBody({})),
   quarantine: () => request<QuarantinedItem[]>("/ingestion/quarantine"),

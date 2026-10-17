@@ -5,6 +5,9 @@ import {
   mapApifyItem,
   normalizeObservation,
   parseFieldMap,
+  parseSearchPlan,
+  planSearches,
+  runInput,
   withoutDropped,
   type ApifyClient,
   type ApifyFieldMap,
@@ -16,6 +19,11 @@ import {
   apifySpendToday,
   claimApifyRun,
   createApifyRun,
+  creditRunSearches,
+  listRunSearches,
+  recentDemandTerms,
+  recordRunSearches,
+  searchHistory,
   failApifyRun,
   findMergeTarget,
   finishApifyRun,
@@ -188,6 +196,51 @@ export async function apifyStartDecision(source: ApifySource, deps: ApifyDeps, s
   return { maxChargeUsd: Math.round(maxChargeUsd * 10_000) / 10_000 };
 }
 
+/** Item URLs and planned URLs compared loosely: Apify may re-encode or add a trailing slash. */
+export function sameSearchUrl(a: string, b: string): boolean {
+  const norm = (u: string) => {
+    try {
+      return decodeURIComponent(u).toLowerCase().replace(/\/+(\?|$)/, "$1").replace(/\+/g, " ");
+    } catch {
+      return u.toLowerCase();
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * Starts one run of a source. With a search plan, the URLs are built now —
+ * recent buyer demand first, then the list in rotation — and recorded with
+ * the run so their yield can be credited; nothing due means no run.
+ */
+export async function startApifyRun(source: ApifySource, deps: ApifyDeps, maxChargeUsd: number): Promise<{ run: ApifyRunRow } | { skip: string }> {
+  let input: unknown = source.apify_input ?? {};
+  let searches: ReturnType<typeof planSearches> = [];
+  if (source.apify_search) {
+    const parsed = parseSearchPlan(source.apify_search);
+    if (!("plan" in parsed)) return { skip: "invalid_search_plan" };
+    const demand = parsed.plan.fromDemand ? await recentDemandTerms() : [];
+    const history = await searchHistory(source.id);
+    // Without a field crediting items to searches every search would look barren: keep only when each ran.
+    if (!parsed.plan.searchUrlField) for (const h of history.values()) h.recentNew = [];
+    searches = planSearches(parsed.plan, demand, history, deps.now);
+    if (searches.length === 0) return { skip: "no_searches_due" };
+    input = runInput(source.apify_input, parsed.plan, searches);
+  }
+  const run = await deps.client.startRun({
+    actorId: source.apify_actor_id!,
+    build: source.apify_actor_version!,
+    input,
+    maxItems: Math.min(source.apify_max_items ?? MAX_ITEMS_PER_RUN, MAX_ITEMS_PER_RUN),
+    maxTotalChargeUsd: maxChargeUsd,
+    timeoutSecs: 3600,
+    webhook: deps.webhook,
+  });
+  const row = await createApifyRun(source.id, { apifyRunId: run.id, datasetId: run.defaultDatasetId ?? null, apifyStatus: run.status, maxChargeUsd });
+  await recordRunSearches(row.id, source.id, searches);
+  return { run: row };
+}
+
 /** Starts a run for every active actor source that is due. */
 export async function startDueApifyRuns(deps: ApifyDeps): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -200,18 +253,13 @@ export async function startDueApifyRuns(deps: ApifyDeps): Promise<Record<string,
       continue;
     }
     try {
-      const run = await deps.client.startRun({
-        actorId: source.apify_actor_id!,
-        build: source.apify_actor_version!,
-        input: source.apify_input ?? {},
-        maxItems: Math.min(source.apify_max_items ?? MAX_ITEMS_PER_RUN, MAX_ITEMS_PER_RUN),
-        maxTotalChargeUsd: decision.maxChargeUsd,
-        timeoutSecs: 3600,
-        webhook: deps.webhook,
-      });
-      await createApifyRun(source.id, { apifyRunId: run.id, datasetId: run.defaultDatasetId ?? null, apifyStatus: run.status, maxChargeUsd: decision.maxChargeUsd });
+      const started = await startApifyRun(source, deps, decision.maxChargeUsd);
+      if ("skip" in started) {
+        out[source.id] = `skipped:${started.skip}`;
+        continue;
+      }
       spentAll += decision.maxChargeUsd;
-      out[source.id] = `started:${run.id}`;
+      out[source.id] = `started:${started.run.apify_run_id}`;
     } catch (err) {
       // Could not even start (bad token, unknown actor, build not found): counts as a failure.
       await recordFailure(source, null, String(err), null, null, deps.now);
@@ -279,6 +327,10 @@ export async function processApifyRun(apifyRunId: string, client: ApifyClient, n
   // No expected fields yet: this first run sets them (the reviewer gave none).
   const learning = source.apify_expected_fields === null;
   const seenFields = new Set<string>();
+  const plan = source.apify_search ? parseSearchPlan(source.apify_search) : null;
+  const urlField = plan && "plan" in plan ? plan.plan.searchUrlField : undefined;
+  const planned = urlField ? await listRunSearches(row.id) : [];
+  const credit = new Map<string, { items: number; itemsNew: number }>();
   try {
     for (let offset = 0; offset < limit; offset += PAGE) {
       const items = await client.datasetItems(run.defaultDatasetId, offset, Math.min(PAGE, limit - offset));
@@ -288,6 +340,14 @@ export async function processApifyRun(apifyRunId: string, client: ApifyClient, n
         if (learning && kept && typeof kept === "object") for (const k of Object.keys(kept)) seenFields.add(k);
         const state = await ingestApifyItem(source, parsed.map, item, row.id);
         counts[state === "quarantined" ? "quarantined" : state]++;
+        const from = urlField && item && typeof item === "object" ? (item as Record<string, unknown>)[urlField] : undefined;
+        const search = typeof from === "string" ? planned.find((p) => sameSearchUrl(p.url, from)) : undefined;
+        if (search) {
+          const c = credit.get(search.url) ?? { items: 0, itemsNew: 0 };
+          c.items++;
+          if (state === "new" || state === "merged") c.itemsNew++;
+          credit.set(search.url, c);
+        }
       }
       if (items.length < PAGE) break;
     }
@@ -296,6 +356,7 @@ export async function processApifyRun(apifyRunId: string, client: ApifyClient, n
     return { outcome: "failed", counts };
   }
   if (learning && seenFields.size > 0) await setExpectedFields(source.id, [...seenFields]);
+  await creditRunSearches(row.id, credit);
   await finishApifyRun(row.id, counts);
   await recordSourceRuns([{ sourceId: source.id, intelRunId: null, query: `apify:${source.apify_actor_id}`, results: counts.total, newResults: counts.new + counts.changed, leads: 0, costUsd: usage ?? 0, error: null }]);
   await recordSourceOutcome(source.id, true, healthFor);
