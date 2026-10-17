@@ -210,12 +210,12 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       try {
         const { prompt, untrusted } = detectionPrompt(q.query, fresh);
         const res = await opts.llm.runStructured({ taskClass: "extraction", system: DETECTION_SYSTEM, prompt, untrustedContext: untrusted }, DetectionSchema, { outputSchema: DetectionWire });
-        budget.recordLlm(res.telemetry.usd);
+        budget.recordLlm(res.telemetry.usd, { stage: "detection", ...res.telemetry });
         record.costUsd = budget.spentUsd - spentBefore;
         detection = res.value;
       } catch (err) {
         // A reply that never parsed was still billed: keep the ledger honest.
-        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
+        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd, { stage: "detection_failed", ...err.telemetry });
         else throw modelUnavailable(err);
         record.costUsd = budget.spentUsd - spentBefore;
         errors.push(`detect "${q.query}": ${String(err).slice(0, 200)}`);
@@ -388,23 +388,25 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
         break;
       }
       let a: Assessment;
+      let assessedBy = "unknown";
       try {
         const { prompt, untrusted } = assessmentPrompt(
           { kind: lead.kind, title: lead.title, summary: lead.summary, url: lead.url, publishedAt: lead.publishedAt, facts: lead.facts, contact: lead.contact },
           counter,
         );
         const res = await opts.llm.runStructured({ taskClass: "research_synthesis", system: ASSESSMENT_SYSTEM, prompt, untrustedContext: untrusted }, AssessmentSchema, { outputSchema: AssessmentWire });
-        budget.recordLlm(res.telemetry.usd);
+        budget.recordLlm(res.telemetry.usd, { stage: "assessment", ...res.telemetry });
         a = res.value;
+        assessedBy = `${res.telemetry.provider ?? "unknown"}/${res.telemetry.model ?? "unknown"}`;
       } catch (err) {
-        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
+        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd, { stage: "assessment_failed", ...err.telemetry });
         else throw modelUnavailable(err);
         errors.push(`assess ${lead.url}: ${String(err).slice(0, 200)}`);
         continue;
       }
 
       // No cap unless the operator sets one (PRD v2 §17 decision, 2026-10-16).
-      const bucket = await persistCandidate(runId, lead, counter, a, opts.maxCapitalUsd ?? Number.POSITIVE_INFINITY);
+      const bucket = await persistCandidate(runId, lead, counter, a, opts.maxCapitalUsd ?? Number.POSITIVE_INFINITY, assessedBy);
       await setIntelLeadStatus(lead.leadId, "assessed");
       if (bucket === "act_now" || bucket === "verify_next") await touchIntelSource(lead.hostname, lead.kind, { actionable: 1 });
       candidates++;
@@ -421,7 +423,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       llmUsd: budget.llmUsd,
       leadsFound,
       candidates,
-      notes,
+      notes: { ...notes, models: budget.models },
     };
     await finishIntelRun(runId, totals);
     await flushSourceRuns(sourceRuns);
@@ -437,7 +439,7 @@ export async function runIntelCycle(opts: IntelRunOptions): Promise<IntelRunResu
       llmUsd: budget.llmUsd,
       leadsFound,
       candidates: 0,
-      notes: { ...notes, fatal: String(err) },
+      notes: { ...notes, models: budget.models, fatal: String(err) },
     };
     await finishIntelRun(runId, totals);
     await flushSourceRuns(sourceRuns);
@@ -567,10 +569,10 @@ async function revisitHypotheses(
       try {
         const { prompt, untrusted } = detectionPrompt(query, fresh);
         const res = await opts.llm.runStructured({ taskClass: "extraction", system: DETECTION_SYSTEM, prompt, untrustedContext: untrusted }, DetectionSchema, { outputSchema: DetectionWire });
-        budget.recordLlm(res.telemetry.usd);
+        budget.recordLlm(res.telemetry.usd, { stage: "hypothesis_check", ...res.telemetry });
         detection = res.value;
       } catch (err) {
-        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd);
+        if (err instanceof StructuredOutputError) budget.recordLlm(err.telemetry.usd, { stage: "hypothesis_check_failed", ...err.telemetry });
         else throw modelUnavailable(err);
         errors.push(`hypothesis detect "${query}": ${String(err).slice(0, 200)}`);
       }
@@ -663,7 +665,7 @@ function modeFor(a: Assessment, service: boolean): DealMode {
   return "brokerage";
 }
 
-async function persistCandidate(runId: string, lead: AssessableLead, counter: WebSearchResult[], a: Assessment, maxCapitalUsd: number) {
+async function persistCandidate(runId: string, lead: AssessableLead, counter: WebSearchResult[], a: Assessment, maxCapitalUsd: number, assessedBy: string) {
   const service = lead.kind === "problem" ? serviceByKey(a.service_key) : undefined;
   const counterResult = a.counter_index !== null ? counter[a.counter_index] : undefined;
   const counterpartyFound = a.counterparty_found && (lead.kind === "problem" ? service !== undefined : counterResult !== undefined);
@@ -743,7 +745,8 @@ async function persistCandidate(runId: string, lead: AssessableLead, counter: We
     evHighUsd: ev[1],
     confidence: confidenceFor(verification, a.probability),
     score,
-    explanation: { factors, modelFactors: a.factors, invalidators: a.invalidators, probability: a.probability, economics: { version: DEAL_ECONOMICS_VERSION, tier: deal.tier, gates: deal.gates } },
+    // Which model judged it (provider/model), so open-weight and Claude results can be compared.
+    explanation: { factors, modelFactors: a.factors, invalidators: a.invalidators, probability: a.probability, economics: { version: DEAL_ECONOMICS_VERSION, tier: deal.tier, gates: deal.gates }, assessedBy },
     outreach: suppressOutreach
       ? { primary: null, secondary: null, requiresApproval: true, note: "Inferred, not stated by the party: confirm the signal before any outreach." }
       : { primary: a.outreach.primary, secondary: a.outreach.secondary, requiresApproval: true },

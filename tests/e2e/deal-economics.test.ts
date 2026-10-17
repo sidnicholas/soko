@@ -106,7 +106,11 @@ describe.skipIf(!HAS_DB)("deal economics and evidence (live postgres)", () => {
   });
 
   it("rejects a headline spread that landed costs eat, keeps the profitable deal, and ranks profit first", async () => {
-    await runIntelCycle({ search, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 5, maxAssessments: 5, lane: "supply", counterpartSearches: 5, hypothesisChecks: 0 });
+    const { runId } = await runIntelCycle({ search, llm, dailyBudgetUsd: 1000, runsPerDay: 1, queriesPerRun: 5, maxAssessments: 5, lane: "supply", counterpartSearches: 5, hypothesisChecks: 0 });
+
+    // Which model did each stage, per run and per candidate (gate follow-up, 2026-10-17).
+    const run = await getDb().selectFrom("intel_runs").select("notes").where("id", "=", runId).executeTakeFirstOrThrow();
+    expect((run.notes as { models: Record<string, { calls: number }> }).models).toMatchObject({ "detection:stub/stub-1": { calls: 1 }, "assessment:stub/stub-1": { calls: 2 } });
 
     const tvs = await candidateFor(URL.headline);
     const deal = (tvs.economics as { deal: DealEconomics }).deal;
@@ -119,6 +123,8 @@ describe.skipIf(!HAS_DB)("deal economics and evidence (live postgres)", () => {
     expect(chairDeal).toMatchObject({ mode: "brokerage", tier: "medium", gates: [] });
     expect(chairDeal.costs.map((c) => [c.kind, c.label])).toEqual([["payment_fees", "default_assumption"]]);
     expect(chairs.bucket).not.toBe("rejected");
+    const explained = await getDb().selectFrom("intel_candidates").select("explanation").where("id", "=", chairs.id).executeTakeFirstOrThrow();
+    expect((explained.explanation as { assessedBy: string }).assessedBy).toBe("stub/stub-1");
 
     const { open } = await listIntelQueue();
     const ours = open.filter((c) => [chairs.id].includes(c.id));

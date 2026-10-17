@@ -8,6 +8,8 @@ export class SpendBudget {
   llmCalls = 0;
   searchUsd = 0;
   llmUsd = 0;
+  /** Calls and spend per stage and model ("detection", "openrouter/deepseek/…"), for the run's notes. */
+  readonly models: Record<string, { calls: number; usd: number }> = {};
 
   constructor(private readonly remainingUsd: number) {}
 
@@ -24,8 +26,14 @@ export class SpendBudget {
     this.searchUsd += usd;
   }
 
-  recordLlm(usd: number): void {
+  recordLlm(usd: number, by?: { stage: string; provider?: string; model?: string }): void {
     this.llmCalls++;
     this.llmUsd += usd;
+    if (by) {
+      const key = `${by.stage}:${by.provider ?? "unknown"}/${by.model ?? "unknown"}`;
+      const m = (this.models[key] ??= { calls: 0, usd: 0 });
+      m.calls++;
+      m.usd = Math.round((m.usd + usd) * 1e6) / 1e6;
+    }
   }
 }
