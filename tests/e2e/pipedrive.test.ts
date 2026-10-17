@@ -11,6 +11,8 @@ import { CrmService } from "../../apps/api/src/crm/crm.service";
  */
 const HAS_DB = Boolean(process.env.DATABASE_URL);
 const RUN = randomUUID().slice(0, 8);
+// Unique per run: deal ids key the elevation event, and suites can share a database.
+const DEAL = String(Math.floor(Math.random() * 1e9) + 1e5);
 const auth = (user: string, pass: string) => `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
 
 describe.skipIf(!HAS_DB)("Pipedrive (live postgres, stubbed API)", () => {
@@ -26,7 +28,7 @@ describe.skipIf(!HAS_DB)("Pipedrive (live postgres, stubbed API)", () => {
     globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
       calls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null });
       const path = new URL(String(url)).pathname;
-      const data = path === "/api/v2/deals" ? { id: 9001, status: "open", stage_id: 1, value: 300, currency: "USD" } : { id: 1 };
+      const data = path === "/api/v2/deals" ? { id: Number(DEAL), status: "open", stage_id: 1, value: 300, currency: "USD" } : { id: 1 };
       return { ok: true, status: 200, json: async () => ({ success: true, data }) } as Response;
     }) as typeof fetch;
 
@@ -57,10 +59,10 @@ describe.skipIf(!HAS_DB)("Pipedrive (live postgres, stubbed API)", () => {
 
   it("elevates a candidate once: a deal valued at mid net profit, a note, and a link", async () => {
     const first = await crm.elevateCandidate(candidateId, randomUUID());
-    expect(first).toMatchObject({ created: true, link: { external_id: "9001", external_url: "https://acme.pipedrive.com/deal/9001", external_status: "open" } });
+    expect(first).toMatchObject({ created: true, link: { external_id: DEAL, external_url: `https://acme.pipedrive.com/deal/${DEAL}`, external_status: "open" } });
     const deal = calls.find((c) => c.url.endsWith("/api/v2/deals"))!.body as Record<string, unknown>;
     expect(deal).toMatchObject({ title: "Broker the chair closeout", value: 300, currency: "USD" });
-    expect(calls.some((c) => c.url.endsWith("/api/v1/notes") && (c.body as { deal_id: number }).deal_id === 9001)).toBe(true);
+    expect(calls.some((c) => c.url.endsWith("/api/v1/notes") && (c.body as { deal_id: number }).deal_id === Number(DEAL))).toBe(true);
 
     const again = await crm.elevateCandidate(candidateId, randomUUID());
     expect(again.created).toBe(false);
@@ -88,7 +90,7 @@ describe.skipIf(!HAS_DB)("Pipedrive (live postgres, stubbed API)", () => {
   });
 
   it("applies stage and outcome back, once per event and in order", async () => {
-    const meta = (id: string, ts: string, action = "change") => ({ action, entity: "deal", entity_id: 9001, id, timestamp: ts });
+    const meta = (id: string, ts: string, action = "change") => ({ action, entity: "deal", entity_id: Number(DEAL), id, timestamp: ts });
     const ok = auth("pd", "secret");
 
     expect((await crm.handleWebhook(ok, { meta: meta(`a-${RUN}`, "2026-10-16T10:00:00Z"), data: { status: "open", stage_id: 2, value: 300, currency: "USD" }, previous: { stage_id: 1 } })).outcome).toBe("applied");
