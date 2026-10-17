@@ -115,6 +115,11 @@ export interface ApifyFieldMap {
   sellerName?: string;
   sellerUrl?: string;
   location?: string;
+  /**
+   * Top-level item fields removed before anything is read or stored, the
+   * quarantine included: personal data such as a private seller's identity.
+   */
+  dropFields?: string[];
 }
 
 const MAP_KEYS: (keyof ApifyFieldMap)[] = ["externalId", "title", "description", "url", "price", "currency", "category", "quantity", "condition", "sellerName", "sellerUrl", "location"];
@@ -134,11 +139,22 @@ export function parseFieldMap(v: unknown): { map: ApifyFieldMap } | { errors: st
     }
     if (typeof val !== "string" || val.length > 200) errors.push(`${k} must be a field path or const:value`);
   }
+  const drop = o["dropFields"];
+  if (drop !== undefined && (!Array.isArray(drop) || drop.some((d) => typeof d !== "string" || !d || d.length > 100) || drop.length > 100)) errors.push("dropFields must be a list of field names");
   if (errors.length) return { errors };
   const map: Record<string, unknown> = { kind: o["kind"] };
   if (o["priceUnit"]) map["priceUnit"] = o["priceUnit"];
+  if (Array.isArray(drop) && drop.length) map["dropFields"] = drop;
   for (const k of MAP_KEYS) if (typeof o[k] === "string" && o[k]) map[k] = o[k];
   return { map: map as unknown as ApifyFieldMap };
+}
+
+/** The item without the fields its source drops (a copy; non-objects unchanged). */
+export function withoutDropped(raw: unknown, map: ApifyFieldMap): unknown {
+  if (!map.dropFields?.length || !raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const copy = { ...(raw as Record<string, unknown>) };
+  for (const f of map.dropFields) delete copy[f];
+  return copy;
 }
 
 /** The top-level item fields a map reads (constants read none). */
@@ -210,7 +226,8 @@ export type MappedApifyItem =
  * item waits for a person rather than being read on a guess. `acceptUnexpected`
  * is set when a person released it.
  */
-export function mapApifyItem(sourceId: string, raw: unknown, map: ApifyFieldMap, expectedFields: string[] | null, opts: { acceptUnexpected?: boolean; now?: Date } = {}): MappedApifyItem {
+export function mapApifyItem(sourceId: string, input: unknown, map: ApifyFieldMap, expectedFields: string[] | null, opts: { acceptUnexpected?: boolean; now?: Date } = {}): MappedApifyItem {
+  const raw = withoutDropped(input, map);
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "invalid_value", fields: ["(item)"], externalId: null };
   const item = raw as Record<string, unknown>;
   const externalIdRaw = read(item, map.externalId);

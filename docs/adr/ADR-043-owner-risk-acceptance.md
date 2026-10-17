@@ -30,9 +30,11 @@ false.
   quarantine, budgets, backoff and auto-pause (ADR-042). The review and the
   activation are in `source_policy_reviews`, the audit chain and
   `source.reviewed.v1` / `source.activated.v1`.
-- **Data minimization for marketplace actors:** the field map should not
-  map seller identity (`sellerName`, `sellerUrl`) when sellers are private
-  individuals; listings are kept as item, price, location and link.
+- **Data minimization for marketplace actors:** the field map does not map
+  seller identity (`sellerName`, `sellerUrl`) when sellers are private
+  individuals, and lists the seller field in `dropFields`, which removes it
+  from every item before anything is read or stored (quarantine included).
+  Listings are kept as item, price, location and link.
 
 ## Consequences
 

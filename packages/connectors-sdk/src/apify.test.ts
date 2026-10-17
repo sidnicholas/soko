@@ -45,6 +45,16 @@ describe("mapApifyItem", () => {
   });
 });
 
+describe("dropFields", () => {
+  it("removes the fields before the expected-field check and before anything is stored", () => {
+    const map = { ...MAP, dropFields: ["seller"] };
+    const m = mapApifyItem("s", { ...ITEM, seller: { name: "Private Person" } }, map, Object.keys(ITEM).filter((k) => k !== "seller"));
+    expect(m.ok).toBe(true);
+    expect(JSON.stringify(m)).not.toContain("Private Person");
+    expect(parseFieldMap({ kind: "supply", externalId: "id", title: "t", dropFields: "seller" })).toEqual({ errors: ["dropFields must be a list of field names"] });
+  });
+});
+
 describe("canonicalListingKey", () => {
   it("gives an eBay item one key however its URL is written", () => {
     expect(canonicalListingKey("https://www.ebay.com/itm/123456789012?hash=x")).toBe("ebay/itm/123456789012");

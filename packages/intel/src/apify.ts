@@ -5,6 +5,7 @@ import {
   mapApifyItem,
   normalizeObservation,
   parseFieldMap,
+  withoutDropped,
   type ApifyClient,
   type ApifyFieldMap,
   type ApifyRun,
@@ -138,7 +139,9 @@ export async function storeObservation(registryId: string, obs: RawObservation, 
  * Maps, checks and stores one dataset item; quarantines it when it does not
  * fit. `acceptUnexpected` when a person released it from quarantine.
  */
-export async function ingestApifyItem(source: ApifySource, map: ApifyFieldMap, raw: unknown, runId: string | null, opts: { acceptUnexpected?: boolean } = {}): Promise<StoreResult["state"] | "quarantined"> {
+export async function ingestApifyItem(source: ApifySource, map: ApifyFieldMap, input: unknown, runId: string | null, opts: { acceptUnexpected?: boolean } = {}): Promise<StoreResult["state"] | "quarantined"> {
+  // Dropped fields (personal data) are gone before anything is kept, quarantine included.
+  const raw = withoutDropped(input, map);
   const m = mapApifyItem(apifySupplySourceId(source.id), raw, map, source.apify_expected_fields, opts);
   if (!m.ok) {
     await quarantineItem({ sourceId: source.id, apifyRunId: runId, externalId: m.externalId, reason: m.reason, fields: m.fields, item: raw });
@@ -279,7 +282,8 @@ export async function processApifyRun(apifyRunId: string, client: ApifyClient, n
       const items = await client.datasetItems(run.defaultDatasetId, offset, Math.min(PAGE, limit - offset));
       for (const item of items) {
         counts.total++;
-        if (learning && item && typeof item === "object") for (const k of Object.keys(item)) seenFields.add(k);
+        const kept = withoutDropped(item, parsed.map);
+        if (learning && kept && typeof kept === "object") for (const k of Object.keys(kept)) seenFields.add(k);
         const state = await ingestApifyItem(source, parsed.map, item, row.id);
         counts[state === "quarantined" ? "quarantined" : state]++;
       }
