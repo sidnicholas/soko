@@ -115,6 +115,19 @@ export interface ApifyFieldMap {
   sellerName?: string;
   sellerUrl?: string;
   location?: string;
+  /** When the buyer needs it by (an RFQ's expiry). */
+  deadline?: string;
+  /** The unit of `quantity` ("pieces", "tons"). */
+  quantityUnit?: string;
+  /**
+   * Items whose title matches this pattern (case-insensitive) are buyers, not
+   * sellers, whatever `kind` says: Craigslist "WANTED" posts, "WTB", "ISO".
+   */
+  demandTitlePattern?: string;
+  /** For supply items with no usable category: read one from the title's words (e.g. "drill" → tools). */
+  categoryFromTitle?: boolean;
+  /** The demand signal type of this source's buyer items (rfq, purchase_request, …). */
+  signal?: string;
   /**
    * Top-level item fields removed before anything is read or stored, the
    * quarantine included: personal data such as a private seller's identity.
@@ -129,7 +142,10 @@ export interface ApifyFieldMap {
   categoryMap?: Record<string, string>;
 }
 
-const MAP_KEYS: (keyof ApifyFieldMap)[] = ["externalId", "title", "description", "url", "price", "currency", "category", "quantity", "condition", "sellerName", "sellerUrl", "location"];
+const MAP_KEYS: (keyof ApifyFieldMap)[] = ["externalId", "title", "description", "url", "price", "currency", "category", "quantity", "condition", "sellerName", "sellerUrl", "location", "deadline", "quantityUnit"];
+
+/** The demand signal types a source may declare (the intel pipeline's own list). */
+export const DEMAND_SIGNAL_TYPES = ["rfq", "purchase_request", "hiring_expansion", "project", "unmet_need", "recurring_consumption", "substitution", "procurement_cycle", "demand_creation"] as const;
 
 /** A field map from untrusted input (a reviewer's form or an API body), or the list of what is wrong with it. */
 export function parseFieldMap(v: unknown): { map: ApifyFieldMap } | { errors: string[] } {
@@ -153,8 +169,22 @@ export function parseFieldMap(v: unknown): { map: ApifyFieldMap } | { errors: st
     const entries = cats && typeof cats === "object" && !Array.isArray(cats) ? Object.entries(cats as Record<string, unknown>) : null;
     if (!entries || entries.length > 500 || entries.some(([k, v]) => !k || k.length > 200 || typeof v !== "string" || !/^[a-z_]{2,40}$/.test(v))) errors.push("categoryMap must map source values to category names like home_goods");
   }
+  const pattern = o["demandTitlePattern"];
+  if (pattern !== undefined) {
+    try {
+      if (typeof pattern !== "string" || !pattern || pattern.length > 200) throw new Error();
+      new RegExp(pattern, "i");
+    } catch {
+      errors.push("demandTitlePattern must be a regular expression");
+    }
+  }
+  if (o["categoryFromTitle"] !== undefined && typeof o["categoryFromTitle"] !== "boolean") errors.push("categoryFromTitle must be true or false");
+  if (o["signal"] !== undefined && !(DEMAND_SIGNAL_TYPES as readonly unknown[]).includes(o["signal"])) errors.push(`signal must be one of ${DEMAND_SIGNAL_TYPES.join(", ")}`);
   if (errors.length) return { errors };
   const map: Record<string, unknown> = { kind: o["kind"] };
+  if (typeof pattern === "string") map["demandTitlePattern"] = pattern;
+  if (o["categoryFromTitle"] === true) map["categoryFromTitle"] = true;
+  if (typeof o["signal"] === "string") map["signal"] = o["signal"];
   if (cats && Object.keys(cats as object).length) map["categoryMap"] = cats;
   if (o["priceUnit"]) map["priceUnit"] = o["priceUnit"];
   if (Array.isArray(drop) && drop.length) map["dropFields"] = drop;
@@ -276,16 +306,20 @@ export function mapApifyItem(sourceId: string, input: unknown, map: ApifyFieldMa
     price: price === null ? null : Math.round(map.priceUnit === "minor" ? price : price * 100),
     currency: (text(read(item, map.currency), 3) ?? "USD").toUpperCase(),
     quantity: number(read(item, map.quantity)),
+    quantity_unit: text(read(item, map.quantityUnit), 40),
+    deadline: text(read(item, map.deadline), 40),
     condition: text(read(item, map.condition), 100),
     ...(sellerName ? { seller: { name: sellerName, ...(typeof sellerUrl === "string" && /^https?:\/\//i.test(sellerUrl) ? { url: sellerUrl } : {}) } } : {}),
     ...(location ? { location: { label: location } } : {}),
+    // Kept in the stored content too: a buyer request has no supply row holding its link.
+    ...(url ? { url } : {}),
   };
   return {
     ok: true,
     canonicalKey: canonicalListingKey(url),
     observation: {
       ref: { source_id: sourceId, external_id: externalId!, ...(url ? { uri: url } : {}) },
-      kind: map.kind,
+      kind: map.demandTitlePattern && new RegExp(map.demandTitlePattern, "i").test(title!) ? "demand" : map.kind,
       captured_at: (opts.now ?? new Date()).toISOString(),
       content,
       // Of the whole item as the actor returned it: a change anywhere is a change.

@@ -12,7 +12,7 @@ import {
   type SourceConnector,
 } from "@opportunity-os/connectors-sdk";
 import { closeDb, getConnectorSource, listActiveMissionsForDiscovery, recordSourceOutcome, recordSourceRuns, upsertSupply, type SourceRunRecord } from "@opportunity-os/db";
-import { apifyCycle, checkDeals, healthFor, policyGaps, storeObservation, type CompsProvider } from "@opportunity-os/intel";
+import { apifyCycle, checkDeals, healthFor, policyGaps, raiseDemandLeads, storeObservation, type CompsProvider } from "@opportunity-os/intel";
 import { getConfig } from "@opportunity-os/config";
 import { createLogger } from "@opportunity-os/observability";
 import { ingestConnectors, type IngestStats, type ObservationSink } from "./ingest";
@@ -164,7 +164,15 @@ async function cycle(): Promise<void> {
     dealResult = { error: String(err) };
     log.error({ err: String(err) }, "ingest.deals.failed");
   }
-  log.info({ fixtures, queries, sources, apify: apifyResult, deals: dealResult, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
+  // Buyer requests from actor sources become demand leads (ADR-042 addendum 2).
+  let demandResult: unknown;
+  try {
+    demandResult = await raiseDemandLeads({ limit: config.connectors.deals.demandLeadsPerRun });
+  } catch (err) {
+    demandResult = { error: String(err) };
+    log.error({ err: String(err) }, "ingest.demand_leads.failed");
+  }
+  log.info({ fixtures, queries, sources, apify: apifyResult, deals: dealResult, demandLeads: demandResult, supplyPersisted: supplyCount.n }, "ingest.cycle.complete");
 }
 
 async function main(): Promise<void> {

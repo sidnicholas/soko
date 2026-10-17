@@ -158,7 +158,8 @@ export async function ingestApifyItem(source: ApifySource, map: ApifyFieldMap, i
     return "quarantined";
   }
   const obs = m.observation;
-  const category = admissibleCategory(obs.content["category"]);
+  // No usable category from the source: its title's words, when the field map allows it.
+  const category = admissibleCategory(obs.content["category"]) ?? (map.categoryFromTitle ? admissibleCategory(canonicalCategory(String(obs.content["title"] ?? ""))) : null);
   if (obs.kind === "supply" && !category) {
     await quarantineItem({ sourceId: source.id, apifyRunId: runId, externalId: obs.ref.external_id, reason: "category_unmapped", fields: [String(obs.content["category"] ?? "(none)")], item: raw });
     return "quarantined";

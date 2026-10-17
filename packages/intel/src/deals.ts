@@ -31,7 +31,7 @@ export const MIN_COMPS = 5;
 export const DEFAULT_MIN_DISCOUNT = 0.3;
 
 const STOP = new Set(
-  "a an and the for of with in on to new used like great good excellent condition works working must sell sale selling obo firm price cash pickup pick up only asap brand nice clean set lot each".split(" "),
+  "a an and the for of with in on to new used like great good excellent condition works working must sell sale selling obo firm price cash pickup pick up only asap brand nice clean set lot each wanted wtb iso looking need needed buying buy want seeking urgent".split(" "),
 );
 
 /** A comparables search from a listing title: its first meaningful words, no noise. */

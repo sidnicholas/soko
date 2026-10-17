@@ -93,3 +93,33 @@ export async function dealCheckSummary(sourceId: string, days = 7): Promise<Reco
   }
   return out;
 }
+
+export interface UnraisedDemand {
+  observation_id: string;
+  source_id: string;
+  source_name: string;
+  external_id: string;
+  content: unknown;
+  first_seen_at: string;
+}
+
+/** Buyer items from actor sources not yet considered for a demand lead, newest first (last `days` days). */
+export async function listUnraisedDemand(limit: number, days = 14): Promise<UnraisedDemand[]> {
+  if (limit <= 0) return [];
+  const rows = await getDb()
+    .selectFrom("source_observations as o")
+    .innerJoin("source_registry as s", "s.id", "o.source_id")
+    .select(["o.id as observation_id", "o.source_id", "s.name as source_name", "o.external_id", "o.content", sql<string>`o.first_seen_at::text`.as("first_seen_at")])
+    .where("s.kind", "=", "apify_actor")
+    .where("o.kind", "=", "demand")
+    .where("o.lead_checked_at", "is", null)
+    .where(sql<boolean>`o.first_seen_at >= now() - make_interval(days => ${days})`)
+    .orderBy("o.first_seen_at", "desc")
+    .limit(limit)
+    .execute();
+  return rows as unknown as UnraisedDemand[];
+}
+
+export async function markDemandConsidered(observationId: string, leadId: string | null): Promise<void> {
+  await getDb().updateTable("source_observations").set({ lead_id: leadId, lead_checked_at: new Date().toISOString() }).where("id", "=", observationId).execute();
+}

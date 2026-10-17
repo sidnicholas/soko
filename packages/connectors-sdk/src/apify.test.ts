@@ -12,7 +12,7 @@ describe("mapApifyItem", () => {
     expect(m.observation.ref).toEqual({ source_id: "apify:s1", external_id: "42", uri: "https://www.example.com/lot/42/" });
     expect(m.observation.content).toEqual({
       title: "Dell monitor lot", description: "20 units", category: "electronics", price: 125050, currency: "USD", quantity: null, condition: null,
-      seller: { name: "Acme" }, location: { label: "Austin, TX" },
+      seller: { name: "Acme" }, location: { label: "Austin, TX" }, quantity_unit: null, deadline: null, url: "https://www.example.com/lot/42/",
     });
     expect(m.canonicalKey).toBe("example.com/lot/42");
     expect(m.observation.content_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -63,6 +63,19 @@ describe("categoryMap", () => {
     const unknown = mapApifyItem("s", { ...ITEM, catId: 999 }, map, null);
     expect(unknown.ok && unknown.observation.content["category"]).toBe("999");
     expect(parseFieldMap({ kind: "supply", externalId: "id", title: "t", categoryMap: { "1": "Home Goods!" } })).toEqual({ errors: ["categoryMap must map source values to category names like home_goods"] });
+  });
+});
+
+describe("buyer items and RFQ fields", () => {
+  it("treats titles matching the demand pattern as buyers and reads deadline and quantity unit", () => {
+    const map = { ...MAP, demandTitlePattern: "^(wanted|wtb|iso)\\b", deadline: "expiresAt", quantity: "qty", quantityUnit: "unit" };
+    const buyer = mapApifyItem("s", { ...ITEM, name: "WANTED: vintage reel mowers", expiresAt: "2026-11-01T07:30:38.000Z", qty: 50, unit: "pieces" }, map, null);
+    expect(buyer.ok && buyer.observation.kind).toBe("demand");
+    expect(buyer.ok && buyer.observation.content).toMatchObject({ deadline: "2026-11-01T07:30:38.000Z", quantity: 50, quantity_unit: "pieces" });
+    const seller = mapApifyItem("s", ITEM, map, null);
+    expect(seller.ok && seller.observation.kind).toBe("supply");
+    expect(parseFieldMap({ kind: "supply", externalId: "id", title: "t", demandTitlePattern: "(" })).toEqual({ errors: ["demandTitlePattern must be a regular expression"] });
+    expect(parseFieldMap({ kind: "demand", externalId: "id", title: "t", signal: "gossip" })).toMatchObject({ errors: [expect.stringContaining("signal must be one of")] });
   });
 });
 

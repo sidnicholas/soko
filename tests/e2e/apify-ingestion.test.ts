@@ -18,7 +18,7 @@ import {
   type RegistrySource,
 } from "@opportunity-os/db";
 import { resetConfig } from "@opportunity-os/config";
-import { SOURCE_POLICY_VERSION, apifyCycle, checkDeals, apifySupplySourceId, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem, storeObservation } from "@opportunity-os/intel";
+import { SOURCE_POLICY_VERSION, apifyCycle, checkDeals, raiseDemandLeads, apifySupplySourceId, mapQuarantinedCategory, policyGaps, processApifyRun, resolveQuarantinedItem, storeObservation } from "@opportunity-os/intel";
 import { ApifyService } from "../../apps/api/src/sources/apify.service";
 
 /**
@@ -281,6 +281,40 @@ describe.skipIf(!HAS_DB)("Apify ingestion (live postgres, stubbed Apify)", () =>
 
     // Checked once: a second sweep has nothing new to price.
     expect((await checkDeals({ comps, limit: 50, leadLimit: 10, minDiscount: 0.45 })).checked).toBe(0);
+  });
+
+  it("splits buyer posts from listings, reads categories from titles, and raises open buyer requests as demand leads", async () => {
+    const before = (await getApifySource(sourceId))!;
+    const map = before.apify_field_map as Record<string, unknown>;
+    await updateApifyConfig(
+      sourceId,
+      { fieldMap: { ...map, demandTitlePattern: "^(wanted|wtb|iso)\\b", categoryFromTitle: true, deadline: "closes", signal: "purchase_request" }, expectedFields: [...(before.apify_expected_fields ?? []), "closes"] },
+      STAFF,
+    );
+    apify.next.push([
+      item(30, { name: `WANTED: 40 standing desks ${RUN}`, price: null, cat: null, closes: new Date(Date.now() + 3 * 86_400_000).toISOString() }),
+      item(31, { name: `WTB pallet racking ${RUN}`, price: null, cat: null, closes: "2020-01-01T00:00:00Z" }),
+      item(32, { name: `DeWalt cordless drill lot ${RUN}`, cat: null }),
+    ]);
+    await apifyCycle(deps());
+    const runId = apify.finishLatest(0.01);
+    expect((await processApifyRun(runId, apify.client)).counts).toMatchObject({ total: 3, new: 3, quarantined: 0 });
+    const drill = await getDb().selectFrom("supply").select("category").where("source_id", "=", apifySupplySourceId(sourceId)).where("external_ref", "=", `${RUN}-32`).executeTakeFirstOrThrow();
+    expect(drill.category).toBe("tools");
+    // Buyer posts are not supply.
+    expect(await getDb().selectFrom("supply").select("id").where("source_id", "=", apifySupplySourceId(sourceId)).where("external_ref", "in", [`${RUN}-30`, `${RUN}-31`]).execute()).toEqual([]);
+
+    const out = await raiseDemandLeads({ limit: 100 });
+    expect(out.raised).toBeGreaterThanOrEqual(1);
+    const lead = await getDb().selectFrom("intel_leads").select(["kind", "item", "signal_type", "urgency", "opposite_queries", "counterpart_status", "summary"]).where("url", "=", `https://lots-${RUN}.example.com/item/30`).executeTakeFirstOrThrow();
+    expect(lead).toMatchObject({ kind: "demand", signal_type: "purchase_request", urgency: "high", counterpart_status: "pending" });
+    // Buyer words ("wanted") are not search terms.
+    expect(lead.item!.startsWith("standing desks")).toBe(true);
+    expect(lead.opposite_queries).toEqual([`${lead.item} supplier`, `${lead.item} wholesale manufacturer`]);
+    // The expired request is considered but not raised.
+    expect(await getDb().selectFrom("intel_leads").select("id").where("url", "=", `https://lots-${RUN}.example.com/item/31`).execute()).toEqual([]);
+    expect((await raiseDemandLeads({ limit: 100 })).considered).toBe(0);
+    await updateApifyConfig(sourceId, { fieldMap: map }, STAFF);
   });
 
   it("backs off after a failed run and pauses the source after three in a row", async () => {

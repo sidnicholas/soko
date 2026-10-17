@@ -779,6 +779,8 @@ export interface SourceObservationsTable {
   content: Json;
   supply_id: string | null;
   merged: Generated<boolean>;
+  lead_id: string | null;
+  lead_checked_at: Timestamp | null;
   first_seen_at: Generated<Timestamp>;
   last_seen_at: Generated<Timestamp>;
   seen_count: Generated<number>;

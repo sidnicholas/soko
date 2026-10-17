@@ -87,6 +87,21 @@ nothing new three times running waits 7 days and then goes last. Each run's
 searches are stored (`apify_run_searches`) and credited with the items and
 new items they found. With nothing due, no run starts (`no_searches_due`).
 
+## Addendum 2: buyer items become demand leads (2026-10-17, migration 0035)
+
+Actor sources can carry buyers: Alibaba RFQs (a demand source) and
+Craigslist "WANTED" posts mixed into a supply source. A field map may set
+`demandTitlePattern` (titles matching it are buyers whatever `kind` says),
+map `deadline` and `quantityUnit`, declare the buyers' `signal` (rfq,
+purchase_request, …), and set `categoryFromTitle` (a supply item with no
+usable category takes one from its title's words). Each sweep,
+`worker-connectors` raises buyer items from actor sources as demand leads
+(`DEMAND_LEADS_PER_RUN`, default 25; once each, recorded on the
+observation; expired requests skipped): the request, quantity, buyer
+location and deadline as facts, supplier searches for the counterpart
+stage, urgency high when it closes within a week. The demand lane assesses
+them like any lead, and their items steer the marketplace search plans.
+
 ## Consequences
 
 - No actor is registered: each needs the owner to choose a site, obtain its
