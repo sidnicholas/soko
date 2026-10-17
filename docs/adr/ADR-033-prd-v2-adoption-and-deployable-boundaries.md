@@ -62,3 +62,6 @@ the code (its §1 says so).
   review (verified leads per dollar against the Brave baseline) still runs
   on the next day's data and its result is recorded in the PRD plan. Outreach
   (P2 slice 2) does not start until that review passes.
+- P1 gate review held 2026-10-17 and passed (PRD plan §7); the exception
+  above for P2 slice 1 is closed. P2 slice 2 may start.
+

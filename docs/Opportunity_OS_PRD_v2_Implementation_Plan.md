@@ -91,3 +91,32 @@ Recorded 2026-10-16.
 | Escrow / insurance providers, freight classes | Not decided | Needed before P3/P4 slices that use them. |
 | Sources without permission | Owner may accept the risk (2026-10-17) | `owner_risk_acceptance` basis for Apify actors only, admin-only, a written note, at most 90 days, recorded as such (ADR-043). First use: `apify~facebook-marketplace-scraper`, against Meta's terms; seller identity not stored. |
 | Model cost | Use comparable open-weight models | Both model tiers move to open-weight models through OpenRouter (detection DeepSeek V4 Flash, assessment DeepSeek V4 Pro), with Claude as the fallback when the host fails. Compare quality on `/yield` and the queue before treating as settled. |
+
+## 7. P1 gate review (2026-10-17)
+
+Read from production (read-only queries) on 2026-10-17, comparing the
+Serper + open-weight period (lanes `demand`/`supply`, 2026-10-16 02:33 UTC
+to 2026-10-17 15:00 UTC) with the Brave + Claude baseline (54 runs through
+2026-10-16: $4.83 spent, 59 leads, 1 actionable).
+
+| PRD §14 gate | Evidence | Result |
+| --- | --- | --- |
+| Better verified leads per dollar | $1.10 spent (search $0.30, model $0.80), 95 leads, 7 actionable (6 VERIFY NEXT, 1 ACT NOW): **$0.16 per actionable** against $4.83, **86 leads per $** against 12. | Pass |
+| Budget adherence | Highest day $1.21 against `INTEL_DAILY_BUDGET_USD` 2; on 2026-10-16, while the cap was $1, runs stopped as `budget_exhausted`. | Pass |
+| Vetted sources only | Every active source has a recorded review: 8 search venues (public search index), 2 connectors (official API terms), 1 Apify actor on owner risk acceptance (ADR-043, recorded as such). | Pass, with the ADR-043 exception |
+| Reproducible evidence | 31 of 48 candidates since 2026-10-16 have evidence rows, 39 have an economics version; the gap includes candidates assessed before slice 3 was deployed that day. | Pass, to confirm: every candidate after the slice 3 deploy should have both |
+
+Operator judgment so far: of the 7 actionable, 2 contacted (sunglasses
+liquidation, lathe), 2 dismissed as not relevant (both Upwork sourcing
+jobs from the demand lane), 3 open. No wins yet; two days is a small
+sample.
+
+**Decision: P1 gate passed (2026-10-17).** P2 slice 2 (email outreach) may
+start once a sending provider and domain are chosen.
+
+Follow-ups: record the model used per run in `intel_runs.notes` (today the
+open-weight and Claude runs cannot be told apart in the data, so the
+quality comparison rests on outcomes, not attribution); re-check evidence
+coverage on candidates after the slice 3 deploy; tune the demand lane
+against outsourced-sourcing job posts if dismissals continue.
+
