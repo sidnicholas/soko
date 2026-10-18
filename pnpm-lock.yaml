@@ -135,6 +135,9 @@ importers:
       '@opportunity-os/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@opportunity-os/briefing':
+        specifier: workspace:*
+        version: link:../../packages/briefing
       '@opportunity-os/chain':
         specifier: workspace:*
         version: link:../../packages/chain
@@ -320,6 +323,9 @@ importers:
 
   apps/worker-lifecycle:
     dependencies:
+      '@opportunity-os/briefing':
+        specifier: workspace:*
+        version: link:../../packages/briefing
       '@opportunity-os/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -449,6 +455,24 @@ importers:
       zod:
         specifier: ^3.23.8
         version: 3.25.76
+
+  packages/briefing:
+    dependencies:
+      '@opportunity-os/config':
+        specifier: workspace:*
+        version: link:../config
+      '@opportunity-os/db':
+        specifier: workspace:*
+        version: link:../db
+      '@opportunity-os/observability':
+        specifier: workspace:*
+        version: link:../observability
+      '@opportunity-os/outreach':
+        specifier: workspace:*
+        version: link:../outreach
+      '@opportunity-os/relationship':
+        specifier: workspace:*
+        version: link:../relationship
 
   packages/chain:
     dependencies:

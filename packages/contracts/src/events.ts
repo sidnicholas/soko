@@ -62,6 +62,7 @@ export const EVENT_NAMES = [
   "outreach.scheduled.v1",
   "outreach.sent.v1",
   "outreach.reply_received.v1",
+  "briefing.ready.v1",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

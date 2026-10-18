@@ -2,6 +2,7 @@ import { getConfig } from "@opportunity-os/config";
 import { closeDb } from "@opportunity-os/db";
 import { createLogger } from "@opportunity-os/observability";
 import { outreachCycle } from "@opportunity-os/outreach";
+import { briefingCycle } from "@opportunity-os/briefing";
 import { refreshCycle } from "./refresh";
 import { retentionCycle } from "./retention";
 
@@ -37,6 +38,12 @@ async function main(): Promise<void> {
       log.error({ err: String(err) }, "lifecycle.outreach.failed");
       code = 1;
     }
+    try {
+      await briefingCycle();
+    } catch (err) {
+      log.error({ err: String(err) }, "lifecycle.briefing.failed");
+      code = 1;
+    }
     await closeDb();
     process.exit(code);
   }
@@ -61,6 +68,11 @@ async function main(): Promise<void> {
       await outreachCycle();
     } catch (err) {
       log.error({ err: String(err) }, "lifecycle.outreach.failed");
+    }
+    try {
+      await briefingCycle();
+    } catch (err) {
+      log.error({ err: String(err) }, "lifecycle.briefing.failed");
     }
     const { promise, resolve } = Promise.withResolvers<void>();
     setTimeout(resolve, intervalMs);

@@ -25,6 +25,7 @@
     "@opportunity-os/discovery": "workspace:*",
     "@opportunity-os/observability": "workspace:*",
     "@opportunity-os/outreach": "workspace:*",
+    "@opportunity-os/briefing": "workspace:*",
     "@opportunity-os/relationship": "workspace:*"
   }
 }

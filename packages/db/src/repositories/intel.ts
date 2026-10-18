@@ -3,6 +3,7 @@ import { sql } from "kysely";
 import { getDb } from "../pool";
 import { enqueueEvent } from "../outbox";
 import { factEvidence, insertEvidence } from "./economics";
+import type { Actor } from "./relationships";
 
 /** AIOOS opportunity intelligence persistence (migration 0019). jsonb writes are JSON.stringify'd (repo convention). */
 
@@ -311,7 +312,8 @@ export async function listIntelQueue(rejectedLimit = 50) {
     .select(CANDIDATE_COLUMNS)
     .select(["k.external_url as crm_url", "k.external_status as crm_status", "k.external_stage_id as crm_stage_id"])
     .where("c.bucket", "!=", "rejected")
-    .where("c.user_status", "not in", ["dismissed", "won", "lost"])
+    // Contacted and responded candidates are worked from Follow-ups (ADR-047); closed ones are archived.
+    .where("c.user_status", "=", "open")
     .orderBy("c.score", "desc")
     .limit(200)
     .execute();
@@ -339,21 +341,35 @@ export async function getIntelCandidate(id: string) {
     .executeTakeFirst();
 }
 
-/** Human outcome feedback (AIOOS §24-§25): status plus a reason code and realized revenue. */
-export async function updateIntelCandidateStatus(id: string, input: { status: string; reason: string | null; realizedUsd: number | null; note?: string | null }) {
+/**
+ * Human outcome feedback (AIOOS §24-§25): status plus a reason code and realized revenue.
+ * Marking it contacted or responded logs that touch, which starts or moves its
+ * follow-up cadence (ADR-047).
+ */
+export async function updateIntelCandidateStatus(id: string, input: { status: string; reason: string | null; realizedUsd: number | null; note?: string | null }, actor: Actor = { type: "system", id: null }) {
   return getDb()
-    .updateTable("intel_candidates")
-    .set({
-      user_status: input.status,
-      outcome_reason: input.reason,
-      // A status change without a note keeps the one already written.
-      ...(input.note !== undefined ? { outcome_note: input.note } : {}),
-      realized_usd: input.realizedUsd === null ? null : input.realizedUsd.toFixed(2),
-      updated_at: sql`now()`,
-    })
-    .where("id", "=", id)
-    .returning("id")
-    .executeTakeFirst();
+    .transaction()
+    .execute(async (tx) => {
+      const before = await tx.selectFrom("intel_candidates").select("user_status").where("id", "=", id).forUpdate().executeTakeFirst();
+      if (!before) return undefined;
+      const updated = await tx
+        .updateTable("intel_candidates")
+        .set({
+          user_status: input.status,
+          outcome_reason: input.reason,
+          // A status change without a note keeps the one already written.
+          ...(input.note !== undefined ? { outcome_note: input.note } : {}),
+          realized_usd: input.realizedUsd === null ? null : input.realizedUsd.toFixed(2),
+          updated_at: sql`now()`,
+        })
+        .where("id", "=", id)
+        .returning("id")
+        .executeTakeFirst();
+      if ((input.status === "contacted" || input.status === "responded") && before.user_status !== input.status) {
+        await tx.insertInto("candidate_touches").values({ candidate_id: id, kind: input.status, created_by: actor.type === "user" ? actor.id : null }).execute();
+      }
+      return updated;
+    });
 }
 
 /** Success metrics (AIOOS §22, §30): spend, actionable count, cost per actionable, outcomes. */

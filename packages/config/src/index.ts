@@ -250,6 +250,12 @@ const EnvSchema = z.object({
   ),
   OUTREACH_TIMEZONE: z.preprocess((v) => (v === "" ? undefined : v), z.string().default("America/Detroit")),
   OUTREACH_WEEKENDS: z.preprocess((v) => (v === "" ? undefined : v), z.enum(["true", "false"]).default("false")),
+  // Daily brief (ADR-046), worker-lifecycle: emailed to this address from the
+  // outreach mailbox once the local hour reaches BRIEF_HOUR (time zone
+  // BRIEF_TIMEZONE, else OUTREACH_TIMEZONE). Without an address it is only in the app.
+  BRIEF_EMAIL_TO: z.preprocess((v) => (v === "" ? undefined : v), z.string().email().optional()),
+  BRIEF_HOUR: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().int().min(0).max(23).default(7)),
+  BRIEF_TIMEZONE: z.preprocess((v) => (v === "" ? undefined : v), z.string().optional()),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   EMAIL_FROM: z.string().optional(),
@@ -365,6 +371,7 @@ export interface AppConfig {
     apify: { token?: string; webhookSecret?: string; dailyBudgetUsd: number };
     deals: { minDiscount: number; checksPerRun: number; leadsPerRun: number; demandLeadsPerRun: number };
   };
+  briefing: { emailTo?: string; hour: number; timezone: string };
   outreach: {
     address?: string;
     password?: string;
@@ -498,6 +505,7 @@ function toConfig(env: Env): AppConfig {
       apify: { token: env.APIFY_API_TOKEN || undefined, webhookSecret: env.APIFY_WEBHOOK_SECRET || undefined, dailyBudgetUsd: env.APIFY_DAILY_BUDGET_USD },
       deals: { minDiscount: env.DEAL_MIN_DISCOUNT, checksPerRun: env.DEAL_CHECKS_PER_RUN, leadsPerRun: env.DEAL_LEADS_PER_RUN, demandLeadsPerRun: env.DEMAND_LEADS_PER_RUN },
     },
+    briefing: { emailTo: env.BRIEF_EMAIL_TO?.trim().toLowerCase() || undefined, hour: env.BRIEF_HOUR, timezone: env.BRIEF_TIMEZONE?.trim() || env.OUTREACH_TIMEZONE },
     outreach: {
       address: env.OUTREACH_EMAIL_ADDRESS?.trim().toLowerCase() || undefined,
       password: env.OUTREACH_EMAIL_PASSWORD || undefined,

@@ -62,7 +62,10 @@ export async function sendDue(s: OutreachSettings, sender: MailSender, opts: { m
   const now = opts.now ?? (() => new Date());
   const result = { sent: 0, failed: 0 };
   for (let i = 0; i < (opts.max ?? 10); i++) {
-    if (!withinSendWindow(now(), s.window)) break;
+    if (!withinSendWindow(now(), s.window)) {
+      if (i === 0) log.info({ window: s.window }, "outreach.outside_window");
+      break;
+    }
     const m = await claimNextOutbound({ fromAddress: s.mailbox.address, dailyCap: s.dailyCap, minGapHours: s.minGapHours, now: now() });
     if (!m) break;
     const unsub = unsubscribeUrl(s, m.rfcMessageId);
@@ -149,7 +152,10 @@ export async function pollReplies(s: OutreachSettings, reader: MailReader, opts:
 /** One sweep (worker-lifecycle): send what is due, then read replies. A no-op until the mailbox is configured. */
 export async function outreachCycle(deps: { sender?: MailSender; reader?: MailReader } = {}): Promise<void> {
   const s = outreachSettings();
-  if (!s) return;
+  if (!s) {
+    log.info({ missing: outreachMissing() }, "outreach.not_configured");
+    return;
+  }
   await sendDue(s, deps.sender ?? smtpSender(s.mailbox, s.fromName, (err) => log.warn({ err: String(err) }, "outreach.sent_copy_failed")));
   const reader = deps.reader ?? imapReader(s.mailbox);
   try {

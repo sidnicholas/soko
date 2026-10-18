@@ -37,6 +37,7 @@
     "@opportunity-os/observability": "workspace:*",
     "@opportunity-os/relationship": "workspace:*",
     "@opportunity-os/outreach": "workspace:*",
+    "@opportunity-os/briefing": "workspace:*",
     "@opportunity-os/risk": "workspace:*",
     "@opportunity-os/scoring": "workspace:*",
     "@opportunity-os/settlement": "workspace:*",

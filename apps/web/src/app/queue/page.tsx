@@ -529,6 +529,20 @@ export default function QueuePage() {
         {(q) => (
           <>
             <Summary q={q} />
+            {q.follow_ups && q.follow_ups.due + q.follow_ups.stalled + q.follow_ups.cold + q.follow_ups.upcoming > 0 && (
+              <Card>
+                <div style={{ display: "flex", gap: tokens.space.md, alignItems: "center", flexWrap: "wrap", fontSize: tokens.fontSize.sm }}>
+                  <span>
+                    <strong>{q.follow_ups.due} follow-up{q.follow_ups.due === 1 ? "" : "s"} due</strong>
+                    {q.follow_ups.stalled ? ` · ${q.follow_ups.stalled} stalled` : ""}
+                    {q.follow_ups.cold ? ` · ${q.follow_ups.cold} gone cold` : ""} · {q.follow_ups.upcoming} waiting. Contacted candidates are worked from Follow-ups.
+                  </span>
+                  <Link href="/follow-ups" className="oos-link">
+                    Open Follow-ups
+                  </Link>
+                </div>
+              </Card>
+            )}
             <Section
               title="Act now"
               subtitle="Fresh, reachable, low-capital, with a named payer and mechanism."

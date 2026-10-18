@@ -1,7 +1,21 @@
 import { BadRequestException, Controller, Get, Headers, Inject, NotFoundException, Param, ParseUUIDPipe, Post, Query, Req } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
-import { getIntelCandidate, intelStats, listEconomicsVersions, listEvidence, listIntelQueryYield, listIntelQueue, listIntelSources, updateIntelCandidateStatus } from "@opportunity-os/db";
+import {
+  followUpCounts,
+  getIntelCandidate,
+  intelStats,
+  listClosedCandidates,
+  listEconomicsVersions,
+  listEvidence,
+  listFollowUps,
+  listIntelQueryYield,
+  listIntelQueue,
+  listIntelSources,
+  logTouch,
+  snoozeCandidate,
+  updateIntelCandidateStatus,
+} from "@opportunity-os/db";
 import { RANKING_PROFILES, rankDeals, type DealEconomics, type RankingProfile } from "@opportunity-os/scoring";
 import { RAPID_MODE, SourceSubmissionSchema } from "@opportunity-os/intel";
 import type { AuthenticatedRequest } from "../common/auth.guard";
@@ -56,6 +70,21 @@ const OutcomeSchema = z.object({
   note: z.string().trim().max(2000).nullable().optional(),
 });
 
+/** A touch logged by hand from Follow-ups (ADR-047). */
+const TouchSchema = z.object({
+  kind: z.enum(["follow_up", "responded", "note"]),
+  channel: z.enum(["email", "phone", "text", "platform_message", "in_person", "other"]).nullable().optional(),
+  note: z.string().trim().max(2000).nullable().optional(),
+});
+
+/** Remind me on a date (ISO), or null to clear. At most a year out. */
+const SnoozeSchema = z.object({
+  until: z
+    .string()
+    .datetime({ offset: true })
+    .nullable()
+    .refine((v) => v === null || (Date.parse(v) > Date.now() && Date.parse(v) < Date.now() + 366 * 86_400_000), "until must be in the future and within a year"),
+});
 
 @ApiTags("intel")
 @Controller("intel")
@@ -113,7 +142,8 @@ export class IntelController {
       evHighUsd: actionable.reduce((s, c) => s + Number(c.ev_high_usd), 0),
       realizedUsd: stats.realizedUsd,
     };
-    return { rank, act_now: actNow, verify_next: verifyNext, watch, rejected, stats, portfolio, sources: sources.slice(0, 20), queries };
+    const followUps = followUpCounts(await listFollowUps());
+    return { rank, act_now: actNow, verify_next: verifyNext, watch, rejected, stats, portfolio, sources: sources.slice(0, 20), queries, follow_ups: followUps };
   }
 
   @Get("candidates/:id")
@@ -136,8 +166,42 @@ export class IntelController {
       reason: body.reason ?? null,
       realizedUsd: body.realized_usd ?? null,
       ...(body.note !== undefined ? { note: body.note || null } : {}),
-    });
+    }, { type: "user", id: user.userId });
     if (!updated) throw new NotFoundException(`Candidate ${id} not found`);
     return getIntelCandidate(id);
+  }
+
+  @Get("follow-ups")
+  @ApiOperation({ summary: "Candidates being worked (contacted, responded) with their follow-up plan, due first (ADR-047)" })
+  async followUps(@CurrentUser() user: Principal) {
+    requirePermission(user, "opportunity:reverify");
+    const items = await listFollowUps();
+    return { counts: followUpCounts(items), items };
+  }
+
+  @Get("closed")
+  @ApiOperation({ summary: "Closed archive: won, lost and dismissed candidates, most recently closed first" })
+  async closed(@CurrentUser() user: Principal, @Query("status") status?: string) {
+    requirePermission(user, "opportunity:reverify");
+    if (status && !["won", "lost", "dismissed"].includes(status)) throw new BadRequestException("status must be won, lost or dismissed");
+    return { items: await listClosedCandidates({ status: status as "won" | "lost" | "dismissed" | undefined }) };
+  }
+
+  @Post("candidates/:id/touches")
+  @ApiOperation({ summary: "Log a follow-up, a response or a note on a candidate" })
+  async touch(@CurrentUser() user: Principal, @Param("id", ParseUUIDPipe) id: string, @ZodBody(TouchSchema) body: z.infer<typeof TouchSchema>) {
+    requirePermission(user, "opportunity:reverify");
+    if (body.kind === "note" && !body.note) throw new BadRequestException("A note needs text");
+    const ok = await logTouch({ candidateId: id, kind: body.kind, channel: body.channel ?? null, note: body.note ?? null }, { type: "user", id: user.userId });
+    if (!ok) throw new NotFoundException(`Candidate ${id} not found`);
+    return { ok: true };
+  }
+
+  @Post("candidates/:id/snooze")
+  @ApiOperation({ summary: "Remind me on a date: hides the follow-up until then (null clears it)" })
+  async snooze(@CurrentUser() user: Principal, @Param("id", ParseUUIDPipe) id: string, @ZodBody(SnoozeSchema) body: z.infer<typeof SnoozeSchema>) {
+    requirePermission(user, "opportunity:reverify");
+    if (!(await snoozeCandidate(id, body.until))) throw new NotFoundException(`Candidate ${id} is not being worked`);
+    return { ok: true };
   }
 }

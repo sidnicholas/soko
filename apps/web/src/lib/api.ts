@@ -389,6 +389,57 @@ export interface IntelQueue {
     /** Why results weren't leads, reason → count. */
     reasons: Record<string, number>;
   }[];
+  /** Candidates being worked, by follow-up stage (ADR-047). */
+  follow_ups: FollowUpCounts;
+}
+export type FollowUpStage = "due" | "upcoming" | "cold" | "stalled";
+export type FollowUpCounts = Record<FollowUpStage, number>;
+export type TouchChannel = "email" | "phone" | "text" | "platform_message" | "in_person" | "other";
+/** A candidate being worked (contacted or responded) and when to touch it next. */
+export interface FollowUpItem {
+  id: string;
+  title: string;
+  match_kind: string;
+  user_status: "contacted" | "responded";
+  lead_kind: string;
+  lead_title: string;
+  lead_url: string;
+  lead_hostname: string;
+  counter_url: string | null;
+  counter_summary: string | null;
+  ev_low_usd: number;
+  ev_high_usd: number;
+  contact: IntelContact | null;
+  outreach: { primary: string | null; secondary: string | null };
+  crm_url: string | null;
+  status_changed_at: string | null;
+  plan: {
+    stage: FollowUpStage;
+    nextAt: string | null;
+    step: number | null;
+    of: number | null;
+    action: string;
+    guidance: string;
+    firstContactAt: string;
+    lastTouchAt: string;
+    outboundTouches: number;
+    snoozed: boolean;
+  };
+  touches: { id: string; kind: "contacted" | "follow_up" | "responded" | "note"; channel: string | null; note: string | null; source: string; occurred_at: string }[];
+}
+export interface ClosedCandidate {
+  id: string;
+  title: string;
+  match_kind: string;
+  user_status: "won" | "lost" | "dismissed";
+  outcome_reason: string | null;
+  outcome_note: string | null;
+  realized_usd: number | null;
+  closed_at: string;
+  lead_title: string;
+  lead_url: string;
+  lead_hostname: string;
+  outbound_touches: number;
 }
 /** A search source added at runtime (GET /intel/sources), with what it has yielded so far. */
 /** PRD v2 FR-01 source registry row, as GET /sources returns it. */
@@ -764,6 +815,29 @@ export interface DraftInput {
   conversationId?: string | null;
 }
 
+// Daily brief (ADR-046)
+export interface BriefCitation {
+  label: string;
+  href: string;
+}
+export interface BriefSection {
+  key: string;
+  title: string;
+  summary: string;
+  items: { text: string; detail?: string; citations: BriefCitation[] }[];
+}
+export interface Briefing {
+  id: string;
+  brief_date: string;
+  period_start: string;
+  period_end: string;
+  headline: string;
+  content: { date: string; timezone: string; headline: string; sections: BriefSection[] };
+  generated_at: string;
+  delivered_at: string | null;
+  delivery_error: string | null;
+}
+
 export interface CreatePartyInput {
   type: PartyType;
   displayName: string;
@@ -881,6 +955,11 @@ export const api = {
   intelCandidate: (id: string) => request<IntelCandidateDetail>(`/intel/candidates/${id}`),
   yieldReport: (days: number) => request<YieldReport>(`/analytics/yield?days=${days}`),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
+  // Follow-ups and the closed archive (ADR-047)
+  followUps: () => request<{ counts: FollowUpCounts; items: FollowUpItem[] }>(`/intel/follow-ups`),
+  closedCandidates: (status?: ClosedCandidate["user_status"]) => request<{ items: ClosedCandidate[] }>(`/intel/closed${status ? `?status=${status}` : ""}`),
+  logTouch: (id: string, body: { kind: "follow_up" | "responded" | "note"; channel?: TouchChannel | null; note?: string | null }) => request<{ ok: true }>(`/intel/candidates/${id}/touches`, jsonBody(body)),
+  snoozeCandidate: (id: string, until: string | null) => request<{ ok: true }>(`/intel/candidates/${id}/snooze`, jsonBody({ until })),
   // Supply and demand intelligence (PRD v2 FR-02/FR-03)
   supplyIntelligence: (days: number) => request<{ leads: IntelligenceLead[] }>(`/supply-intelligence?days=${days}`),
   demandIntelligence: (days: number) => request<{ leads: IntelligenceLead[]; hypotheses: DemandHypothesis[] }>(`/demand-intelligence?days=${days}`),
@@ -912,6 +991,12 @@ export const api = {
   restoreParty: (id: string) => request<PartyDetail>(`/relationships/${id}/restore`, jsonBody({})),
   syncPartyToPipedrive: (id: string) => request<{ kind: "person" | "org"; id: number; url: string }>(`/relationships/${id}/crm`, jsonBody({})),
   deleteParty: (id: string, confirmName: string) => request<{ deleted: boolean; crm: { deleted: boolean; error: string | null } | null }>(`/relationships/${id}/delete`, jsonBody({ confirmName })),
+
+  // Daily brief (ADR-046)
+  briefings: () => request<Pick<Briefing, "id" | "brief_date" | "headline" | "delivered_at">[]>("/briefings"),
+  latestBriefing: () => request<Briefing | null>("/briefings/latest"),
+  briefing: (date: string) => request<Briefing>(`/briefings/${date}`),
+  generateBriefing: (email: boolean) => request<Briefing & { emailed: boolean }>(`/briefings/generate${email ? "?email=true" : ""}`, jsonBody({})),
 
   // Email outreach (ADR-045)
   outreachStatus: () => request<OutreachStatus>("/outreach/status"),

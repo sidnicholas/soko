@@ -19,7 +19,9 @@ const GROUPS: NavGroup[] = [
   {
     label: "Discover",
     items: [
+      { href: "/brief", label: "Daily Brief", match: (p) => p.startsWith("/brief") },
       { href: "/queue", label: "Action Queue", match: (p) => p.startsWith("/queue") },
+      { href: "/follow-ups", label: "Follow-ups", match: (p) => p.startsWith("/follow-ups") },
       { href: "/sources", label: "Source Registry", match: (p) => p.startsWith("/sources") },
       { href: "/yield", label: "Yield & Spend", match: (p) => p.startsWith("/yield") },
       { href: "/demand", label: "Emerging Demand", match: (p) => p.startsWith("/demand") },

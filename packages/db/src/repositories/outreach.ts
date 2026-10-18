@@ -4,6 +4,7 @@ import { getDb } from "../pool";
 import { enqueueEvent } from "../outbox";
 import type { Database } from "../schema";
 import { appendAuditEvent } from "./audit";
+import { logTouchTx } from "./followups";
 import type { Actor, LinkSubject } from "./relationships";
 
 /**
@@ -414,6 +415,7 @@ export async function markOutboundSent(messageId: string): Promise<void> {
       await tx.updateTable("conversation_messages").set({ status: "sent", sent_at: sql`now()`, error: null }).where("id", "=", messageId).execute();
       await tx.updateTable("conversations").set({ last_outbound_at: sql`now()`, updated_at: sql`now()` }).where("id", "=", m.conversation_id).execute();
       await touchParty(tx, m.counterparty_id);
+      await candidateTouch(tx, m.conversation_id, "outbound", messageId);
       await audit(tx, { type: "system", id: null }, "outreach.sent", messageId);
       await enqueueEvent(tx, {
         eventName: "outreach.sent.v1",
@@ -423,6 +425,21 @@ export async function markOutboundSent(messageId: string): Promise<void> {
         payload: { conversationId: m.conversation_id, messageId, counterpartyId: m.counterparty_id, channel: "email" },
       });
     });
+}
+
+/**
+ * An email about a candidate is a touch on it (ADR-047): the first one sent
+ * is the first contact, later ones are follow-ups, and a reply is a response.
+ */
+async function candidateTouch(tx: Transaction<Database>, conversationId: string, what: "outbound" | "reply", messageId: string) {
+  const c = await tx.selectFrom("conversations").select(["subject_type", "subject_id"]).where("id", "=", conversationId).executeTakeFirst();
+  if (c?.subject_type !== "intel_candidate" || !c.subject_id) return;
+  let kind: "contacted" | "follow_up" | "responded" = "responded";
+  if (what === "outbound") {
+    const prior = await tx.selectFrom("candidate_touches").select("id").where("candidate_id", "=", c.subject_id).where("kind", "in", ["contacted", "follow_up"]).executeTakeFirst();
+    kind = prior ? "follow_up" : "contacted";
+  }
+  await logTouchTx(tx, { candidateId: c.subject_id, kind, channel: "email", source: "outreach", refId: messageId }, { type: "system", id: null });
 }
 
 /** The mail server refused the message: it was not sent. */
@@ -555,6 +572,7 @@ export async function recordInbound(mail: InboundMail): Promise<{ conversationId
         await tx.updateTable("conversations").set({ last_inbound_at: mail.receivedAt, updated_at: sql`now()`, status: "open" }).where("id", "=", conv.id).execute();
         await touchParty(tx, conv.counterparty_id);
       }
+      if (mail.classification === "reply") await candidateTouch(tx, conv.id, "reply", row.id);
       if (mail.classification === "opt_out") await optOut(tx, conv.counterparty_id, `Replied asking to stop (message ${mail.rfcMessageId})`);
       await audit(tx, { type: "system", id: null }, `outreach.received.${mail.classification}`, row.id);
       await enqueueEvent(tx, {

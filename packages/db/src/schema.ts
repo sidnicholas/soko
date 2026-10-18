@@ -244,6 +244,18 @@ export interface ConversationMessagesTable {
   created_at: Generated<Timestamp>;
 }
 
+export interface BriefingsTable {
+  id: Generated<string>;
+  brief_date: string;
+  period_start: string;
+  period_end: string;
+  headline: string;
+  content: Json;
+  generated_at: Generated<Timestamp>;
+  delivered_at: Timestamp | null;
+  delivery_error: string | null;
+}
+
 export interface OutreachMailboxStateTable {
   mailbox: string;
   uid_validity: string | number;
@@ -699,8 +711,25 @@ export interface IntelCandidatesTable {
   outcome_reason: string | null;
   outcome_note: string | null;
   realized_usd: Numeric | null;
+  /** Migration 0038: set by trigger when user_status changes. */
+  status_changed_at: Timestamp | null;
+  snoozed_until: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+/** Migration 0038 (ADR-047): first contact, follow-ups, responses and notes on a candidate. */
+export interface CandidateTouchesTable {
+  id: Generated<string>;
+  candidate_id: string;
+  kind: string;
+  channel: string | null;
+  note: string | null;
+  source: Generated<string>;
+  ref_id: string | null;
+  occurred_at: Timestamp;
+  created_by: string | null;
+  created_at: Timestamp;
 }
 
 /** Migration 0025 (renamed from intel_query_sources): every place discovery reads from. */
@@ -898,6 +927,8 @@ export interface Database {
   conversations: ConversationsTable;
   conversation_messages: ConversationMessagesTable;
   outreach_mailbox_state: OutreachMailboxStateTable;
+  briefings: BriefingsTable;
+  candidate_touches: CandidateTouchesTable;
   approvals: ApprovalsTable;
   negotiations: NegotiationsTable;
   transactions: TransactionsTable;
