@@ -6,6 +6,7 @@ import { api, type ClosedCandidate, type FollowUpItem, type FollowUpStage, type 
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
 import { SubjectContacts } from "../../components/Contacts";
+import { SuggestedOutreach } from "../../components/SuggestedOutreach";
 
 /**
  * Follow-ups (ADR-047): candidates marked contacted or responded leave the
@@ -79,6 +80,12 @@ function FollowUpCard({ f, onChange }: { f: FollowUpItem; onChange: () => void }
         <div style={{ border: `1px solid ${tokens.color.border}`, borderRadius: tokens.radius.md, padding: tokens.space.sm, background: tokens.color.surfaceMuted, fontSize: tokens.fontSize.sm }}>
           <strong>{p.action}.</strong> {p.guidance}
         </div>
+        {(f.outreach?.primary || f.outreach?.secondary) && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: tokens.space.sm }}>
+            {f.outreach.primary && <SuggestedOutreach title="Suggested outreach — adapt for this step" text={f.outreach.primary} />}
+            {f.outreach.secondary && <SuggestedOutreach title="Other side" text={f.outreach.secondary} />}
+          </div>
+        )}
         <div style={{ fontSize: tokens.fontSize.sm, display: "flex", gap: tokens.space.md, flexWrap: "wrap" }}>
           <a href={f.lead_url} target="_blank" rel="noopener noreferrer" className="oos-link">
             {f.lead_hostname}: {f.lead_title}
@@ -198,7 +205,7 @@ function FollowUpCard({ f, onChange }: { f: FollowUpItem; onChange: () => void }
         {error && <div style={{ fontSize: tokens.fontSize.xs, color: "#b02525" }}>{error}</div>}
 
         <details>
-          <summary style={{ cursor: "pointer", fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>History, contacts and suggested wording</summary>
+          <summary style={{ cursor: "pointer", fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>History and contacts</summary>
           <div className="oos-stack" style={{ gap: tokens.space.md, marginTop: tokens.space.sm }}>
             <div style={{ fontSize: tokens.fontSize.sm }}>
               {f.touches.map((t) => (
@@ -210,11 +217,6 @@ function FollowUpCard({ f, onChange }: { f: FollowUpItem; onChange: () => void }
                 </div>
               ))}
             </div>
-            {f.outreach.primary && (
-              <div style={{ fontSize: tokens.fontSize.sm, whiteSpace: "pre-wrap", color: tokens.color.inkMuted }}>
-                <strong>Original suggested outreach:</strong> {f.outreach.primary}
-              </div>
-            )}
             <SubjectContacts subjectType="intel_candidate" subjectId={f.id} />
           </div>
         </details>

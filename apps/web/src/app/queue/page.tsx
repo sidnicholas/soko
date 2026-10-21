@@ -6,6 +6,7 @@ import { api, type DealEconomics, type IntelCandidate, type IntelOutcomeInput, t
 import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
 import { SubjectContacts } from "../../components/Contacts";
+import { SuggestedOutreach } from "../../components/SuggestedOutreach";
 import Link from "next/link";
 
 const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
@@ -58,27 +59,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <div>
       <Label>{label}</Label>
       <div style={{ fontSize: tokens.fontSize.sm, color: tokens.color.ink, lineHeight: 1.45 }}>{children}</div>
-    </div>
-  );
-}
-
-function Outreach({ title, text }: { title: string; text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div style={{ border: `1px solid ${tokens.color.border}`, borderRadius: tokens.radius.md, padding: tokens.space.md, background: tokens.color.surfaceMuted }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: tokens.space.xs }}>
-        <Label>{title}</Label>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            void navigator.clipboard?.writeText(text).then(() => setCopied(true));
-          }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      <div style={{ fontSize: tokens.fontSize.sm, whiteSpace: "pre-wrap", color: tokens.color.ink }}>{text}</div>
     </div>
   );
 }
@@ -331,8 +311,8 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
 
       {(c.outreach.primary || c.outreach.secondary) && (
         <div className="oos-stack" style={{ gap: tokens.space.sm }}>
-          {c.outreach.primary && <Outreach title="Suggested outreach — review before sending" text={c.outreach.primary} />}
-          {c.outreach.secondary && <Outreach title="Other side" text={c.outreach.secondary} />}
+          {c.outreach.primary && <SuggestedOutreach title="Suggested outreach — review before sending" text={c.outreach.primary} />}
+          {c.outreach.secondary && <SuggestedOutreach title="Other side" text={c.outreach.secondary} />}
         </div>
       )}
       <StatusActions c={c} onChange={onChange} />
