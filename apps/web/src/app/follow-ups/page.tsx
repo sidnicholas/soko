@@ -7,6 +7,7 @@ import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
 import { SubjectContacts } from "../../components/Contacts";
 import { SuggestedOutreach } from "../../components/SuggestedOutreach";
+import { CandidateFacts, CandidateHeader } from "../../components/CandidateFacts";
 
 /**
  * Follow-ups (ADR-047): candidates marked contacted or responded leave the
@@ -73,6 +74,7 @@ function FollowUpCard({ f, onChange }: { f: FollowUpItem; onChange: () => void }
           <Badge tone={STAGE_TONE[p.stage]}>{p.snoozed ? "snoozed" : STAGE_LABEL[p.stage]}</Badge>
           <Badge tone={f.user_status === "responded" ? "success" : "neutral"}>{f.user_status}</Badge>
         </div>
+        <CandidateHeader c={f} />
         <div style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>
           First contact {ago(p.firstContactAt)} · {p.outboundTouches} {p.outboundTouches === 1 ? "touch" : "touches"} sent · last touch {ago(p.lastTouchAt)}
           {p.nextAt && <> · {p.stage === "upcoming" && !p.step && !p.snoozed && f.user_status === "contacted" ? "goes cold" : p.snoozed ? "reminder" : "next"} {dueText(p.nextAt)}</>}
@@ -86,30 +88,19 @@ function FollowUpCard({ f, onChange }: { f: FollowUpItem; onChange: () => void }
             {f.outreach.secondary && <SuggestedOutreach title="Other side" text={f.outreach.secondary} />}
           </div>
         )}
-        <div style={{ fontSize: tokens.fontSize.sm, display: "flex", gap: tokens.space.md, flexWrap: "wrap" }}>
-          <a href={f.lead_url} target="_blank" rel="noopener noreferrer" className="oos-link">
-            {f.lead_hostname}: {f.lead_title}
-          </a>
-          {f.counter_url && (
-            <a href={f.counter_url} target="_blank" rel="noopener noreferrer" className="oos-link">
-              Other side
-            </a>
-          )}
-          {f.contact && f.contact.channel !== "unknown" && (
-            <span style={{ color: tokens.color.inkMuted }}>
-              Contact: {words(f.contact.channel)}
-              {f.contact.value ? ` ${f.contact.value}` : ""}
-            </span>
-          )}
-          <span style={{ color: tokens.color.inkMuted }}>
-            EV {usd(f.ev_low_usd)}–{usd(f.ev_high_usd)}
-          </span>
-          {f.crm_url && (
+        <details open>
+          <summary style={{ cursor: "pointer", fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>Deal economics, evidence and risks</summary>
+          <div style={{ marginTop: tokens.space.sm }}>
+            <CandidateFacts c={f} />
+          </div>
+        </details>
+        {f.crm_url && (
+          <div style={{ fontSize: tokens.fontSize.sm }}>
             <a href={f.crm_url} target="_blank" rel="noopener noreferrer" className="oos-link">
-              Pipedrive deal
+              Pipedrive deal{f.crm_status ? ` (${f.crm_status})` : ""}
             </a>
-          )}
-        </div>
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: tokens.space.sm, flexWrap: "wrap", alignItems: "center" }}>
           <Button size="sm" variant="primary" disabled={busy} onClick={() => setForm(form === "follow_up" ? null : "follow_up")}>

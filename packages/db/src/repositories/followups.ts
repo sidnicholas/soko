@@ -3,6 +3,7 @@ import { compareFollowUps, followUpPlan, type FollowUpPlan, type FollowUpStage, 
 import { getDb } from "../pool";
 import type { Database } from "../schema";
 import { appendAuditEvent } from "./audit";
+import { CANDIDATE_COLUMNS } from "./intel";
 import type { Actor } from "./relationships";
 
 /**
@@ -86,56 +87,29 @@ export interface FollowUpTouch {
   occurred_at: string;
 }
 
-export interface FollowUpItem {
-  id: string;
-  title: string;
-  match_kind: string;
-  user_status: string;
-  lead_kind: string;
-  lead_title: string;
-  lead_url: string;
-  lead_hostname: string;
-  counter_url: string | null;
-  counter_summary: string | null;
-  ev_low_usd: number;
-  ev_high_usd: number;
-  contact: unknown;
-  outreach: unknown;
-  crm_url: string | null;
-  status_changed_at: string | null;
+/** The candidate as the Action Queue shows it, plus its follow-up plan and touches. */
+export type FollowUpItem = Awaited<ReturnType<typeof followUpRows>>[number] & {
   plan: FollowUpPlan;
   touches: FollowUpTouch[];
+};
+
+function followUpRows() {
+  return getDb()
+    .selectFrom("intel_candidates as c")
+    .innerJoin("intel_leads as l", "l.id", "c.lead_id")
+    .leftJoin("crm_links as k", (j) => j.onRef("k.subject_id", "=", "c.id").on("k.subject_type", "=", "intel_candidate").on("k.provider", "=", "pipedrive"))
+    .select(CANDIDATE_COLUMNS)
+    .select(["k.external_url as crm_url", "k.external_status as crm_status", "k.external_stage_id as crm_stage_id"])
+    .select([sql<string | null>`c.status_changed_at::text`.as("status_changed_at"), sql<string | null>`c.snoozed_until::text`.as("snoozed_until")])
+    .where("c.user_status", "in", ["contacted", "responded"])
+    .limit(500)
+    .execute();
 }
 
 /** Every candidate being worked with its plan, due first. */
 export async function listFollowUps(now = new Date()): Promise<FollowUpItem[]> {
   const db = getDb();
-  const rows = await db
-    .selectFrom("intel_candidates as c")
-    .innerJoin("intel_leads as l", "l.id", "c.lead_id")
-    .leftJoin("crm_links as k", (j) => j.onRef("k.subject_id", "=", "c.id").on("k.subject_type", "=", "intel_candidate").on("k.provider", "=", "pipedrive"))
-    .select([
-      "c.id",
-      "c.title",
-      "c.match_kind",
-      "c.user_status",
-      "l.kind as lead_kind",
-      "l.title as lead_title",
-      "l.url as lead_url",
-      "l.hostname as lead_hostname",
-      "c.counter_url",
-      "c.counter_summary",
-      sql<number>`c.ev_low_usd::float`.as("ev_low_usd"),
-      sql<number>`c.ev_high_usd::float`.as("ev_high_usd"),
-      "c.contact",
-      "c.outreach",
-      "k.external_url as crm_url",
-      sql<string | null>`c.status_changed_at::text`.as("status_changed_at"),
-      sql<string | null>`c.snoozed_until::text`.as("snoozed_until"),
-    ])
-    .where("c.user_status", "in", ["contacted", "responded"])
-    .limit(500)
-    .execute();
+  const rows = await followUpRows();
   if (!rows.length) return [];
   const touches = await db
     .selectFrom("candidate_touches")
@@ -154,10 +128,10 @@ export async function listFollowUps(now = new Date()): Promise<FollowUpItem[]> {
     byCandidate.set(t.candidate_id, list);
   }
   const items: FollowUpItem[] = [];
-  for (const { snoozed_until, ...r } of rows) {
+  for (const r of rows) {
     const own = byCandidate.get(r.id) ?? [];
-    const plan = followUpPlan({ status: r.user_status, matchKind: r.match_kind, statusChangedAt: r.status_changed_at, touches: own.map((t) => ({ kind: t.kind, at: t.occurred_at })), snoozedUntil: snoozed_until, now });
-    if (plan) items.push({ ...r, ev_low_usd: Number(r.ev_low_usd), ev_high_usd: Number(r.ev_high_usd), plan, touches: own.slice(-20).reverse() });
+    const plan = followUpPlan({ status: r.user_status, matchKind: r.match_kind, statusChangedAt: r.status_changed_at, touches: own.map((t) => ({ kind: t.kind, at: t.occurred_at })), snoozedUntil: r.snoozed_until, now });
+    if (plan) items.push({ ...r, plan, touches: own.slice(-20).reverse() });
   }
   return items.sort((a, b) => compareFollowUps(a.plan, b.plan));
 }

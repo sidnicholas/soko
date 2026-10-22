@@ -395,23 +395,9 @@ export interface IntelQueue {
 export type FollowUpStage = "due" | "upcoming" | "cold" | "stalled";
 export type FollowUpCounts = Record<FollowUpStage, number>;
 export type TouchChannel = "email" | "phone" | "text" | "platform_message" | "in_person" | "other";
-/** A candidate being worked (contacted or responded) and when to touch it next. */
-export interface FollowUpItem {
-  id: string;
-  title: string;
-  match_kind: string;
+/** A candidate being worked (contacted or responded), as the Action Queue shows it, and when to touch it next. */
+export interface FollowUpItem extends IntelCandidate {
   user_status: "contacted" | "responded";
-  lead_kind: string;
-  lead_title: string;
-  lead_url: string;
-  lead_hostname: string;
-  counter_url: string | null;
-  counter_summary: string | null;
-  ev_low_usd: number;
-  ev_high_usd: number;
-  contact: IntelContact | null;
-  outreach: { primary: string | null; secondary: string | null };
-  crm_url: string | null;
   status_changed_at: string | null;
   plan: {
     stage: FollowUpStage;

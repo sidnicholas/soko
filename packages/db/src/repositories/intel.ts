@@ -260,7 +260,8 @@ export async function upsertIntelCandidate(c: NewIntelCandidate): Promise<string
   return row.id;
 }
 
-const CANDIDATE_COLUMNS = [
+/** Everything the Action Queue shows about a candidate (also Follow-ups). */
+export const CANDIDATE_COLUMNS = [
   "c.id",
   "c.lead_id",
   "c.counter_url",
