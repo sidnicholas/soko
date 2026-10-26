@@ -31,6 +31,46 @@ function matches(s: RegistrySource, f: Filter): boolean {
   return s.status === f;
 }
 
+/** Pausing with this reason marks a source the owner left out on purpose, not one that failed. */
+const EXCLUDED = "excluded_from_sweeps";
+
+/**
+ * Checkbox for whether a source takes part in sweeps: checked is active, unchecked is paused.
+ * Only active and paused sources can change; a proposed source needs a review first.
+ */
+function SweepToggle({ s, onChange }: { s: RegistrySource; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const editable = s.status === "active" || s.status === "paused";
+  const title = editable ? (s.status === "active" ? "In upcoming sweeps. Uncheck to leave it out." : "Left out of sweeps. Check to include it.") : s.status === "proposed" ? "Review this source first." : "Rejected sources never run.";
+
+  async function toggle(include: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setSourceStatus(s.id, include ? "active" : "paused", include ? undefined : EXCLUDED);
+      onChange();
+    } catch (err) {
+      setError(err instanceof ApiError || err instanceof Error ? err.message : "Change failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <label title={error ?? title} style={{ display: "inline-flex", alignItems: "center", gap: tokens.space.xs, cursor: editable && !busy ? "pointer" : "not-allowed" }}>
+      <input
+        type="checkbox"
+        aria-label={`Include ${s.name} in sweeps`}
+        checked={s.status === "active"}
+        disabled={!editable || busy}
+        onChange={(e) => void toggle(e.target.checked)}
+      />
+      {error && <span style={{ fontSize: tokens.fontSize.xs, color: tonePalette.danger.fg, maxWidth: "20ch" }}>{error}</span>}
+    </label>
+  );
+}
+
 /** Permission-policy review for one source (PRD v2 FR-01). Approval activates it only if every gap is closed. */
 function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
   const [basis, setBasis] = useState<PermissionBasis>(s.permission_basis === "none" ? (s.kind === "connector" ? "official_api_terms" : s.kind === "apify_actor" ? "written_permission" : "public_search_index") : s.permission_basis);
@@ -38,6 +78,7 @@ function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
   const [dataUse, setDataUse] = useState(s.data_use_constraints ?? "");
   const [due, setDue] = useState(new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
+  const [include, setInclude] = useState(s.status !== "paused");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -53,7 +94,11 @@ function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
         terms_review_due_at: new Date(`${due}T00:00:00Z`).toISOString(),
         notes: notes.trim() || null,
       });
-      setMessage(out.status === "active" ? "Approved: the source runs from the next sweep." : decision === "rejected" ? "Rejected." : `Recorded, still not runnable: ${out.policy_gaps.map(words).join(", ")}.`);
+      // Approval activates the source; leave it paused when the owner does not want it swept yet.
+      if (decision === "approved" && out.status === "active" && !include) {
+        await api.setSourceStatus(s.id, "paused", EXCLUDED);
+        setMessage("Approved, and left out of sweeps until you check it in the list.");
+      } else setMessage(out.status === "active" ? "Approved: the source runs from the next sweep." : decision === "rejected" ? "Rejected." : `Recorded, still not runnable: ${out.policy_gaps.map(words).join(", ")}.`);
       onDone();
     } catch (err) {
       setMessage(err instanceof ApiError || err instanceof Error ? err.message : "Review failed.");
@@ -99,6 +144,9 @@ function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
         <Input id={`notes-${s.id}`} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </Field>
       <div style={{ display: "flex", gap: tokens.space.sm, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: tokens.space.xs, fontSize: tokens.fontSize.sm, width: "100%" }}>
+          <input type="checkbox" checked={include} onChange={(e) => setInclude(e.target.checked)} /> Include in upcoming sweeps once approved
+        </label>
         <Button variant="primary" loading={busy} onClick={() => void submit("approved")}>
           Approve
         </Button>
@@ -263,6 +311,7 @@ export default function SourcesPage() {
   const [open, setOpen] = useState<string | null>(null);
 
   const columns: Column<RegistrySource>[] = [
+    { key: "sweep", header: "In sweeps", render: (s) => <SweepToggle s={s} onChange={sources.reload} /> },
     {
       key: "source",
       header: "Source",
