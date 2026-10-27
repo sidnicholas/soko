@@ -159,6 +159,103 @@ function ReviewForm({ s, onDone }: { s: RegistrySource; onDone: () => void }) {
   );
 }
 
+/** Bulk review covers search venues only: connectors and Apify actors each need their own permission basis. */
+const bulkReviewable = (s: RegistrySource) => s.kind === "search_venue" && (s.status === "proposed" || s.status === "paused");
+
+/**
+ * One permission-policy review applied to every selected search venue. Each
+ * source still gets its own review record, audit event and policy check;
+ * this only saves filling in the same form for each.
+ */
+function BulkApprove({ selected, onDone, onClear }: { selected: RegistrySource[]; onDone: (approved: string[], summary: { text: string; tone: Tone }[]) => void; onClear: () => void }) {
+  const [tos, setTos] = useState("Queried only through the search provider's index with a site: filter; no page on the site is fetched.");
+  const [dataUse, setDataUse] = useState("Search result titles and snippets only; a lead keeps a short summary and the result URL. No bulk copying of listings.");
+  const [due, setDue] = useState(new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const [include, setInclude] = useState(true);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  async function run() {
+    const approved: string[] = [];
+    const waiting: string[] = [];
+    const failed: string[] = [];
+    setProgress({ done: 0, total: selected.length });
+    // One at a time: each review is its own transaction, and a failure stops only that source.
+    for (const [i, s] of selected.entries()) {
+      try {
+        const out = await api.reviewSource(s.id, {
+          decision: "approved",
+          permission_basis: "public_search_index",
+          robots_tos_assessment: tos.trim() || null,
+          data_use_constraints: dataUse.trim() || null,
+          terms_review_due_at: new Date(`${due}T00:00:00Z`).toISOString(),
+          notes: notes.trim() || "Approved with others from the source list.",
+        });
+        if (out.status === "active") {
+          if (!include) await api.setSourceStatus(s.id, "paused", EXCLUDED);
+          approved.push(s.id);
+        } else waiting.push(`${s.name} (${s.orientation}): ${out.policy_gaps.map(words).join(", ")}`);
+      } catch (err) {
+        failed.push(`${s.name} (${s.orientation}): ${err instanceof Error ? err.message : "failed"}`);
+      }
+      setProgress({ done: i + 1, total: selected.length });
+    }
+    setProgress(null);
+    const summary: { text: string; tone: Tone }[] = [
+      { tone: "success", text: `${approved.length} approved${approved.length > 0 ? (include ? ", running from the next sweep." : ", left out of sweeps until you check them.") : "."}` },
+    ];
+    if (waiting.length > 0) summary.push({ tone: "warning", text: `Recorded but not runnable: ${waiting.join("; ")}` });
+    if (failed.length > 0) summary.push({ tone: "danger", text: `Failed: ${failed.join("; ")}` });
+    onDone(approved, summary);
+  }
+
+  const busy = progress !== null;
+  return (
+    <Card
+      title={`Approve ${selected.length} selected`}
+      subtitle="Search venues only, on the public search index basis. Every source gets its own review record and audit entry."
+      actions={
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onClear}>
+          Clear selection
+        </Button>
+      }
+    >
+      <div className="oos-stack" style={{ gap: tokens.space.md }}>
+        <div style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>
+          {selected.map((s) => `${s.name} (${s.orientation})`).join(" · ")}
+        </div>
+        <div style={{ display: "grid", gap: tokens.space.md, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+          <Field label="Robots / terms assessment" htmlFor="bulk-tos">
+            <Textarea id="bulk-tos" value={tos} onChange={(e) => setTos(e.target.value)} />
+          </Field>
+          <Field label="Data-use constraints" htmlFor="bulk-use">
+            <Textarea id="bulk-use" value={dataUse} onChange={(e) => setDataUse(e.target.value)} />
+          </Field>
+          <Field label="Review valid until" htmlFor="bulk-due">
+            <Input id="bulk-due" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+          </Field>
+          <Field label="Notes" htmlFor="bulk-notes">
+            <Input id="bulk-notes" value={notes} placeholder="Approved with others from the source list." onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+        </div>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: tokens.space.xs, fontSize: tokens.fontSize.sm }}>
+          <input type="checkbox" checked={include} disabled={busy} onChange={(e) => setInclude(e.target.checked)} /> Include them in upcoming sweeps once approved
+        </label>
+        <div style={{ display: "flex", gap: tokens.space.sm, alignItems: "center", flexWrap: "wrap" }}>
+          <Button variant="primary" loading={busy} disabled={!tos.trim()} onClick={() => void run()}>
+            Approve {selected.length}
+          </Button>
+          {progress && (
+            <span style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkMuted }}>
+              Approving {progress.done} of {progress.total}…
+            </span>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function SourceDetail({ id, onChange }: { id: string; onChange: () => void }) {
   const detail = useAsync(() => api.getSource(id), [id]);
   const [busy, setBusy] = useState(false);
@@ -309,6 +406,17 @@ export default function SourcesPage() {
   const sources = useAsync(() => api.listSources(), []);
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkNotice, setBulkNotice] = useState<{ text: string; tone: Tone }[] | null>(null);
+  const toggle = (ids: string[], on: boolean) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
 
   const columns: Column<RegistrySource>[] = [
     { key: "sweep", header: "In sweeps", render: (s) => <SweepToggle s={s} onChange={sources.reload} /> },
@@ -368,6 +476,25 @@ export default function SourcesPage() {
           const counts = Object.fromEntries(FILTERS.map((f) => [f, rows.filter((s) => matches(s, f)).length]));
           const shown = rows.filter((s) => matches(s, filter));
           const selected = open ? rows.find((s) => s.id === open) : undefined;
+          // Only rows still eligible count, so a reload after approval drops them from the selection.
+          const bulk = rows.filter((s) => picked.has(s.id) && bulkReviewable(s));
+          const pickable = shown.filter(bulkReviewable);
+          const allPicked = pickable.length > 0 && pickable.every((s) => picked.has(s.id));
+          const pickColumn: Column<RegistrySource> = {
+            key: "pick",
+            header: (
+              <input
+                type="checkbox"
+                aria-label="Select every reviewable search venue shown"
+                title="Select every proposed or paused search venue shown"
+                checked={allPicked}
+                disabled={pickable.length === 0}
+                onChange={(e) => toggle(pickable.map((s) => s.id), e.target.checked)}
+              />
+            ),
+            render: (s) =>
+              bulkReviewable(s) ? <input type="checkbox" aria-label={`Select ${s.name} (${s.orientation})`} checked={picked.has(s.id)} onChange={(e) => toggle([s.id], e.target.checked)} /> : null,
+          };
           return (
             <>
               <div style={{ display: "flex", gap: tokens.space.xs, flexWrap: "wrap" }} role="group" aria-label="Filter">
@@ -377,8 +504,22 @@ export default function SourcesPage() {
                   </Button>
                 ))}
               </div>
+              {bulkNotice && (
+                <div className="oos-stack" style={{ gap: tokens.space.xs, fontSize: tokens.fontSize.sm }} role="status">
+                  {bulkNotice.map((n) => (
+                    <span key={n.text} style={{ color: tonePalette[n.tone].fg }}>
+                      {n.text}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {bulk.length > 0 && <BulkApprove selected={bulk} onClear={() => setPicked(new Set())} onDone={(ids, summary) => {
+                toggle(ids, false);
+                setBulkNotice(summary);
+                sources.reload();
+              }} />}
               <Card flush title={`${shown.length} sources`}>
-                <DataTable columns={columns} rows={shown} getRowKey={(s) => s.id} empty={<EmptyState compact title="Nothing here" description="No source matches this filter." />} />
+                <DataTable columns={[pickColumn, ...columns]} rows={shown} getRowKey={(s) => s.id} empty={<EmptyState compact title="Nothing here" description="No source matches this filter." />} />
               </Card>
               {selected && (
                 <Card title={selected.name} subtitle={`${selected.domain} · ${selected.topics.length ? `searched for: ${selected.topics.join(" · ")}` : words(selected.kind)}`}>
