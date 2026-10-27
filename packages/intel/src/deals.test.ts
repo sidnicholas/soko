@@ -14,6 +14,8 @@ describe("good-deal screen", () => {
     const market = comps(90, 100, 100, 110, 120, 95, 105, 2, 900, 100);
     expect(median([3, 1, 2])).toBe(2);
     expect(judgeDeal(6000, "USD", market, { minDiscount: 0.3, demandMatch: false })).toMatchObject({ verdict: "good_deal", medianMinor: 10000, discount: 0.4 });
+    // Priced 250x the median: still overpriced, with a discount the deal_checks column can hold.
+    expect(judgeDeal(2_500_000, "USD", market, { minDiscount: 0.3, demandMatch: false })).toMatchObject({ verdict: "overpriced", discount: -99.9999 });
     expect(judgeDeal(8500, "USD", market, { minDiscount: 0.3, demandMatch: false }).verdict).toBe("fair");
     // A buyer asked for it: half the bar.
     expect(judgeDeal(8500, "USD", market, { minDiscount: 0.3, demandMatch: true }).verdict).toBe("good_deal");

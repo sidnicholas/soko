@@ -56,6 +56,9 @@ export function median(values: number[]): number | null {
  * the same currency, after dropping the cheapest and dearest tenth (parts,
  * bundles, typos). A recent buyer request lowers the bar by half.
  */
+/** Lowest discount stored; any lower is just as overpriced. */
+export const DISCOUNT_FLOOR = -99.9999;
+
 export function judgeDeal(priceMinor: number | null, currency: string, comps: Comparable[], opts: { minDiscount: number; demandMatch: boolean }): { verdict: DealVerdict; medianMinor: number | null; discount: number | null; used: Comparable[] } {
   if (priceMinor === null || priceMinor <= 0) return { verdict: "no_price", medianMinor: null, discount: null, used: [] };
   const same = comps.filter((c) => c.currency === currency && c.priceMinor > 0).sort((a, b) => a.priceMinor - b.priceMinor);
@@ -65,7 +68,10 @@ export function judgeDeal(priceMinor: number | null, currency: string, comps: Co
   const used = same.slice(trim, same.length - trim);
   if (used.length < MIN_COMPS) return { verdict: "no_comps", medianMinor: null, discount: null, used };
   const medianMinor = median(used.map((c) => c.priceMinor))!;
-  const discount = Math.round((1 - priceMinor / medianMinor) * 10_000) / 10_000;
+  // Floored at -99.9999: deal_checks.discount is numeric(6, 4), and a listing
+  // priced over ~100x its comparables (usually a search that matched the wrong
+  // kind of item) would otherwise fail the insert on every sweep.
+  const discount = Math.max(DISCOUNT_FLOOR, Math.round((1 - priceMinor / medianMinor) * 10_000) / 10_000);
   const bar = opts.demandMatch ? opts.minDiscount / 2 : opts.minDiscount;
   return { verdict: discount >= bar ? "good_deal" : discount >= 0 ? "fair" : "overpriced", medianMinor, discount, used };
 }
