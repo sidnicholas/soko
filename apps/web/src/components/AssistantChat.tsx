@@ -88,7 +88,12 @@ function ChatBody({ subject, id }: { subject: ChatSubject; id: string }) {
     };
   }, [subject, id]);
 
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [thread?.messages.length, pending]);
+  // Braces matter: current Chromium returns a Promise from scrollIntoView, and
+  // an effect that returns it hands React a "cleanup" that is not a function
+  // (TypeError: n is not a function, which unmounts the page).
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [thread?.messages.length, pending]);
 
   if (loadError) return <div style={{ fontSize: tokens.fontSize.sm, color: tonePalette.danger.fg }}>{loadError}</div>;
   if (!thread) return <div style={{ fontSize: tokens.fontSize.sm, color: tokens.color.inkSubtle }}>Loading the conversation…</div>;
