@@ -42,7 +42,9 @@ export type Permission =
   /** ADR-043: run an Apify actor without the site's permission, accepting the legal risk. Admin only, never agents. */
   | "source:accept_risk"
   /** ADR-045: approve an outbound message (this wording, to this recipient) for sending. Never granted to agents. */
-  | "outreach:send";
+  | "outreach:send"
+  /** ADR-048: talk to the opportunity assistant, which spends on model calls. Staff only, never agents. */
+  | "assistant:chat";
 
 const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   user: ["mission:create", "mission:read", "mission:update", "mission:archive", "opportunity:read", "transaction:read", "signal:submit"],
@@ -67,6 +69,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "source:review",
     "contact:delete",
     "outreach:send",
+    "assistant:chat",
   ],
   reviewer: ["mission:read", "opportunity:read", "approval:read", "approval:decide", "audit:read"],
   admin: [
@@ -98,6 +101,7 @@ const ROLE_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
     "contact:delete",
     "source:accept_risk",
     "outreach:send",
+    "assistant:chat",
   ],
   service: ["settlement:execute", "settlement:release", "settlement:dispute", "asset_transfer:execute", "audit:read"],
   // Agents may propose but never approve, send, or move money (§8, §13.5).

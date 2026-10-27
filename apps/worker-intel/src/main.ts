@@ -1,5 +1,5 @@
 import { getConfig } from "@opportunity-os/config";
-import { makeBraveSearch, makeSerperSearch, type SearchProvider } from "@opportunity-os/connectors-sdk";
+import { makeBraveSearch, makeSerperSearch, makeYouSearch, type SearchProvider } from "@opportunity-os/connectors-sdk";
 import { closeDb } from "@opportunity-os/db";
 import { runIntelCycle, type Lane } from "@opportunity-os/intel";
 import { LlmGateway } from "@opportunity-os/llm-gateway";
@@ -66,6 +66,7 @@ function laneArg(): Lane {
 
 function searchProvider(intel: ReturnType<typeof getConfig>["intel"]): SearchProvider | undefined {
   const costPerQueryUsd = intel.searchCostPerQueryUsd;
+  if (intel.searchProvider === "youcom") return intel.youApiKey ? makeYouSearch({ apiKey: intel.youApiKey, costPerQueryUsd }) : undefined;
   if (intel.searchProvider === "serper") return intel.serperApiKey ? makeSerperSearch({ apiKey: intel.serperApiKey, costPerQueryUsd }) : undefined;
   return intel.braveApiKey ? makeBraveSearch({ apiKey: intel.braveApiKey, costPerQueryUsd }) : undefined;
 }

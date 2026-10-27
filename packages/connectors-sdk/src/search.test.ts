@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeBraveSearch, makeSerperSearch, serperPublishedAt } from "./search";
+import { makeBraveSearch, makeSerperSearch, makeYouSearch, serperPublishedAt } from "./search";
 
 describe("makeBraveSearch", () => {
   it("queries Brave with the key header and maps results", async () => {
@@ -99,5 +99,45 @@ describe("makeSerperSearch", () => {
     expect(serperPublishedAt("2 weeks ago", now())).toBe("2026-10-01T12:00:00.000Z");
     expect(serperPublishedAt("sometime", now())).toBeNull();
     expect(serperPublishedAt(undefined, now())).toBeNull();
+  });
+});
+
+describe("makeYouSearch", () => {
+  it("posts to You.com with the key header and maps web results", async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            results: {
+              web: [
+                { url: "https://www.ec21.com/buy/drills", title: " Buying drills ", description: "Need 500 drills", page_age: "2026-10-20T08:00:00" },
+                { url: "https://b.example/x", title: "B", snippets: ["only a snippet"] },
+                { title: "no url" },
+              ],
+            },
+          };
+        },
+      } as Response;
+    }) as unknown as typeof fetch;
+    const search = makeYouSearch({ apiKey: "ydc", fetchImpl });
+    const out = await search.search({ query: "site:ec21.com drills", count: 50, freshness: "week" });
+
+    expect(calls[0]!.url).toBe("https://ydc-index.io/v1/search");
+    expect((calls[0]!.init?.headers as Record<string, string>)["x-api-key"]).toBe("ydc");
+    expect(JSON.parse(String(calls[0]!.init?.body))).toEqual({ query: "site:ec21.com drills", count: 20, freshness: "week" });
+    expect(search.costPerQueryUsd).toBe(0.005);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ url: "https://www.ec21.com/buy/drills", title: "Buying drills", snippet: "Need 500 drills", hostname: "ec21.com", provider: "youcom" });
+    expect(out[0]!.publishedAt).toMatch(/^2026-10-20/);
+    expect(out[1]).toMatchObject({ snippet: "only a snippet", publishedAt: null });
+  });
+
+  it("throws on an HTTP error", async () => {
+    const fetchImpl = (async () => ({ ok: false, status: 401 }) as Response) as unknown as typeof fetch;
+    await expect(makeYouSearch({ apiKey: "bad", fetchImpl }).search({ query: "q" })).rejects.toThrow("youcom search 401");
   });
 });

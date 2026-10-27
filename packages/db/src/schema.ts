@@ -732,6 +732,24 @@ export interface CandidateTouchesTable {
   created_at: Timestamp;
 }
 
+/** Migration 0039 (ADR-048): the opportunity assistant's conversations. */
+export interface ChatMessagesTable {
+  id: Generated<string>;
+  subject_type: string;
+  subject_id: string;
+  role: string;
+  provider: string | null;
+  model: string | null;
+  content: string;
+  citations: JsonDefault;
+  input_tokens: Generated<number>;
+  output_tokens: Generated<number>;
+  cost_usd: Numeric;
+  error: string | null;
+  author_id: string | null;
+  created_at: Timestamp;
+}
+
 /** Migration 0025 (renamed from intel_query_sources): every place discovery reads from. */
 export interface SourceRegistryTable {
   id: Generated<string>;
@@ -929,6 +947,7 @@ export interface Database {
   outreach_mailbox_state: OutreachMailboxStateTable;
   briefings: BriefingsTable;
   candidate_touches: CandidateTouchesTable;
+  chat_messages: ChatMessagesTable;
   approvals: ApprovalsTable;
   negotiations: NegotiationsTable;
   transactions: TransactionsTable;

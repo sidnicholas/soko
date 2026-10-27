@@ -9,6 +9,7 @@ import { OpenAiCompatProvider } from "./openai-compat";
 export * from "./embed";
 export * from "./anthropic";
 export * from "./openai-compat";
+export * from "./chat";
 
 /** §18 — task classes routed to provider/model profiles. */
 export const LLM_TASK_CLASSES = [

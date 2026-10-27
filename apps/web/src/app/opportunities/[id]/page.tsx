@@ -20,6 +20,7 @@ import {
 import { api, type OpportunityDetail, type OpportunityDetails, type OpportunityParty, type OpportunitySide } from "../../../lib/api";
 import { useAsync } from "../../../lib/useAsync";
 import { AsyncView } from "../../../components/AsyncView";
+import { AssistantChat } from "../../../components/AssistantChat";
 import { riskBand, scoreTone } from "../../../lib/opportunity";
 
 function ScoreMeter({ label, value, tone }: { label: string; value: number; tone: Tone }) {
@@ -251,6 +252,10 @@ export default function OpportunityDetailPage({ params }: { params: { id: string
             )}
 
             {o.details?.match && <MatchCard match={o.details.match} />}
+
+            <Card title="Assistant" subtitle="Talk this deal through with Claude, Perplexity, You.com or OpenAI. The conversation is saved here.">
+              <AssistantChat subject="opportunities" id={o.id} defaultOpen />
+            </Card>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: tokens.space.lg }}>
               <Card title="Value & likelihood" subtitle="Higher is better.">

@@ -7,6 +7,7 @@ import { useAsync } from "../../lib/useAsync";
 import { AsyncView } from "../../components/AsyncView";
 import { SubjectContacts } from "../../components/Contacts";
 import { SuggestedOutreach } from "../../components/SuggestedOutreach";
+import { AssistantChat } from "../../components/AssistantChat";
 import { CandidateFacts, CandidateHeader, ago, usd, words } from "../../components/CandidateFacts";
 import Link from "next/link";
 
@@ -182,6 +183,7 @@ function CandidateDetail({ c, onChange }: { c: IntelCandidate; onChange: () => v
           {c.outreach.secondary && <SuggestedOutreach title="Other side" text={c.outreach.secondary} />}
         </div>
       )}
+      <AssistantChat subject="candidates" id={c.id} />
       <StatusActions c={c} onChange={onChange} />
     </div>
   );

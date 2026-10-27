@@ -36,3 +36,4 @@ export * from "./repositories/deals";
 export * from "./repositories/outreach";
 export * from "./repositories/briefings";
 export * from "./repositories/followups";
+export * from "./repositories/chats";

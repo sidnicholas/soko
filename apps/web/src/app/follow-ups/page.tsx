@@ -8,6 +8,7 @@ import { AsyncView } from "../../components/AsyncView";
 import { SubjectContacts } from "../../components/Contacts";
 import { SuggestedOutreach } from "../../components/SuggestedOutreach";
 import { CandidateFacts, CandidateHeader } from "../../components/CandidateFacts";
+import { AssistantChat } from "../../components/AssistantChat";
 
 /**
  * Follow-ups (ADR-047): candidates marked contacted or responded leave the
@@ -94,6 +95,7 @@ function FollowUpCard({ f, onChange }: { f: FollowUpItem; onChange: () => void }
             <CandidateFacts c={f} />
           </div>
         </details>
+        <AssistantChat subject="candidates" id={f.id} />
         {f.crm_url && (
           <div style={{ fontSize: tokens.fontSize.sm }}>
             <a href={f.crm_url} target="_blank" rel="noopener noreferrer" className="oos-link">

@@ -167,3 +167,58 @@ export function makeSerperSearch(config: SerperSearchConfig): SearchProvider {
     },
   };
 }
+
+export interface YouSearchConfig {
+  apiKey: string;
+  /** Override if your plan's rate differs ($5 per 1,000 calls on 2026 list pricing). */
+  costPerQueryUsd?: number;
+  fetchImpl?: typeof fetch;
+}
+
+interface YouResult {
+  url?: string;
+  title?: string;
+  description?: string;
+  snippets?: string[];
+  page_age?: string;
+}
+
+const YOU_URL = "https://ydc-index.io/v1/search";
+
+/**
+ * You.com Web Search API (its own web index, key-authenticated). Supports the
+ * `site:` operator and a recency window like Brave and Serper. One call is
+ * billed the same up to 100 results; the sweep asks for at most 20.
+ */
+export function makeYouSearch(config: YouSearchConfig): SearchProvider {
+  const doFetch = config.fetchImpl ?? fetch;
+  return {
+    id: "youcom",
+    costPerQueryUsd: config.costPerQueryUsd ?? 0.005,
+    async search(q) {
+      const body: Record<string, unknown> = { query: q.query, count: Math.min(q.count ?? 20, 20) };
+      if (q.freshness) body.freshness = q.freshness;
+      const res = await doFetch(YOU_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": config.apiKey },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`youcom search ${res.status}`);
+      const json = (await res.json()) as { results?: { web?: YouResult[] } };
+      return (json.results?.web ?? [])
+        .filter((r): r is YouResult & { url: string } => typeof r.url === "string")
+        .map((r) => {
+          const published = r.page_age && !Number.isNaN(Date.parse(r.page_age)) ? new Date(r.page_age).toISOString() : null;
+          return {
+            url: r.url,
+            title: (r.title ?? "").trim(),
+            snippet: (r.description?.trim() || r.snippets?.[0]?.trim() || "").slice(0, 1000),
+            hostname: hostOf(r.url),
+            publishedAt: published,
+            ageText: r.page_age ?? null,
+            provider: "youcom",
+          };
+        });
+    },
+  };
+}

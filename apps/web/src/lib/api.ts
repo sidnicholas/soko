@@ -246,6 +246,37 @@ async function requestWithToken<T>(path: string, body: unknown, approvalToken?: 
 
 const jsonBody = (value: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(value ?? {}) });
 
+/** Opportunity assistant (ADR-048): which conversation, and the models a message can go to. */
+export type ChatSubject = "candidates" | "opportunities";
+export type ChatModelId = "claude" | "perplexity" | "youcom" | "openai";
+
+export interface ChatModelInfo {
+  id: ChatModelId;
+  label: string;
+  purpose: string;
+  model: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  provider: ChatModelId | null;
+  model: string | null;
+  content: string;
+  citations: { url: string; title?: string }[];
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  error: string | null;
+  created_at: string;
+}
+
+export interface ChatThread {
+  models: ChatModelInfo[];
+  messages: ChatMessage[];
+  budget: { daily_usd: number; spent_today_usd: number };
+}
+
 /** GET /me — the caller as the API sees them: verified identity + application-owned role. */
 export interface Me {
   id: string;
@@ -939,6 +970,9 @@ export const api = {
   // Opportunity intelligence (AIOOS action queue)
   intelQueue: (rank: RankingProfile = "profit_first") => request<IntelQueue>(`/intel/queue?rank=${rank}`),
   intelCandidate: (id: string) => request<IntelCandidateDetail>(`/intel/candidates/${id}`),
+  chatThread: (subject: ChatSubject, id: string) => request<ChatThread>(`/assistant/${subject}/${id}`),
+  askAssistant: (subject: ChatSubject, id: string, body: { model: ChatModelId; content: string }) =>
+    request<{ question: ChatMessage; answer: ChatMessage }>(`/assistant/${subject}/${id}`, jsonBody(body)),
   yieldReport: (days: number) => request<YieldReport>(`/analytics/yield?days=${days}`),
   setIntelStatus: (id: string, body: IntelOutcomeInput) => request<IntelCandidate>(`/intel/candidates/${id}/status`, jsonBody(body)),
   // Follow-ups and the closed archive (ADR-047)

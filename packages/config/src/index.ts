@@ -116,6 +116,26 @@ const EnvSchema = z.object({
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "expected a JSON object" });
       return z.NEVER;
     }),
+  // Opportunity assistant (ADR-048): the models a person can pick per message.
+  // Claude uses ANTHROPIC_REASONING_MODEL, OpenAI uses OPENAI_API_KEY; each
+  // model shows up only when its key is set.
+  PERPLEXITY_API_KEY: z.string().optional(),
+  PERPLEXITY_MODEL: z.string().optional().transform((v) => v?.trim() || "sonar-pro"),
+  // List prices of the default models; change them with the model.
+  PERPLEXITY_PRICE: tokenPrice.transform((v) => v ?? { input: 3, output: 15 }),
+  // Perplexity also charges per request (searches), in USD. Used only when a
+  // reply does not report its own cost.
+  PERPLEXITY_REQUEST_FEE_USD: z.preprocess((v) => (typeof v === "string" && !v.trim() ? undefined : v), z.coerce.number().nonnegative().default(0.006)),
+  // You.com Inference Router model for the assistant, answering with web search.
+  // Model ids: GET https://api.you.com/v1/models. Price is that model's list price.
+  YOUCOM_CHAT_MODEL: z.string().optional().transform((v) => v?.trim() || "kimi-k3"),
+  YOUCOM_CHAT_PRICE: tokenPrice.transform((v) => v ?? { input: 2.85, output: 14.25 }),
+  // Charged per web search the model runs (You.com's Web Search API rate).
+  YOUCOM_SEARCH_FEE_USD: z.preprocess((v) => (typeof v === "string" && !v.trim() ? undefined : v), z.coerce.number().nonnegative().default(0.005)),
+  OPENAI_CHAT_MODEL: z.string().optional().transform((v) => v?.trim() || "gpt-5"),
+  OPENAI_CHAT_PRICE: tokenPrice.transform((v) => v ?? { input: 1.25, output: 10 }),
+  // Total the assistant may spend per UTC day across every conversation.
+  CHAT_DAILY_USD: z.preprocess((v) => (typeof v === "string" && !v.trim() ? undefined : v), z.coerce.number().nonnegative().default(5)),
   VOYAGE_API_KEY: z.string().optional(),
   EMBEDDING_PROVIDER: z.enum(["echo", "openai", "voyage"]).default("echo"),
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
@@ -168,9 +188,11 @@ const EnvSchema = z.object({
   // hard ceiling on search + LLM spend across all runs that UTC day.
   BRAVE_SEARCH_API_KEY: z.string().optional(),
   // Search provider for the intel sweep. Serper (Google results) lists at
-  // about $1 per 1,000 queries against Brave's $5.
-  INTEL_SEARCH_PROVIDER: z.enum(["brave", "serper"]).default("brave"),
+  // about $1 per 1,000 queries against Brave's and You.com's $5.
+  INTEL_SEARCH_PROVIDER: z.enum(["brave", "serper", "youcom"]).default("brave"),
   SERPER_API_KEY: z.string().optional(),
+  // You.com: one key for its Web Search API (sweeps) and Inference Router (assistant).
+  YDC_API_KEY: z.string().optional(),
   // Override the per-query price the budget ledger charges (your plan's rate).
   INTEL_SEARCH_COST_PER_QUERY_USD: z.coerce.number().nonnegative().optional(),
   // Conservative per-call estimates the budget checks before each model call
@@ -326,6 +348,19 @@ export interface AppConfig {
       reasoningPrice?: { input: number; output: number };
       extraBody?: Record<string, unknown>;
     };
+    chat: {
+      perplexityKey?: string;
+      perplexityModel: string;
+      perplexityPrice: { input: number; output: number };
+      perplexityRequestFeeUsd: number;
+      youKey?: string;
+      youModel: string;
+      youPrice: { input: number; output: number };
+      youSearchFeeUsd: number;
+      openaiModel: string;
+      openaiPrice: { input: number; output: number };
+      dailyUsd: number;
+    };
     voyageKey?: string;
     embeddingProvider: "echo" | "openai" | "voyage";
     embeddingModel: string;
@@ -389,9 +424,10 @@ export interface AppConfig {
     pipedrive: { companyDomain?: string; apiToken?: string; pipelineId?: number; stageId?: number; webhookUser?: string; webhookPassword?: string };
   };
   intel: {
-    searchProvider: "brave" | "serper";
+    searchProvider: "brave" | "serper" | "youcom";
     braveApiKey?: string;
     serperApiKey?: string;
+    youApiKey?: string;
     searchCostPerQueryUsd?: number;
     detectionEstimateUsd: number;
     assessmentEstimateUsd: number;
@@ -457,6 +493,19 @@ function toConfig(env: Env): AppConfig {
         fastPrice: env.LLM_COMPAT_FAST_PRICE,
         reasoningPrice: env.LLM_COMPAT_REASONING_PRICE,
         extraBody: env.LLM_COMPAT_EXTRA_BODY,
+      },
+      chat: {
+        perplexityKey: env.PERPLEXITY_API_KEY,
+        perplexityModel: env.PERPLEXITY_MODEL,
+        perplexityPrice: env.PERPLEXITY_PRICE,
+        perplexityRequestFeeUsd: env.PERPLEXITY_REQUEST_FEE_USD,
+        youKey: env.YDC_API_KEY,
+        youModel: env.YOUCOM_CHAT_MODEL,
+        youPrice: env.YOUCOM_CHAT_PRICE,
+        youSearchFeeUsd: env.YOUCOM_SEARCH_FEE_USD,
+        openaiModel: env.OPENAI_CHAT_MODEL,
+        openaiPrice: env.OPENAI_CHAT_PRICE,
+        dailyUsd: env.CHAT_DAILY_USD,
       },
       voyageKey: env.VOYAGE_API_KEY,
       embeddingProvider: env.EMBEDDING_PROVIDER,
@@ -533,6 +582,7 @@ function toConfig(env: Env): AppConfig {
       searchProvider: env.INTEL_SEARCH_PROVIDER,
       braveApiKey: env.BRAVE_SEARCH_API_KEY,
       serperApiKey: env.SERPER_API_KEY,
+      youApiKey: env.YDC_API_KEY,
       searchCostPerQueryUsd: env.INTEL_SEARCH_COST_PER_QUERY_USD,
       detectionEstimateUsd: env.INTEL_DETECTION_ESTIMATE_USD,
       assessmentEstimateUsd: env.INTEL_ASSESSMENT_ESTIMATE_USD,

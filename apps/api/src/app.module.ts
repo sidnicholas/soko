@@ -23,6 +23,7 @@ import { CrmModule } from "./crm/crm.module";
 import { RelationshipsModule } from "./relationships/relationships.module";
 import { OutreachModule } from "./outreach/outreach.module";
 import { BriefingsModule } from "./briefings/briefings.controller";
+import { AssistantModule } from "./assistant/assistant.controller";
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { BriefingsModule } from "./briefings/briefings.controller";
     RelationshipsModule,
     OutreachModule,
     BriefingsModule,
+    AssistantModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
 })
